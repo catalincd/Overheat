@@ -41,12 +41,25 @@ bool FontAtlas::init(VulkanContext& vk, const std::string& font_path, float font
         std::vector<uint8_t> bitmap;
     };
     std::vector<RenderedGlyph> rendered;
-    rendered.reserve(95); // ASCII 32-126
+    // Glyph ranges: ASCII + Latin-1 Supplement + Box Drawing + common symbols
+    std::vector<std::pair<uint32_t,uint32_t>> ranges = {
+        {32, 126},     // Basic ASCII
+        {160, 255},    // Latin-1 Supplement
+        {0x2500, 0x257F}, // Box Drawing
+        {0x2580, 0x259F}, // Block Elements
+        {0x25A0, 0x25FF}, // Geometric Shapes
+        {0x2190, 0x21FF}, // Arrows
+        {0x2600, 0x26FF}, // Misc Symbols
+        {0x2700, 0x27BF}, // Dingbats
+        {0xE000, 0xE0FF}, // Private Use (Nerd Font icons subset)
+    };
+    rendered.reserve(1024);
 
     uint32_t total_area = 0;
     uint32_t max_glyph_h = 0;
 
-    for (uint32_t cp = 32; cp <= 126; cp++) {
+    for (auto& [lo, hi] : ranges)
+    for (uint32_t cp = lo; cp <= hi; cp++) {
         if (FT_Load_Char(face, cp, FT_LOAD_RENDER)) {
             continue;
         }
@@ -90,7 +103,7 @@ bool FontAtlas::init(VulkanContext& vk, const std::string& font_path, float font
     uint32_t side = static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<float>(total_area) * 1.5f)));
     atlas_w_ = 256;
     while (atlas_w_ < side) atlas_w_ *= 2;
-    if (atlas_w_ > 2048) atlas_w_ = 2048;
+    if (atlas_w_ > 4096) atlas_w_ = 4096;
     atlas_h_ = atlas_w_; // start square
 
     // Row-based packing
