@@ -13,6 +13,7 @@ public:
     std::shared_ptr<Editor> editor() const { return editor_; }
 
     void render(RenderContext& ctx, Rect bounds) override;
+    void update(float dt);
     bool handle_key(const KeyEvent& e) override;
     bool handle_mouse(const MouseEvent& e) override;
     bool handle_text(const std::string& text) override;
@@ -25,6 +26,9 @@ private:
     float cursor_blink_timer_ = 0;
     bool cursor_visible_ = true;
     bool mouse_selecting_ = false;
+    float cached_line_h_ = 20.0f;
+    float cached_char_w_ = 9.0f;
+    float cached_gutter_w_ = 40.0f;
 
     void render_gutter(RenderContext& ctx, Rect gutter_rect);
     void render_text(RenderContext& ctx, Rect text_rect);

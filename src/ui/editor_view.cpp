@@ -31,14 +31,11 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     bounds_ = bounds;
     if (!editor_) return;
 
-    // Update cursor blink
-    cursor_blink_timer_ += ctx.dt;
-    if (cursor_blink_timer_ >= 0.5f) {
-        cursor_blink_timer_ -= 0.5f;
-        cursor_visible_ = !cursor_visible_;
-    }
+    cached_line_h_ = ctx.font->line_height();
+    cached_char_w_ = ctx.font->char_width();
 
     float gw = gutter_width(*ctx.font);
+    cached_gutter_w_ = gw;
     Rect gutter_rect = {bounds.x, bounds.y, gw, bounds.h};
     Rect text_rect = {bounds.x + gw, bounds.y, bounds.w - gw, bounds.h};
 
@@ -224,7 +221,7 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
 }
 
 void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {
-    if (!cursor_visible_ && focused_) return;
+    if (!cursor_visible_ || !focused_) return;
 
     float line_h = ctx.font->line_height();
     float char_w = ctx.font->char_width();
@@ -294,88 +291,98 @@ bool EditorView::handle_key(const KeyEvent& e) {
     auto& cursors = editor_->cursors();
     auto& buf = editor_->buffer();
 
+    bool nav_handled = true;
     switch (e.keycode) {
         case SDLK_LEFT:
             if (ctrl) cursors.move_word_left(buf, shift);
             else cursors.move_left(buf, shift);
-            return true;
+            break;
         case SDLK_RIGHT:
             if (ctrl) cursors.move_word_right(buf, shift);
             else cursors.move_right(buf, shift);
-            return true;
+            break;
         case SDLK_UP:
-            if (ctrl && shift) {
-                editor_->move_line_up();
-            } else {
-                cursors.move_up(buf, shift);
-            }
-            return true;
+            if (ctrl && shift) editor_->move_line_up();
+            else cursors.move_up(buf, shift);
+            break;
         case SDLK_DOWN:
-            if (ctrl && shift) {
-                editor_->move_line_down();
-            } else {
-                cursors.move_down(buf, shift);
-            }
-            return true;
+            if (ctrl && shift) editor_->move_line_down();
+            else cursors.move_down(buf, shift);
+            break;
         case SDLK_HOME:
             if (ctrl) cursors.move_to_start(buf, shift);
             else cursors.move_home(buf, shift);
-            return true;
+            break;
         case SDLK_END:
             if (ctrl) cursors.move_to_end(buf, shift);
             else cursors.move_end(buf, shift);
-            return true;
+            break;
         case SDLK_PAGEUP: {
-            size_t page_lines = std::max(static_cast<size_t>(1), static_cast<size_t>(bounds_.h / 20.0f));
+            size_t page_lines = std::max(static_cast<size_t>(1),
+                static_cast<size_t>(bounds_.h / cached_line_h_));
             cursors.move_page_up(buf, page_lines, shift);
-            return true;
+            break;
         }
         case SDLK_PAGEDOWN: {
-            size_t page_lines = std::max(static_cast<size_t>(1), static_cast<size_t>(bounds_.h / 20.0f));
+            size_t page_lines = std::max(static_cast<size_t>(1),
+                static_cast<size_t>(bounds_.h / cached_line_h_));
             cursors.move_page_down(buf, page_lines, shift);
-            return true;
+            break;
         }
         case SDLK_BACKSPACE:
             if (ctrl) editor_->delete_word_backward();
             else editor_->delete_backward();
-            return true;
+            break;
         case SDLK_DELETE:
             if (ctrl) editor_->delete_word_forward();
             else editor_->delete_forward();
-            return true;
+            break;
         case SDLK_RETURN:
         case SDLK_RETURN2:
             editor_->newline();
-            return true;
+            break;
         case SDLK_TAB:
             if (shift) editor_->unindent();
             else editor_->tab();
-            return true;
+            break;
         case SDLK_ESCAPE:
             cursors.clear_secondary();
-            return true;
-        default:
             break;
+        default:
+            nav_handled = false;
+            break;
+    }
+
+    if (nav_handled) {
+        editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h,
+                                  cached_char_w_, cached_line_h_);
+        return true;
     }
 
     // Ctrl shortcuts
     if (ctrl) {
+        bool handled = false;
         switch (e.keycode) {
-            case 'a': cursors.select_all(buf); return true;
-            case 'd': cursors.select_word(buf); return true;
-            case 'l': cursors.select_line(buf); return true;
-            case 'z': buf.undo(); return true;
-            case 'y': buf.redo(); return true;
-            case '/': editor_->toggle_comment(); return true;
+            case 'a': cursors.select_all(buf); handled = true; break;
+            case 'd': cursors.select_word(buf); handled = true; break;
+            case 'l': cursors.select_line(buf); handled = true; break;
+            case 'z':
+                if (shift) buf.redo(); else buf.undo();
+                handled = true; break;
+            case 'y': buf.redo(); handled = true; break;
+            case '/': editor_->toggle_comment(); handled = true; break;
             default: break;
         }
-        if (shift) {
+        if (!handled && shift) {
             switch (e.keycode) {
-                case 'z': buf.redo(); return true;
-                case 'k': editor_->delete_line(); return true;
-                case 'd': editor_->duplicate_line(); return true;
+                case 'k': editor_->delete_line(); handled = true; break;
                 default: break;
             }
+        }
+        if (handled) {
+            editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h,
+                                      cached_char_w_, cached_line_h_);
+            return true;
         }
     }
 
@@ -386,17 +393,12 @@ bool EditorView::handle_mouse(const MouseEvent& e) {
     if (!editor_) return false;
     if (!bounds_.contains(e.x, e.y) && !mouse_selecting_) return false;
 
-    float gw = 40.0f; // Approximate; in practice we'd cache this
-    if (editor_) {
-        // We don't have font here directly, so use a rough estimate
-        // The actual gutter width is computed during render
-    }
+    float gw = cached_gutter_w_;
     Rect text_rect = {bounds_.x + gw, bounds_.y, bounds_.w - gw, bounds_.h};
 
     // Scroll
     if (e.scroll_y != 0.0f) {
-        float line_h = 20.0f; // Approximate; real line height from font
-        float new_scroll = editor_->scroll_y() - e.scroll_y * line_h * 3.0f;
+        float new_scroll = editor_->scroll_y() - e.scroll_y * cached_line_h_ * 3.0f;
         new_scroll = std::max(0.0f, new_scroll);
         editor_->set_scroll(editor_->scroll_x(), new_scroll);
         return true;
@@ -413,9 +415,8 @@ bool EditorView::handle_mouse(const MouseEvent& e) {
             // For now, approximate char width/line height
             Position pos = {0, 0};
 
-            // Rough pixel_to_position without font reference
-            float line_h = 20.0f;
-            float char_w = 9.0f;
+            float line_h = cached_line_h_;
+            float char_w = cached_char_w_;
             float scroll_y = editor_->scroll_y();
             float scroll_x = editor_->scroll_x();
 
@@ -453,10 +454,22 @@ bool EditorView::handle_text(const std::string& text) {
     if (!editor_) return false;
     editor_->insert_text(text);
 
-    // Reset cursor blink on typing
+    // Keep cursor in view after typing
+    editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h,
+                              cached_char_w_, cached_line_h_);
+
     cursor_blink_timer_ = 0;
     cursor_visible_ = true;
     return true;
+}
+
+void EditorView::update(float dt) {
+    if (!editor_) return;
+    cursor_blink_timer_ += dt;
+    if (cursor_blink_timer_ >= 1.0f) {
+        cursor_blink_timer_ -= 1.0f;
+        cursor_visible_ = !cursor_visible_;
+    }
 }
 
 } // namespace oh
