@@ -1,0 +1,4 @@
+/home/wizard/Workspace/Overheat/build-release/CMakeFiles/shaders.dir
+/home/wizard/Workspace/Overheat/build-release/CMakeFiles/overheat.dir
+/home/wizard/Workspace/Overheat/build-release/CMakeFiles/edit_cache.dir
+/home/wizard/Workspace/Overheat/build-release/CMakeFiles/rebuild_cache.dir
