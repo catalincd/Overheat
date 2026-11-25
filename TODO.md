@@ -1,0 +1,53 @@
+# Overheat — TODO
+
+Living list of what is next, known limitations, and ideas. Done items move to
+the git log; keep this file short and current.
+
+## Next up
+
+- [ ] Hover tooltips (LSP `textDocument/hover`) with a small markdown renderer
+- [ ] Rename symbol (F2), format document / selection, organize imports
+- [ ] Document symbols (Ctrl+Shift+O) and workspace symbols (Ctrl+T)
+- [ ] Find all references with a peek view
+- [ ] Problems panel (diagnostics for all open files, click to jump)
+- [ ] Remote-SSH: git status/blame/commit over the SSH connection
+- [ ] Remote-SSH: run language servers on the remote host
+- [ ] Remote search without blocking the UI (dedicated SSH channel / thread)
+- [ ] AI chat: markdown rendering, code-block copy/apply, saved conversations
+- [ ] AI chat: tool use (read files, apply edits with a diff preview)
+
+## Editor
+
+- [ ] Cursor up/down by visual row when word wrap is on
+- [ ] Word wrap for files over 2 MB (incremental wrap map)
+- [ ] Configurable tab width and "insert spaces" (currently 4 / spaces)
+- [ ] Bold / italic font faces for syntax styles
+- [ ] Column (box) selection with Alt+Shift+drag
+- [ ] Sticky scroll (current scope pinned at the top)
+- [ ] Code folding
+- [ ] More tree-sitter grammars (Python, Rust, JS/TS, Go, JSON, Markdown, ...)
+- [ ] Diff editor (side-by-side / inline) for git changes
+
+## Workbench
+
+- [ ] More than two editor groups; vertical splits
+- [ ] Multiple terminals (tabs) and split terminals
+- [ ] Hover fades and press states for buttons (animation polish)
+- [ ] Settings UI: search box, tab width, terminal font, per-language settings
+- [ ] Command palette: recently used commands first
+- [ ] Explorer: create / rename / delete files and folders, drag & drop
+- [ ] Notifications area for long-running tasks (git, SSH, LSP start-up)
+
+## Known limitations
+
+- Ligatures are on by default; JetBrains Mono turns `/=` into `≠` (toggle in Settings)
+- The terminal does not reflow old output when resized
+- Split editors support two groups only
+- Remote search briefly blocks the UI while `grep` runs on the host
+- The OMP chat backend shows the CLI's "Working..." line in replies
+
+## Platform & release
+
+- [ ] Code signing for the Windows installer
+- [ ] macOS port (Metal via MoltenVK, PTY, packaging)
+- [ ] Auto-update channel
