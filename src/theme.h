@@ -19,8 +19,12 @@ public:
     bool poll_reload(Theme& out);
 
     // Persisted choice in <config>/settings.toml (`theme = "..."`).
-    std::string saved_choice() const;
-    void save_choice(const std::string& name) const;
+    std::string saved_choice() const { return setting("theme"); }
+    void save_choice(const std::string& name) const { set_setting("theme", "\"" + name + "\""); }
+    // Raw `key = value` access to <config>/settings.toml (quotes stripped on read).
+    std::string setting(const std::string& key) const;
+    void set_setting(const std::string& key, const std::string& raw_value) const;
+    void set_config_dir(const fs::path& dir) { config_dir_ = dir; }
 
     fs::path themes_dir() const { return config_dir_ / "themes"; }
     static std::string serialize(const Theme& t);

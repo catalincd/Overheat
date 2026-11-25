@@ -8,6 +8,13 @@
 namespace oh {
 
 bool FontAtlas::init(VulkanContext& vk, const std::vector<std::string>& font_paths, float font_size) {
+    glyphs_.clear();
+    pen_x_ = pen_y_ = 1;
+    shelf_h_ = 0;
+    full_warned_ = false;
+    char_width_ = 0;
+    dirty_x0_ = dirty_y0_ = UINT32_MAX;
+    dirty_x1_ = dirty_y1_ = 0;
     if (FT_Init_FreeType(&ft_)) {
         fprintf(stderr, "Failed to init FreeType\n");
         return false;

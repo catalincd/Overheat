@@ -66,6 +66,7 @@ void KeyMap::init_defaults() {
     bind(SDLK_PLUS,  KeyMod::Ctrl,                      "zoom_in");
     bind(SDLK_EQUALS,KeyMod::Ctrl,                      "zoom_in");
     bind(SDLK_MINUS, KeyMod::Ctrl,                      "zoom_out");
+    bind(SDLK_0,     KeyMod::Ctrl,                      "zoom_reset");
 }
 
 void KeyMap::bind(SDL_Keycode key, KeyMod mods, const std::string& command) {

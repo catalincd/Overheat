@@ -57,6 +57,9 @@ private:
 
     Theme theme_;
     ThemeManager themes_;
+    fs::path config_dir_;
+    std::vector<std::string> font_chain_;
+    float font_size_ = 15.0f;
     float theme_poll_timer_ = 0;
     KeyMap keymap_;
 
@@ -172,6 +175,7 @@ private:
     KeyMod sdl_mods(SDL_Keymod m) const;
     void emit_probe(const std::string& label);
     void focus_editor();
+    void set_font_size(float size);
     void select_theme();
     void print_frame_stats() const;
 };

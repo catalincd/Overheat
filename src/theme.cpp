@@ -292,17 +292,16 @@ bool ThemeManager::poll_reload(Theme& out) {
     return resolve(current_, out);
 }
 
-std::string ThemeManager::saved_choice() const {
+std::string ThemeManager::setting(const std::string& key) const {
     std::ifstream in(config_dir_ / "settings.toml");
     for (std::string line; std::getline(in, line);) {
         auto eq = line.find('=');
-        if (eq != std::string::npos && trim(line.substr(0, eq)) == "theme")
-            return unquote(line.substr(eq + 1));
+        if (eq != std::string::npos && trim(line.substr(0, eq)) == key) return unquote(line.substr(eq + 1));
     }
     return "";
 }
 
-void ThemeManager::save_choice(const std::string& name) const {
+void ThemeManager::set_setting(const std::string& key, const std::string& raw_value) const {
     fs::path p = config_dir_ / "settings.toml";
     std::vector<std::string> lines;
     bool replaced = false;
@@ -310,14 +309,16 @@ void ThemeManager::save_choice(const std::string& name) const {
         std::ifstream in(p);
         for (std::string line; std::getline(in, line);) {
             auto eq = line.find('=');
-            if (eq != std::string::npos && trim(line.substr(0, eq)) == "theme") {
-                line = "theme = \"" + name + "\"";
+            if (eq != std::string::npos && trim(line.substr(0, eq)) == key) {
+                line = key + " = " + raw_value;
                 replaced = true;
             }
             lines.push_back(line);
         }
     }
-    if (!replaced) lines.push_back("theme = \"" + name + "\"");
+    if (!replaced) lines.push_back(key + " = " + raw_value);
+    std::error_code ec;
+    fs::create_directories(config_dir_, ec);
     std::ofstream out(p);
     for (auto& l : lines) out << l << "\n";
 }

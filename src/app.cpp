@@ -87,6 +87,14 @@ bool App::init(int argc, char** argv) {
         return false;
     }
 
+    // ---- Settings location ----
+    {
+        const char* home = std::getenv("HOME");
+        const char* xdg = std::getenv("XDG_CONFIG_HOME");
+        config_dir_ = xdg && *xdg ? fs::path(xdg) / "overheat" : fs::path(home ? home : ".") / ".config" / "overheat";
+        themes_.set_config_dir(config_dir_);
+    }
+
     // ---- Font ----
     // Primary is the first that exists; the rest form the glyph fallback chain.
     const char* font_candidates[] = {
@@ -97,10 +105,11 @@ bool App::init(int argc, char** argv) {
         "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
         "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
     };
-    std::vector<std::string> font_chain;
     for (const char* fp : font_candidates)
-        if (fs::exists(fp)) font_chain.push_back(fp);
-    if (!font_.init(vk_, font_chain, 15.0f)) {
+        if (fs::exists(fp)) font_chain_.push_back(fp);
+    if (std::string fs_setting = themes_.setting("font_size"); !fs_setting.empty())
+        font_size_ = std::clamp(std::strtof(fs_setting.c_str(), nullptr), 8.0f, 40.0f);
+    if (!font_.init(vk_, font_chain_, font_size_)) {
         std::fprintf(stderr, "Could not load any font\n");
         return false;
     }
@@ -113,10 +122,7 @@ bool App::init(int argc, char** argv) {
 
     // ---- Theme ----
     {
-        const char* home = std::getenv("HOME");
-        const char* xdg = std::getenv("XDG_CONFIG_HOME");
-        fs::path config = xdg && *xdg ? fs::path(xdg) / "overheat" : fs::path(home ? home : ".") / ".config" / "overheat";
-        themes_.init(config);
+        themes_.init(config_dir_);
         std::string choice = themes_.saved_choice();
         if (choice.empty() || !themes_.apply(choice, theme_)) themes_.apply("Overheat Dark", theme_);
     }
@@ -573,9 +579,11 @@ void App::handle_command(const std::string& cmd) {
             SDL_SetWindowFullscreen(window_, true);
         }
     } else if (cmd == "zoom_in") {
-        // TODO: adjust font size and reinit font atlas
+        set_font_size(font_size_ + 1.0f);
     } else if (cmd == "zoom_out") {
-        // TODO: adjust font size and reinit font atlas
+        set_font_size(font_size_ - 1.0f);
+    } else if (cmd == "zoom_reset") {
+        set_font_size(15.0f);
     } else if (cmd == "remote_connect") {
         remote_connect_prompt();
     } else if (cmd == "remote_disconnect") {
@@ -946,6 +954,22 @@ void App::new_file() {
 
 void App::focus_editor() { focus(&editor_view_); }
 
+void App::set_font_size(float size) {
+    size = std::clamp(size, 8.0f, 40.0f);
+    if (size == font_size_) return;
+    vkDeviceWaitIdle(vk_.device());  // frames in flight still sample the old atlas
+    font_.cleanup(vk_);
+    if (!font_.init(vk_, font_chain_, size)) {
+        font_.init(vk_, font_chain_, font_size_);
+        renderer_.rebind_font(vk_, font_);
+        return;
+    }
+    font_size_ = size;
+    renderer_.rebind_font(vk_, font_);
+    themes_.set_setting("font_size", std::to_string(static_cast<int>(size)));
+    set_status_message("Font size " + std::to_string(static_cast<int>(size)));
+}
+
 void App::focus(Panel* p) {
     for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_, &search_})
         q->set_focused(q == p);
@@ -1173,6 +1197,7 @@ void App::register_commands() {
     add("toggle_fullscreen",       "Toggle Fullscreen",         "F11");
     add("zoom_in",                 "Zoom In",                   "Ctrl++");
     add("zoom_out",                "Zoom Out",                  "Ctrl+-");
+    add("zoom_reset",              "Reset Zoom",                "Ctrl+0");
     add("remote_connect",          "Remote-SSH: Connect to Host...", "");
     add("remote_disconnect",       "Remote-SSH: Close Remote Connection", "");
     add("view_explorer",           "View: Explorer",            "Ctrl+Shift+E");

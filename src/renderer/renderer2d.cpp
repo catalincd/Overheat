@@ -103,6 +103,20 @@ bool Renderer2D::init(VulkanContext& vk, FontAtlas& font) {
     return true;
 }
 
+void Renderer2D::rebind_font(VulkanContext& vk, FontAtlas& font) {
+    VkDescriptorImageInfo img{font.sampler(), font.image_view(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    for (uint32_t i = 0; i < VulkanContext::MAX_FRAMES; i++) {
+        VkWriteDescriptorSet w{};
+        w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w.dstSet = desc_sets_[i];
+        w.dstBinding = 2;
+        w.descriptorCount = 1;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w.pImageInfo = &img;
+        vkUpdateDescriptorSets(vk.device(), 1, &w, 0, nullptr);
+    }
+}
+
 void Renderer2D::cleanup(VulkanContext& vk) {
     if (!vk.device()) return;
     vkDeviceWaitIdle(vk.device());

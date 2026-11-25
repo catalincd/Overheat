@@ -16,6 +16,8 @@ public:
 
     void begin(VkExtent2D extent);
     void flush(VulkanContext& vk, VkCommandBuffer cmd);
+    // Point the atlas binding at a re-created font (zoom). Call with the device idle.
+    void rebind_font(VulkanContext& vk, FontAtlas& font);
 
     void push_clip(Rect r);
     void pop_clip();
