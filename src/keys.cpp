@@ -24,6 +24,8 @@ void KeyMap::init_defaults() {
     // Panels
     bind(SDLK_GRAVE, KeyMod::Ctrl,                      "toggle_terminal");
     bind(SDLK_B,     KeyMod::Ctrl,                      "toggle_sidebar");
+    bind(SDLK_E,     KeyMod::Ctrl | KeyMod::Shift,      "view_explorer");
+    bind(SDLK_G,     KeyMod::Ctrl | KeyMod::Shift,      "view_scm");
 
     // Undo/redo
     bind(SDLK_Z,     KeyMod::Ctrl,                      "undo");

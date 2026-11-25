@@ -144,6 +144,7 @@ bool App::init(int argc, char** argv) {
     // ---- File tree ----
     file_tree_.set_root(project_root_, vfs_.get());
     file_tree_.set_on_open([this](const fs::path& p) { open_file(p); });
+    setup_scm();
 
     // ---- Terminal ----
     terminal_.spawn();
@@ -326,6 +327,12 @@ void App::handle_event(const SDL_Event& e) {
             if (command_palette_.handle_key(ke)) break;
         }
 
+        // The commit message box takes typing keys before global bindings.
+        if (scm_.input_focused() && sidebar_visible_ && sidebar_view_ == SidebarView::SourceControl) {
+            KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
+            if (scm_.handle_key(ke)) break;
+        }
+
         // Check keymap. While the terminal has focus, the shell owns the keyboard
         // except for a few app-level shortcuts (and Ctrl+Shift+C/V for the clipboard).
         std::string cmd = keymap_.lookup(kc, mods);
@@ -368,6 +375,8 @@ void App::handle_event(const SDL_Event& e) {
         const char* text = e.text.text;
         if (command_palette_.is_visible()) {
             command_palette_.handle_text(text);
+        } else if (scm_.input_focused()) {
+            scm_.handle_text(text);
         } else if (terminal_.focused() && terminal_visible_) {
             terminal_.handle_text(text);
         } else {
@@ -389,22 +398,23 @@ void App::handle_event(const SDL_Event& e) {
         // Determine which panel was clicked and set focus
         if (command_palette_.is_visible()) {
             command_palette_.handle_mouse(me);
+        } else if (layout.activity_bar.contains(mx, my)) {
+            int slot = static_cast<int>((my - layout.activity_bar.y) / ACTIVITY_BAR_W);
+            SidebarView v = slot == 0 ? SidebarView::Explorer : SidebarView::SourceControl;
+            if (slot <= 1) {
+                if (sidebar_visible_ && v == sidebar_view_) sidebar_visible_ = false;
+                else show_sidebar_view(v);
+            }
         } else if (sidebar_visible_ && layout.sidebar.contains(mx, my)) {
-            file_tree_.set_focused(true);
-            terminal_.set_focused(false);
-            editor_view_.set_focused(false);
-            file_tree_.handle_mouse(me);
+            focus(&sidebar_panel());
+            sidebar_panel().handle_mouse(me);
         } else if (terminal_visible_ && layout.terminal.contains(mx, my)) {
-            terminal_.set_focused(true);
-            file_tree_.set_focused(false);
-            editor_view_.set_focused(false);
+            focus(&terminal_);
             terminal_.handle_mouse(me);
         } else if (layout.tab_bar.contains(mx, my)) {
             tab_bar_.handle_mouse(me);
         } else if (layout.editor.contains(mx, my)) {
-            editor_view_.set_focused(true);
-            file_tree_.set_focused(false);
-            terminal_.set_focused(false);
+            focus(&editor_view_);
             editor_view_.handle_mouse(me);
         }
         break;
@@ -425,7 +435,7 @@ void App::handle_event(const SDL_Event& e) {
         MouseEvent me{mx, my, 0, false, false, e.wheel.x, e.wheel.y};
 
         if (sidebar_visible_ && layout.sidebar.contains(mx, my)) {
-            file_tree_.handle_mouse(me);
+            sidebar_panel().handle_mouse(me);
         } else if (terminal_visible_ && layout.terminal.contains(mx, my)) {
             terminal_.handle_mouse(me);
         } else if (layout.editor.contains(mx, my)) {
@@ -538,6 +548,10 @@ void App::handle_command(const std::string& cmd) {
         // TODO: adjust font size and reinit font atlas
     } else if (cmd == "zoom_out") {
         // TODO: adjust font size and reinit font atlas
+    } else if (cmd == "view_explorer") {
+        show_sidebar_view(SidebarView::Explorer);
+    } else if (cmd == "view_scm") {
+        show_sidebar_view(SidebarView::SourceControl);
     } else if (cmd == "git_checkout") {
         git_checkout();
     } else if (cmd == "toggle_blame") {
@@ -567,12 +581,14 @@ App::Layout App::compute_layout() const {
 
     float content_h = fh - status_h;
 
-    // Sidebar: left side
-    float sb_w = sidebar_visible_ ? std::min(sidebar_width_, std::floor(fw * 0.25f)) : 0.0f;
-    l.sidebar = {0, 0, sb_w, content_h};
+    // Activity bar (always visible), then the sidebar view.
+    float ab_w = ACTIVITY_BAR_W;
+    l.activity_bar = {0, 0, ab_w, content_h};
+    float sb_w = sidebar_visible_ ? std::min(sidebar_width_, std::floor((fw - ab_w) * 0.28f)) : 0.0f;
+    l.sidebar = {ab_w, 0, sb_w, content_h};
 
-    float right_x = sb_w;
-    float right_w = fw - sb_w;
+    float right_x = ab_w + sb_w;
+    float right_w = fw - right_x;
 
     // Tab bar: 32px tall at top of right region
     float tab_h = 36.0f;
@@ -616,6 +632,7 @@ void App::poll_git_refresh() {
     fs::path wd = git_.workdir();
     for (auto& s : git_statuses_) by_path[(wd / s.path).lexically_normal().string()] = s.status;
     file_tree_.set_git_status(by_path);
+    scm_.set_state(wd, git_.branch_name(), git_statuses_);
     status_bar_.set_git_branch(git_.branch_name());
     int ahead = 0, behind = 0;
     git_.ahead_behind(ahead, behind);
@@ -761,7 +778,8 @@ void App::render() {
         panel.render(ctx, r);
         renderer_.pop_clip();
     };
-    if (sidebar_visible_) clipped(file_tree_, layout.sidebar);
+    render_activity_bar(ctx, layout.activity_bar);
+    if (sidebar_visible_) clipped(sidebar_panel(), layout.sidebar);
     clipped(tab_bar_, layout.tab_bar);
     clipped(editor_view_, layout.editor);
     if (terminal_visible_) clipped(terminal_, layout.terminal);
@@ -841,10 +859,73 @@ void App::new_file() {
     focus_editor();
 }
 
-void App::focus_editor() {
-    editor_view_.set_focused(true);
-    terminal_.set_focused(false);
-    file_tree_.set_focused(false);
+void App::focus_editor() { focus(&editor_view_); }
+
+void App::focus(Panel* p) {
+    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_})
+        q->set_focused(q == p);
+}
+
+void App::show_sidebar_view(SidebarView v) {
+    sidebar_view_ = v;
+    sidebar_visible_ = true;
+    focus(&sidebar_panel());
+}
+
+void App::render_activity_bar(RenderContext& ctx, Rect r) {
+    ctx.r->add_rect(r, theme_.tab_bg);
+    const uint32_t icons[] = {0xEAF0, 0xEA68};
+    float cw = font_.char_width();
+    for (int i = 0; i < 2; i++) {
+        Rect slot{r.x, r.y + i * ACTIVITY_BAR_W, ACTIVITY_BAR_W, ACTIVITY_BAR_W};
+        bool active = sidebar_visible_ && static_cast<int>(sidebar_view_) == i;
+        if (active) ctx.r->add_rect({slot.x, slot.y + 10.0f, 2.0f, slot.h - 20.0f}, theme_.accent, 1.0f);
+        float bx = slot.x + (slot.w - cw) * 0.5f;
+        float by = slot.y + (slot.h - font_.line_height()) * 0.5f + font_.ascender();
+        ctx.r->add_char(bx, by, icons[i], active ? theme_.fg : theme_.fg_muted, font_);
+        if (i == 1 && scm_.change_count() > 0) {
+            std::string n = std::to_string(std::min<size_t>(scm_.change_count(), 99));
+            float bw = std::max(16.0f, static_cast<float>(n.size()) * cw + 8.0f);
+            Rect badge{slot.x + slot.w - bw - 6.0f, slot.y + slot.h - 22.0f, bw, 16.0f};
+            ctx.r->add_rect(badge, theme_.accent, 8.0f);
+            ctx.r->add_text(badge.x + (bw - static_cast<float>(n.size()) * cw) * 0.5f,
+                            badge.y + (16.0f - font_.line_height()) * 0.5f + font_.ascender(), n,
+                            theme_.tab_active_bg, font_);
+        }
+    }
+}
+
+void App::setup_scm() {
+    ScmPanel::Callbacks cb;
+    cb.open = [this](const fs::path& p) { open_file(p); };
+    cb.stage = [this](const fs::path& p) {
+        if (!git_.stage(p)) set_status_message(git_.last_error(), 6.0f);
+        request_git_refresh();
+    };
+    cb.unstage = [this](const fs::path& p) {
+        if (!git_.unstage(p)) set_status_message(git_.last_error(), 6.0f);
+        request_git_refresh();
+    };
+    cb.stage_all = [this] {
+        fs::path wd = git_.workdir();
+        for (auto& s : git_statuses_)
+            if (s.wt_status != FileStatus::Unmodified) git_.stage(wd / s.path);
+        request_git_refresh();
+    };
+    cb.commit = [this](std::string msg) {  // by value: the panel's buffer is cleared below
+        bool staged = std::any_of(git_statuses_.begin(), git_statuses_.end(),
+                                  [](auto& s) { return s.index_status != FileStatus::Unmodified; });
+        if (msg.empty()) { set_status_message("Enter a commit message first"); return; }
+        if (!staged) { set_status_message("Nothing staged: stage changes with + first"); return; }
+        if (!git_.commit(msg)) {
+            set_status_message(git_.last_error().empty() ? "Commit failed" : git_.last_error(), 6.0f);
+            return;
+        }
+        scm_.clear_message();
+        set_status_message("Committed: " + msg);
+        after_head_change();
+    };
+    scm_.set_callbacks(std::move(cb));
 }
 
 void App::close_current_tab() {
@@ -911,6 +992,8 @@ void App::register_commands() {
     add("toggle_fullscreen",       "Toggle Fullscreen",         "F11");
     add("zoom_in",                 "Zoom In",                   "Ctrl++");
     add("zoom_out",                "Zoom Out",                  "Ctrl+-");
+    add("view_explorer",           "View: Explorer",            "Ctrl+Shift+E");
+    add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
     add("toggle_blame",            "Git: Toggle Inline Blame",  "");
     add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");

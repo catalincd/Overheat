@@ -9,6 +9,7 @@
 #include "ui/status_bar.h"
 #include "ui/command_palette.h"
 #include "ui/editor_view.h"
+#include "ui/scm_panel.h"
 #include "git/repository.h"
 #include "ssh/session.h"
 #include "lsp/client.h"
@@ -58,6 +59,14 @@ private:
     Terminal terminal_;
     StatusBar status_bar_;
     CommandPalette command_palette_;
+    ScmPanel scm_;
+    enum class SidebarView { Explorer, SourceControl };
+    SidebarView sidebar_view_ = SidebarView::Explorer;
+    Panel& sidebar_panel() { return sidebar_view_ == SidebarView::Explorer ? static_cast<Panel&>(file_tree_) : scm_; }
+    void focus(Panel* p);
+    void show_sidebar_view(SidebarView v);
+    void render_activity_bar(RenderContext& ctx, Rect r);
+    void setup_scm();
 
     GitRepository git_;
     std::unique_ptr<Vfs> vfs_ = std::make_unique<LocalVfs>();
@@ -89,7 +98,8 @@ private:
     bool running_ = false;
     bool sidebar_visible_ = true;
     bool terminal_visible_ = true;
-    float sidebar_width_ = 240.0f;
+    float sidebar_width_ = 260.0f;
+    static constexpr float ACTIVITY_BAR_W = 48.0f;
     float terminal_height_ = 200.0f;
 
     fs::path project_root_;
@@ -98,6 +108,7 @@ private:
 
     // Layout
     struct Layout {
+        Rect activity_bar;
         Rect sidebar;
         Rect tab_bar;
         Rect editor;
