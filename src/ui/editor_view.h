@@ -14,6 +14,9 @@ public:
 
     void render(RenderContext& ctx, Rect bounds) override;
     void update(float dt);
+    void reveal_cursor() {
+        if (editor_) editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h, cached_char_w_, cached_line_h_);
+    }
     bool handle_key(const KeyEvent& e) override;
     bool handle_mouse(const MouseEvent& e) override;
     bool handle_text(const std::string& text) override;

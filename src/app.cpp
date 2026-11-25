@@ -289,6 +289,10 @@ void App::handle_event(const SDL_Event& e) {
         quit();
         break;
 
+    case SDL_EVENT_CLIPBOARD_UPDATE:
+        if (!e.clipboard.owner) own_clipboard_.clear();
+        break;
+
     case SDL_EVENT_WINDOW_RESIZED:
         vk_.recreate_swapchain();
         break;
@@ -303,8 +307,19 @@ void App::handle_event(const SDL_Event& e) {
             if (command_palette_.handle_key(ke)) break;
         }
 
-        // Check keymap
+        // Check keymap. While the terminal has focus, the shell owns the keyboard
+        // except for a few app-level shortcuts (and Ctrl+Shift+C/V for the clipboard).
         std::string cmd = keymap_.lookup(kc, mods);
+        bool in_terminal = terminal_.focused() && terminal_visible_;
+        if (!cmd.empty() && in_terminal) {
+            static const char* global_cmds[] = {
+                "toggle_terminal", "command_palette_files", "command_palette_commands",
+                "next_tab", "prev_tab", "quit", "toggle_fullscreen"};
+            bool global = std::any_of(std::begin(global_cmds), std::end(global_cmds),
+                                      [&](const char* g) { return cmd == g; });
+            bool clipboard = (cmd == "copy" || cmd == "paste") && (mods & KeyMod::Shift);
+            if (!global && !clipboard) cmd.clear();
+        }
         if (!cmd.empty()) {
             handle_command(cmd);
             break;
@@ -442,6 +457,31 @@ void App::handle_command(const std::string& cmd) {
         terminal_visible_ = !terminal_visible_;
     } else if (cmd == "toggle_sidebar") {
         sidebar_visible_ = !sidebar_visible_;
+    } else if (cmd == "copy" || cmd == "cut") {
+        if (terminal_.focused() && terminal_visible_) return;  // terminal selection: TODO
+        if (Editor* ed = current_editor()) {
+            bool line_mode = false;
+            std::string text = cmd == "cut" ? ed->cut_text(line_mode) : ed->copy_text(line_mode);
+            SDL_SetClipboardText(text.c_str());
+            own_clipboard_ = text;
+            clipboard_line_text_ = line_mode ? text : std::string();
+        }
+    } else if (cmd == "paste") {
+        // SDL on Wayland can't read back a selection this client owns, so our own
+        // copies are served from memory until another client takes the clipboard.
+        std::string text = own_clipboard_;
+        if (text.empty()) {
+            char* raw = SDL_GetClipboardText();
+            text = raw ? raw : "";
+            SDL_free(raw);
+        }
+        if (text.empty()) return;
+        if (terminal_.focused() && terminal_visible_) {
+            terminal_.paste(text);
+        } else if (Editor* ed = current_editor()) {
+            ed->paste_text(text, !clipboard_line_text_.empty() && text == clipboard_line_text_);
+            editor_view_.reveal_cursor();
+        }
     } else if (cmd == "undo") {
         if (Editor* ed = current_editor()) ed->undo();
     } else if (cmd == "redo") {
@@ -711,6 +751,9 @@ void App::register_commands() {
     add("command_palette_commands","Command Palette",           "Ctrl+Shift+P");
     add("toggle_terminal",         "Toggle Terminal",           "Ctrl+`");
     add("toggle_sidebar",          "Toggle Sidebar",            "Ctrl+B");
+    add("copy",                    "Copy",                      "Ctrl+C");
+    add("cut",                     "Cut",                       "Ctrl+X");
+    add("paste",                   "Paste",                     "Ctrl+V");
     add("undo",                    "Undo",                      "Ctrl+Z");
     add("redo",                    "Redo",                      "Ctrl+Shift+Z");
     add("select_word",             "Select Word",               "Ctrl+D");

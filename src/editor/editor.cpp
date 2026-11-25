@@ -704,6 +704,72 @@ void Editor::scroll_to_cursor(float view_width, float view_height,
     }
 }
 
+std::string Editor::copy_text(bool& line_mode) const {
+    const auto& sels = cursors_.selections();
+    line_mode = std::all_of(sels.begin(), sels.end(), [](const Selection& s) { return s.empty(); });
+    std::string out;
+    for (size_t i = 0; i < sels.size(); i++) {
+        if (i) out += '\n';
+        if (line_mode) {
+            out += buffer_.line_text(sels[i].head.line);
+            out += '\n';
+            continue;
+        }
+        size_t a = buffer_.offset_of(sels[i].min().line, sels[i].min().col);
+        size_t b = buffer_.offset_of(sels[i].max().line, sels[i].max().col);
+        for (size_t o = a; o < b;) {
+            std::string_view chunk = buffer_.chunk_at(o);
+            size_t n = std::min(chunk.size(), b - o);
+            out.append(chunk.data(), n);
+            o += n;
+        }
+    }
+    if (line_mode && sels.size() > 1) out.pop_back();  // keep one newline per copied line
+    return out;
+}
+
+std::string Editor::cut_text(bool& line_mode) {
+    std::string text = copy_text(line_mode);
+    if (line_mode) {
+        buffer_.begin_undo_group();
+        // Remove whole lines bottom-up so earlier offsets stay valid.
+        std::vector<size_t> lines;
+        for (auto& s : cursors_.selections()) lines.push_back(s.head.line);
+        std::sort(lines.rbegin(), lines.rend());
+        lines.erase(std::unique(lines.begin(), lines.end()), lines.end());
+        for (size_t line : lines) {
+            size_t start = buffer_.line_start(line);
+            size_t len = buffer_.line_length(line);
+            bool has_newline = line + 1 < buffer_.line_count();
+            if (!has_newline && start > 0) { start--; len++; }  // last line: eat the preceding newline
+            else if (has_newline) len++;
+            buffer_.erase(start, len);
+        }
+        buffer_.end_undo_group();
+        Position p = cursors_.primary_pos();
+        cursors_.set_primary({std::min(p.line, buffer_.line_count() - 1), 0});
+        on_text_changed();
+    } else {
+        delete_backward();  // deletes the selections
+    }
+    return text;
+}
+
+void Editor::paste_text(const std::string& text, bool line_mode) {
+    if (line_mode && cursors_.selections().size() == 1 && cursors_.primary().empty()) {
+        Position p = cursors_.primary_pos();
+        size_t at = buffer_.line_start(p.line);
+        buffer_.begin_undo_group();
+        buffer_.insert(at, text);
+        buffer_.end_undo_group();
+        size_t added = static_cast<size_t>(std::count(text.begin(), text.end(), '\n'));
+        cursors_.set_primary({p.line + added, p.col});
+        on_text_changed();
+        return;
+    }
+    insert_text(text);
+}
+
 void Editor::undo() {
     if (auto off = buffer_.undo()) cursors_.set_primary(buffer_.position_of(*off));
     on_text_changed();

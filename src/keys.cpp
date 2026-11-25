@@ -31,6 +31,12 @@ void KeyMap::init_defaults() {
     bind(SDLK_Y,     KeyMod::Ctrl,                      "redo");
 
     // Selection
+    bind(SDLK_C,     KeyMod::Ctrl,                      "copy");
+    bind(SDLK_X,     KeyMod::Ctrl,                      "cut");
+    bind(SDLK_V,     KeyMod::Ctrl,                      "paste");
+    bind(SDLK_C,     KeyMod::Ctrl | KeyMod::Shift,      "copy");
+    bind(SDLK_V,     KeyMod::Ctrl | KeyMod::Shift,      "paste");
+    bind(SDLK_INSERT,KeyMod::Shift,                     "paste");
     bind(SDLK_D,     KeyMod::Ctrl,                      "select_word");
     bind(SDLK_L,     KeyMod::Ctrl,                      "select_line");
     bind(SDLK_A,     KeyMod::Ctrl,                      "select_all");

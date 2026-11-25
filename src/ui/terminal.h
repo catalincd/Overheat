@@ -25,6 +25,7 @@ public:
     bool is_alive() const { return alive_; }
 
     void write(const std::string& data);
+    void paste(const std::string& text);
 
     void render(RenderContext& ctx, Rect bounds) override;
     bool handle_key(const KeyEvent& e) override;
@@ -63,6 +64,7 @@ private:
     void process_output(const char* data, size_t len);
     void process_char(char c);
     void put_codepoint(uint32_t cp);
+    bool bracketed_paste_ = false;
     uint32_t utf8_cp_ = 0;
     int utf8_remaining_ = 0;
     void process_csi(char final_char);

@@ -118,6 +118,18 @@ void Terminal::kill() {
 // Write to PTY
 // ---------------------------------------------------------------------------
 
+void Terminal::paste(const std::string& text) {
+    std::string data;
+    data.reserve(text.size() + 12);
+    if (bracketed_paste_) data += "\x1b[200~";
+    for (char c : text) {
+        if (c == '\r') continue;
+        data.push_back(c == '\n' ? '\r' : c);
+    }
+    if (bracketed_paste_) data += "\x1b[201~";
+    write(data);
+}
+
 void Terminal::write(const std::string& data) {
     if (!alive_ || master_fd_ < 0) return;
     size_t total = 0;
@@ -533,8 +545,10 @@ void Terminal::process_csi(char final_char) {
     }
     case 'h': // Set mode
     case 'l': // Reset mode
-        // Private modes (e.g. ?25h = show cursor, ?1049h = alt screen)
-        // We acknowledge but don't implement alternate screen buffer
+        if (is_private) {
+            for (int mode : params)
+                if (mode == 2004) bracketed_paste_ = (final_char == 'h');
+        }
         break;
     case 'd': { // VPA – Vertical line position absolute
         int row = std::max(p0, 1) - 1;

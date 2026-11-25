@@ -62,6 +62,8 @@ private:
     ScriptRunner script_;
     std::vector<std::string> pending_probes_;
     bool debug_hit_ = false;
+    std::string own_clipboard_;        // what we last put on the clipboard
+    std::string clipboard_line_text_;  // last whole-line copy, to paste as lines
     float last_click_x_ = -1, last_click_y_ = -1;
     TimePoint start_time_ = Clock::now();
     bool first_paint_done_ = false;

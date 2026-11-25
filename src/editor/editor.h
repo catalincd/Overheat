@@ -32,6 +32,12 @@ public:
     void toggle_comment();
     void undo();
     void redo();
+
+    // Clipboard helpers. With no selection, copy/cut take the whole line
+    // (including its newline) and report line_mode so paste inserts above.
+    std::string copy_text(bool& line_mode) const;
+    std::string cut_text(bool& line_mode);
+    void paste_text(const std::string& text, bool line_mode);
     void newline();
     void tab();
 
