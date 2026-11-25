@@ -34,9 +34,16 @@ public:
 
     // When set, close clicks ask the host (to confirm unsaved changes) instead of closing.
     void set_on_close_request(std::function<void(int)> cb) { on_close_request_ = std::move(cb); }
+    // Tab indices, most recently used first.
+    std::vector<int> mru_order() const;
+    bool dragging() const { return drag_index_ >= 0; }
 
 private:
     std::function<void(int)> on_close_request_;
+    std::vector<const Editor*> mru_;
+    int drag_index_ = -1;
+    float drag_start_x_ = 0;
+    bool drag_moved_ = false;
     static constexpr float PAD = 14.0f;
     static constexpr float CLOSE_W = 16.0f;
     float char_w_ = 9.0f;

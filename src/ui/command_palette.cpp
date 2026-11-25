@@ -28,6 +28,11 @@ void CommandPalette::pick(PickOptions opts) {
     select(std::clamp(pick_.initial, 0, std::max(0, static_cast<int>(filtered_.size()) - 1)));
 }
 
+void CommandPalette::accept() {
+    KeyEvent enter{static_cast<uint32_t>(SDLK_RETURN), KeyMod::None, true};
+    handle_key(enter);
+}
+
 void CommandPalette::select(int index) {
     selected_index_ = filtered_.empty() ? 0 : std::clamp(index, 0, static_cast<int>(filtered_.size()) - 1);
     if (mode_ == Mode::Pick && pick_.on_preview && !filtered_.empty()) {

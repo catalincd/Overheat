@@ -14,8 +14,10 @@ void KeyMap::init_defaults() {
 
     // Tabs
     bind(SDLK_W,     KeyMod::Ctrl,                      "close_tab");
-    bind(SDLK_TAB,   KeyMod::Ctrl,                      "next_tab");
-    bind(SDLK_TAB,   KeyMod::Ctrl | KeyMod::Shift,      "prev_tab");
+    bind(SDLK_TAB,   KeyMod::Ctrl,                      "quick_switch");
+    bind(SDLK_TAB,   KeyMod::Ctrl | KeyMod::Shift,      "quick_switch_back");
+    bind(SDLK_PAGEDOWN, KeyMod::Ctrl,                   "next_tab");
+    bind(SDLK_PAGEUP,   KeyMod::Ctrl,                   "prev_tab");
 
     // Command palette
     bind(SDLK_P,     KeyMod::Ctrl,                      "command_palette_files");

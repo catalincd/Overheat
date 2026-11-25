@@ -412,6 +412,12 @@ void App::handle_event(const SDL_Event& e) {
     }
 
     case SDL_EVENT_KEY_UP: {
+        // The Ctrl+Tab switcher commits when Ctrl is released.
+        if (switcher_open_ && (e.key.key == SDLK_LCTRL || e.key.key == SDLK_RCTRL)) {
+            if (command_palette_.is_visible()) command_palette_.accept();
+            switcher_open_ = false;
+            break;
+        }
         KeyEvent ke{static_cast<uint32_t>(e.key.key), sdl_mods(e.key.mod), false};
         if (terminal_.focused() && terminal_visible_) {
             terminal_.handle_key(ke);
@@ -488,6 +494,10 @@ void App::handle_event(const SDL_Event& e) {
         }
         MouseEvent me{e.button.x, e.button.y, static_cast<int>(e.button.button),
                       false, false, 0, 0};
+        if (tab_bar_.dragging()) {
+            tab_bar_.handle_mouse(me);
+            break;
+        }
         editor_view_.handle_mouse(me);
         terminal_.handle_mouse(me);
         break;
@@ -534,7 +544,8 @@ void App::handle_event(const SDL_Event& e) {
         }
         if (e.motion.state & SDL_BUTTON_LMASK) {
             MouseEvent me{e.motion.x, e.motion.y, 1, true, false, 0, 0, true};
-            if (terminal_.focused()) terminal_.handle_mouse(me);
+            if (tab_bar_.dragging()) tab_bar_.handle_mouse(me);
+            else if (terminal_.focused()) terminal_.handle_mouse(me);
             else editor_view_.handle_mouse(me);
         }
         break;
@@ -561,6 +572,36 @@ void App::handle_command(const std::string& cmd) {
         command_palette_.show(CommandPalette::Mode::Files);
     } else if (cmd == "close_tab") {
         close_current_tab();
+    } else if (cmd == "quick_switch" || cmd == "quick_switch_back") {
+        if (switcher_open_ && command_palette_.is_visible()) {
+            command_palette_.move_selection(cmd == "quick_switch" ? 1 : -1);
+        } else if (tab_bar_.tabs().size() > 1) {
+            auto order = tab_bar_.mru_order();
+            std::vector<std::string> items;
+            std::vector<std::shared_ptr<Editor>> eds;
+            for (int i : order) {
+                auto& ed = tab_bar_.tabs()[static_cast<size_t>(i)].editor;
+                fs::path p = ed->buffer().file_path();
+                std::string rel = p.empty() ? "" : p.parent_path().lexically_relative(project_root_).string();
+                items.push_back((p.empty() ? std::string("Untitled") : p.filename().string()) +
+                                (rel.empty() || rel == "." ? "" : "  " + rel));
+                eds.push_back(ed);
+            }
+            CommandPalette::PickOptions opts;
+            opts.placeholder = "Open editors (release Ctrl to switch)";
+            opts.items = items;
+            opts.initial = cmd == "quick_switch" ? 1 : static_cast<int>(items.size()) - 1;
+            opts.on_pick = [this, eds](int i, const std::string&) {
+                switcher_open_ = false;
+                if (i < 0) return;
+                for (size_t t = 0; t < tab_bar_.tabs().size(); t++)
+                    if (tab_bar_.tabs()[t].editor == eds[static_cast<size_t>(i)]) tab_bar_.set_active(static_cast<int>(t));
+                focus_editor();
+            };
+            opts.on_cancel = [this] { switcher_open_ = false; };
+            command_palette_.pick(std::move(opts));
+            switcher_open_ = true;
+        }
     } else if (cmd == "next_tab") {
         tab_bar_.next_tab();
     } else if (cmd == "prev_tab") {
@@ -1347,8 +1388,9 @@ void App::register_commands() {
     add("new_file",                "New File",                 "Ctrl+N");
     add("open_file",               "Open File",                "Ctrl+O");
     add("close_tab",               "Close Tab",                "Ctrl+W");
-    add("next_tab",                "Next Tab",                 "Ctrl+Tab");
-    add("prev_tab",                "Previous Tab",             "Ctrl+Shift+Tab");
+    add("quick_switch",            "Switch Editor (recent)",   "Ctrl+Tab");
+    add("next_tab",                "Next Tab",                 "Ctrl+PageDown");
+    add("prev_tab",                "Previous Tab",             "Ctrl+PageUp");
     add("command_palette_files",   "Quick Open",               "Ctrl+P");
     add("command_palette_commands","Command Palette",           "Ctrl+Shift+P");
     add("toggle_terminal",         "Toggle Terminal",           "Ctrl+`");

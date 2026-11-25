@@ -23,6 +23,8 @@ public:
         int initial = 0;
     };
     void pick(PickOptions opts);
+    void move_selection(int delta) { select(selected_index_ + delta); }
+    void accept();  // as if Enter were pressed
 
     void show(Mode mode = Mode::Commands);
     void hide();

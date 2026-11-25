@@ -12,8 +12,19 @@ void TabBar::add_tab(std::shared_ptr<Editor> editor) {
     set_active(static_cast<int>(tabs_.size()) - 1);
 }
 
+std::vector<int> TabBar::mru_order() const {
+    std::vector<int> out;
+    for (const Editor* e : mru_)
+        for (size_t i = 0; i < tabs_.size(); i++)
+            if (tabs_[i].editor.get() == e) out.push_back(static_cast<int>(i));
+    for (size_t i = 0; i < tabs_.size(); i++)  // tabs never activated go last
+        if (std::find(out.begin(), out.end(), static_cast<int>(i)) == out.end()) out.push_back(static_cast<int>(i));
+    return out;
+}
+
 void TabBar::close_tab(int index) {
     if (index < 0 || index >= static_cast<int>(tabs_.size())) return;
+    std::erase(mru_, tabs_[static_cast<size_t>(index)].editor.get());
 
     tabs_.erase(tabs_.begin() + index);
 
@@ -36,6 +47,11 @@ void TabBar::close_tab(int index) {
 void TabBar::set_active(int index) {
     if (index < -1 || index >= static_cast<int>(tabs_.size())) return;
     active_ = index;
+    if (index >= 0) {
+        const Editor* e = tabs_[static_cast<size_t>(index)].editor.get();
+        std::erase(mru_, e);
+        mru_.insert(mru_.begin(), e);
+    }
     if (on_change_) on_change_(active_);
 }
 
@@ -107,6 +123,36 @@ void TabBar::render(RenderContext& ctx, Rect bounds) {
 }
 
 bool TabBar::handle_mouse(const MouseEvent& e) {
+    // Drag to reorder: the dragged tab swaps with a neighbour once the pointer
+    // passes that neighbour's midpoint.
+    if (drag_index_ >= 0 && e.button == 1) {
+        if (!e.pressed) {
+            int i = drag_index_;
+            drag_index_ = -1;
+            if (!drag_moved_) set_active(i);
+            return true;
+        }
+        if (e.motion) {
+            if (std::abs(e.x - drag_start_x_) > 4.0f) drag_moved_ = true;
+            if (!drag_moved_) return true;
+            float x = bounds_.x - scroll_x_;
+            for (size_t i = 0; i < tabs_.size(); i++) {
+                float w = tab_width(tabs_[i]);
+                int target = static_cast<int>(i);
+                bool past_mid = target > drag_index_ ? e.x > x + w * 0.5f : e.x < x + w * 0.5f;
+                if (target != drag_index_ && std::abs(target - drag_index_) == 1 && past_mid &&
+                    e.x >= x && e.x < x + w) {
+                    std::swap(tabs_[static_cast<size_t>(target)], tabs_[static_cast<size_t>(drag_index_)]);
+                    if (active_ == drag_index_) active_ = target;
+                    else if (active_ == target) active_ = drag_index_;
+                    drag_index_ = target;
+                    break;
+                }
+                x += w;
+            }
+            return true;
+        }
+    }
     if (!bounds_.contains(e.x, e.y)) return false;
     if (e.scroll_y != 0.0f) {
         scroll_x_ = std::max(0.0f, scroll_x_ - e.scroll_y * 30.0f);
@@ -122,8 +168,12 @@ bool TabBar::handle_mouse(const MouseEvent& e) {
             if (e.button == 2 || (e.button == 1 && on_close)) {
                 if (on_close_request_) on_close_request_(static_cast<int>(i));
                 else close_tab(static_cast<int>(i));
+            } else if (e.button == 1) {
+                set_active(static_cast<int>(i));
+                drag_index_ = static_cast<int>(i);
+                drag_start_x_ = e.x;
+                drag_moved_ = false;
             }
-            else if (e.button == 1) set_active(static_cast<int>(i));
             return true;
         }
         x += w;

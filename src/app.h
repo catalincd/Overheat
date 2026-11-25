@@ -132,6 +132,7 @@ private:
 
     ScriptRunner script_;
     bool scripted_ = false;
+    bool switcher_open_ = false;  // Ctrl+Tab list is showing
     std::vector<std::string> pending_probes_;
     bool debug_hit_ = false;
     std::string shot_dir_;  // --shot-dir: frames for shot: probes are captured in-app
