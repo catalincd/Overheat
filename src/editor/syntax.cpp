@@ -1,8 +1,8 @@
 #include "editor/syntax.h"
 #include "editor/buffer.h"
 #include <tree_sitter/api.h>
-#include <tree_sitter/tree-sitter-c.h>
-
+// Grammars are vendored in third_party/ and built into ts_grammars.
+extern "C" const TSLanguage* tree_sitter_c();
 extern "C" const TSLanguage* tree_sitter_cpp();
 #include <algorithm>
 #include <cstring>

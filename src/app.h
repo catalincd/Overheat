@@ -104,7 +104,8 @@ private:
     void render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed);
     void render_terminal_header(RenderContext& ctx, Rect r);
     void restart_terminal();
-    std::vector<std::string> terminal_argv_;  // empty = local login shell
+    std::vector<std::string> terminal_argv_;  // empty = local shell (local_shell())
+    std::vector<std::string> local_shell() const;
     Rect term_restart_btn_{}, term_close_btn_{};
 
     // Split editors: tab_bar_/editor_view_ are always the *active* group; the

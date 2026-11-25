@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include "platform/platform.h"
 #include <atomic>
 #include <functional>
 #include <mutex>
@@ -41,7 +42,7 @@ private:
     std::thread worker_;
     std::atomic<bool> busy_{false};
     std::atomic<bool> cancel_{false};
-    std::atomic<int> child_pid_{-1};
+    std::atomic<platform::Process*> current_{nullptr};
 };
 
 } // namespace oh

@@ -1,9 +1,5 @@
 #include "llm.h"
-#include <csignal>
 #include <cstring>
-#include <fcntl.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 namespace oh {
 
@@ -74,50 +70,24 @@ std::string json_string(const std::string& json, const std::string& key, size_t 
 // Returns the exit status (or -1). Stops early when `cancel` is set.
 int run_process(const std::vector<std::string>& argv, const fs::path& cwd, const std::string& input,
                 const std::function<void(const char*, size_t)>& on_chunk, std::atomic<bool>& cancel,
-                std::atomic<int>& pid_out) {
-    int in_pipe[2], out_pipe[2];
-    if (pipe2(in_pipe, O_CLOEXEC) != 0) return -1;
-    if (pipe2(out_pipe, O_CLOEXEC) != 0) { close(in_pipe[0]); close(in_pipe[1]); return -1; }
-    pid_t pid = fork();
-    if (pid < 0) return -1;
-    if (pid == 0) {
-        dup2(in_pipe[0], 0);
-        dup2(out_pipe[1], 1);
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) dup2(devnull, 2);
-        if (!cwd.empty() && chdir(cwd.c_str()) != 0) {}
-        std::vector<char*> args;
-        for (auto& a : argv) args.push_back(const_cast<char*>(a.c_str()));
-        args.push_back(nullptr);
-        execvp(args[0], args.data());
-        _exit(127);
-    }
-    pid_out = pid;
-    close(in_pipe[0]);
-    close(out_pipe[1]);
-    // Small request bodies: write all, then close so the child sees EOF.
-    size_t off = 0;
-    while (off < input.size()) {
-        ssize_t n = write(in_pipe[1], input.data() + off, input.size() - off);
-        if (n <= 0) break;
-        off += static_cast<size_t>(n);
-    }
-    close(in_pipe[1]);
+                std::atomic<platform::Process*>& current) {
+    platform::Process proc;
+    if (!proc.start(argv, cwd)) return -1;
+    current = &proc;
+    proc.write(input.data(), input.size());  // small request bodies
+    proc.close_stdin();
     char buf[4096];
-    for (;;) {
-        if (cancel) { kill(pid, SIGTERM); break; }
-        ssize_t n = read(out_pipe[0], buf, sizeof buf);
-        if (n > 0) on_chunk(buf, static_cast<size_t>(n));
-        else if (n == 0 || errno != EINTR) break;
+    while (!cancel) {
+        long n = proc.read(buf, sizeof buf);
+        if (n <= 0) break;
+        on_chunk(buf, static_cast<size_t>(n));
     }
-    close(out_pipe[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    pid_out = -1;
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    current = nullptr;
+    if (cancel) proc.terminate();
+    return proc.wait();
 }
 
-std::string first_model(const LLMBackend& b, std::atomic<bool>& cancel, std::atomic<int>& pid) {
+std::string first_model(const LLMBackend& b, std::atomic<bool>& cancel, std::atomic<platform::Process*>& pid) {
     std::string out;
     std::vector<std::string> argv = {"curl", "-s", "-m", "10", b.endpoint + "/v1/models"};
     if (!b.api_key.empty()) argv.insert(argv.end(), {"-H", "Authorization: Bearer " + b.api_key});
@@ -129,7 +99,7 @@ std::string first_model(const LLMBackend& b, std::atomic<bool>& cancel, std::ato
 
 void LLMClient::cancel() {
     cancel_ = true;
-    if (int pid = child_pid_; pid > 0) kill(pid, SIGTERM);
+    if (platform::Process* p = current_) p->terminate();  // unblocks the worker's read
     if (worker_.joinable()) worker_.join();
     cancel_ = false;
     busy_ = false;
@@ -145,10 +115,10 @@ void LLMClient::send(const LLMBackend& backend, std::vector<ChatMessage> history
             // The agent runs non-interactively in the project folder; its stdout is the reply.
             std::string prompt = history.empty() ? "" : history.back().content;
             int rc = run_process({"omp", "-p", "--no-session", prompt}, cwd, "",
-                                 [&](const char* d, size_t n) { on_text(std::string(d, n)); }, cancel_, child_pid_);
+                                 [&](const char* d, size_t n) { on_text(std::string(d, n)); }, cancel_, current_);
             if (rc != 0 && !cancel_) error = "omp exited with status " + std::to_string(rc);
         } else {
-            std::string model = backend.model.empty() ? first_model(backend, cancel_, child_pid_) : backend.model;
+            std::string model = backend.model.empty() ? first_model(backend, cancel_, current_) : backend.model;
             std::string body = "{\"stream\":true,";
             if (!model.empty()) body += "\"model\":\"" + json_escape(model) + "\",";
             body += "\"messages\":[";
@@ -179,7 +149,7 @@ void LLMClient::send(const LLMBackend& backend, std::vector<ChatMessage> history
                         on_text(text);
                     }
                 }
-            }, cancel_, child_pid_);
+            }, cancel_, current_);
             if (!cancel_ && !got_any)
                 error = rc != 0 ? "request failed (curl status " + std::to_string(rc) + ") - is the endpoint running?"
                                 : "no reply: " + raw.substr(0, 200);

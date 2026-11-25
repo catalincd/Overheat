@@ -54,7 +54,7 @@ public:
                              uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 
     VkSampler create_sampler(VkFilter filter = VK_FILTER_LINEAR);
-    VkShaderModule load_shader(const std::string& path);
+    VkShaderModule load_shader(const uint32_t* code, size_t bytes);
     VkPipeline create_graphics_pipeline(
         VkShaderModule vert, VkShaderModule frag,
         VkPipelineLayout layout,

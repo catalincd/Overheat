@@ -17,7 +17,7 @@ std::vector<SearchHit> App::search_remote(const SearchQuery& q) {
     std::string cmd = "grep -rnI --exclude-dir=.git -m 500 -F";
     if (!q.case_sensitive) cmd += " -i";
     if (q.whole_word) cmd += " -w";
-    cmd += " -e " + shell_quote(q.text) + " -- " + shell_quote(project_root_.string()) +
+    cmd += " -e " + shell_quote(q.text) + " -- " + shell_quote(project_root_.generic_string()) +
            " 2>/dev/null | head -n 20000";
     std::vector<SearchHit> hits;
     std::string out = ssh_.exec(cmd).stdout_data;
@@ -159,7 +159,7 @@ void App::open_remote_folder(const fs::path& path) {
     if (remote_target_.from_config) argv.push_back(remote_target_.alias);
     else argv.insert(argv.end(), {"-p", std::to_string(remote_target_.port),
                                   remote_target_.user + "@" + remote_target_.hostname});
-    argv.push_back("cd " + shell_quote(path.string()) + " && exec \"$SHELL\" -l");
+    argv.push_back("cd " + shell_quote(path.generic_string()) + " && exec \"$SHELL\" -l");
     terminal_argv_ = argv;
     terminal_.spawn(argv);
     set_status_message("Opened " + path.string() + " on " + remote_target_.display());

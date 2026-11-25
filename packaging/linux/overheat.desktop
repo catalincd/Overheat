@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Overheat
+GenericName=Code Editor
+Comment=Fast GPU-accelerated code editor
+Exec=overheat %F
+Icon=overheat
+Terminal=false
+Categories=Development;TextEditor;IDE;
+MimeType=text/plain;text/x-c;text/x-c++;text/x-chdr;text/x-c++hdr;text/x-c++src;text/x-csrc;
+Keywords=editor;code;ide;
+StartupWMClass=overheat

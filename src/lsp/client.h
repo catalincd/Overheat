@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include "platform/platform.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -74,9 +75,11 @@ public:
     void set_on_diagnostics(DiagnosticsCallback cb) { on_diagnostics_ = cb; }
 
 private:
-    int stdin_fd_ = -1;
-    int stdout_fd_ = -1;
-    pid_t child_pid_ = -1;
+    std::unique_ptr<platform::Process> process_;
+    char rbuf_[8192];
+    size_t rpos_ = 0, rlen_ = 0;
+    bool read_byte(char& c);
+    long read_bytes(char* out, size_t n);
     std::atomic<bool> running_{false};
     std::thread reader_thread_;
     // Writes go through a queue so a large didOpen never blocks the UI thread on

@@ -1,5 +1,6 @@
 #pragma once
 #include "ui/panel.h"
+#include "platform/platform.h"
 #include <string>
 #include <vector>
 #include <thread>
@@ -55,8 +56,7 @@ public:
     void resize(int cols, int rows);
 
 private:
-    int master_fd_ = -1;
-    pid_t child_pid_ = -1;
+    platform::Pty pty_;
     std::atomic<bool> alive_{false};
     std::thread reader_thread_;
 

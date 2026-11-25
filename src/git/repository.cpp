@@ -31,7 +31,7 @@ GitRepository::~GitRepository() {
 
 bool GitRepository::open(const fs::path& path) {
     close();
-    int err = git_repository_open_ext(&repo_, path.c_str(),
+    int err = git_repository_open_ext(&repo_, path.generic_string().c_str(),
                                       GIT_REPOSITORY_OPEN_FROM_ENV, nullptr);
     if (err != 0) {
         repo_ = nullptr;
@@ -389,7 +389,11 @@ std::vector<GitBlame> GitRepository::blame(const fs::path& path) const {
         if (hunk->final_signature) {
             time_t time = static_cast<time_t>(hunk->final_signature->when.time);
             struct tm tm_buf;
+#ifdef _WIN32
+            gmtime_s(&tm_buf, &time);
+#else
             gmtime_r(&time, &tm_buf);
+#endif
             char date_buf[64];
             strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", &tm_buf);
             date_str = date_buf;

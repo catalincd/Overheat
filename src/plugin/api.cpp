@@ -1,6 +1,6 @@
 #include "plugin/api.h"
 #include "app.h"
-#include <dlfcn.h>
+#include "platform/platform.h"
 #include <cstring>
 
 namespace oh {
@@ -116,36 +116,33 @@ void PluginManager::shutdown() {
         void* h = handles_[i];
         if (!h) continue;
 
-        auto shutdown_fn = reinterpret_cast<PluginShutdownFn>(dlsym(h, "oh_plugin_shutdown"));
+        auto shutdown_fn = reinterpret_cast<PluginShutdownFn>(platform::find_symbol(h, "oh_plugin_shutdown"));
         if (shutdown_fn) shutdown_fn();
 
-        dlclose(h);
+        platform::close_library(h);
     }
     handles_.clear();
     plugins_.clear();
 }
 
 bool PluginManager::load_plugin(const fs::path& path) {
-    void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (!handle) {
-        // dlerror() has the message, but we just return false
-        return false;
-    }
+    void* handle = platform::load_library(path);
+    if (!handle) return false;
 
-    auto init_fn     = reinterpret_cast<PluginInitFn>(dlsym(handle, "oh_plugin_init"));
-    auto shutdown_fn  = reinterpret_cast<PluginShutdownFn>(dlsym(handle, "oh_plugin_shutdown"));
-    auto name_fn      = reinterpret_cast<PluginNameFn>(dlsym(handle, "oh_plugin_name"));
-    auto version_fn   = reinterpret_cast<PluginVersionFn>(dlsym(handle, "oh_plugin_version"));
+    auto init_fn     = reinterpret_cast<PluginInitFn>(platform::find_symbol(handle, "oh_plugin_init"));
+    auto shutdown_fn  = reinterpret_cast<PluginShutdownFn>(platform::find_symbol(handle, "oh_plugin_shutdown"));
+    auto name_fn      = reinterpret_cast<PluginNameFn>(platform::find_symbol(handle, "oh_plugin_name"));
+    auto version_fn   = reinterpret_cast<PluginVersionFn>(platform::find_symbol(handle, "oh_plugin_version"));
 
     if (!init_fn) {
-        dlclose(handle);
+        platform::close_library(handle);
         return false;
     }
 
     // Call plugin init
     int result = init_fn(&api_);
     if (result != 0) {
-        dlclose(handle);
+        platform::close_library(handle);
         return false;
     }
 
@@ -166,9 +163,9 @@ void PluginManager::unload_plugin(const std::string& id) {
         if (plugins_[i].id == id) {
             void* h = handles_[i];
             if (h) {
-                auto shutdown_fn = reinterpret_cast<PluginShutdownFn>(dlsym(h, "oh_plugin_shutdown"));
+                auto shutdown_fn = reinterpret_cast<PluginShutdownFn>(platform::find_symbol(h, "oh_plugin_shutdown"));
                 if (shutdown_fn) shutdown_fn();
-                dlclose(h);
+                platform::close_library(h);
             }
             plugins_.erase(plugins_.begin() + static_cast<ptrdiff_t>(i));
             handles_.erase(handles_.begin() + static_cast<ptrdiff_t>(i));
@@ -183,7 +180,7 @@ void PluginManager::scan_directory(const fs::path& dir) {
     for (const auto& entry : fs::directory_iterator(dir)) {
         if (!entry.is_regular_file()) continue;
         const auto& p = entry.path();
-        if (p.extension() == ".so") {
+        if (p.extension() == platform::library_extension()) {
             load_plugin(p);
         }
     }

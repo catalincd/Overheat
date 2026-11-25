@@ -3,12 +3,6 @@
 #include "renderer/renderer2d.h"
 #include "renderer/vulkan_context.h"
 
-#include <pty.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <sys/ioctl.h>
-#include <sys/wait.h>
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
@@ -43,81 +37,29 @@ bool Terminal::spawn(const std::vector<std::string>& argv, const fs::path& cwd) 
         bracketed_paste_ = false;
     }
 
-    struct winsize ws{};
-    ws.ws_row = static_cast<unsigned short>(rows_);
-    ws.ws_col = static_cast<unsigned short>(cols_);
-
-    pid_t pid = forkpty(&master_fd_, nullptr, nullptr, &ws);
-    if (pid < 0) return false;
-
-    if (pid == 0) {
-        setenv("TERM", "xterm-256color", 1);
-        if (!cwd.empty() && chdir(cwd.c_str()) != 0) {}
-        if (argv.empty()) {
-            const char* sh = std::getenv("SHELL");
-            if (!sh) sh = "/bin/bash";
-            execlp(sh, sh, nullptr);
-        } else {
-            std::vector<char*> args;
-            for (auto& a : argv) args.push_back(const_cast<char*>(a.c_str()));
-            args.push_back(nullptr);
-            execvp(args[0], args.data());
-        }
-        _exit(127);
-    }
-
-    // Parent
-    child_pid_ = pid;
+    if (!pty_.spawn(argv, cwd, cols_, rows_)) return false;
     alive_ = true;
-
-    // Non-blocking reads
-    int flags = fcntl(master_fd_, F_GETFL, 0);
-    fcntl(master_fd_, F_SETFL, flags | O_NONBLOCK);
-
     reader_thread_ = std::thread([this]() {
         char buf[4096];
         while (alive_) {
-            ssize_t n = ::read(master_fd_, buf, sizeof(buf));
+            long n = pty_.read(buf, sizeof(buf), 20);  // short timeout so kill() can join promptly
             if (n > 0) {
                 process_output(buf, static_cast<size_t>(n));
                 request_redraw();
-            } else if (n == 0) {
-                // EOF – child closed
-                alive_ = false;
-                break;
-            } else {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // Use a short poll to avoid busy-waiting
-                    fd_set fds;
-                    FD_ZERO(&fds);
-                    FD_SET(master_fd_, &fds);
-                    struct timeval tv{0, 10000}; // 10 ms
-                    select(master_fd_ + 1, &fds, nullptr, nullptr, &tv);
-                } else if (errno == EIO) {
-                    // Child exited
-                    alive_ = false;
-                    break;
-                }
+            } else if (n < 0) {
+                alive_ = false;  // the shell exited
+                request_redraw();
             }
         }
     });
-
     return true;
 }
 
 void Terminal::kill() {
     alive_ = false;
-    if (child_pid_ > 0) {
-        ::kill(child_pid_, SIGHUP);
-        waitpid(child_pid_, nullptr, 0);
-        child_pid_ = -1;
-    }
-    // Join before closing: the reader must not touch a closed (or reused) fd.
+    // Join before closing: the reader must not touch a closed (or reused) handle.
     if (reader_thread_.joinable()) reader_thread_.join();
-    if (master_fd_ >= 0) {
-        ::close(master_fd_);
-        master_fd_ = -1;
-    }
+    pty_.kill();
 }
 
 // ---------------------------------------------------------------------------
@@ -137,13 +79,7 @@ void Terminal::paste(const std::string& text) {
 }
 
 void Terminal::write(const std::string& data) {
-    if (!alive_ || master_fd_ < 0) return;
-    size_t total = 0;
-    while (total < data.size()) {
-        ssize_t n = ::write(master_fd_, data.data() + total, data.size() - total);
-        if (n <= 0) break;
-        total += static_cast<size_t>(n);
-    }
+    if (alive_) pty_.write(data.data(), data.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -170,17 +106,7 @@ void Terminal::resize(int cols, int rows) {
     cursor_x_ = std::min(cursor_x_, cols_ - 1);
     cursor_y_ = std::min(cursor_y_, rows_ - 1);
 
-    // Inform PTY of new size
-    if (master_fd_ >= 0) {
-        struct winsize ws{};
-        ws.ws_row = static_cast<unsigned short>(rows_);
-        ws.ws_col = static_cast<unsigned short>(cols_);
-        ioctl(master_fd_, TIOCSWINSZ, &ws);
-
-        if (child_pid_ > 0) {
-            ::kill(child_pid_, SIGWINCH);
-        }
-    }
+    pty_.resize(cols_, rows_);
 }
 
 // ---------------------------------------------------------------------------
@@ -188,15 +114,7 @@ void Terminal::resize(int cols, int rows) {
 // ---------------------------------------------------------------------------
 
 void Terminal::update(float /*dt*/) {
-    // Check if child has exited
-    if (child_pid_ > 0) {
-        int status;
-        pid_t result = waitpid(child_pid_, &status, WNOHANG);
-        if (result > 0) {
-            alive_ = false;
-            child_pid_ = -1;  // reaped: never signal this pid again (it may be reused)
-        }
-    }
+    if (alive_ && pty_.exited()) alive_ = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -667,12 +585,7 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
         cursor_x_ = std::min(cursor_x_, cols_ - 1);
         cursor_y_ = std::min(cursor_y_, rows_ - 1);
 
-        if (master_fd_ >= 0) {
-            struct winsize ws{};
-            ws.ws_row = static_cast<unsigned short>(rows_);
-            ws.ws_col = static_cast<unsigned short>(cols_);
-            ioctl(master_fd_, TIOCSWINSZ, &ws);
-        }
+        pty_.resize(cols_, rows_);
     }
 
     // Background

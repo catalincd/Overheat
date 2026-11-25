@@ -74,7 +74,7 @@ private:
     LIBSSH2_SFTP* sftp_ = nullptr;  // one SFTP channel for the connection
     LIBSSH2_SFTP* sftp();
     LIBSSH2_CHANNEL* shell_channel_ = nullptr;
-    int sock_ = -1;
+    libssh2_socket_t sock_ = LIBSSH2_INVALID_SOCKET;
     bool connected_ = false;
     SSHConfig config_;
 

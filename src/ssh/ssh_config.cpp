@@ -1,17 +1,20 @@
 #include "ssh/ssh_config.h"
+#include "platform/platform.h"
 #include <cstdlib>
-#include <fnmatch.h>
 #include <fstream>
 #include <sstream>
-#include <unistd.h>
-#include <pwd.h>
 
 namespace oh {
 
 namespace {
-std::string home() {
-    const char* h = std::getenv("HOME");
-    return h ? h : "";
+std::string home() { return platform::home_dir().string(); }
+
+// OpenSSH Host patterns: '*' and '?' wildcards.
+bool glob_match(const char* p, const char* s) {
+    if (*p == '\0') return *s == '\0';
+    if (*p == '*') return glob_match(p + 1, s) || (*s && glob_match(p, s + 1));
+    if (*s && (*p == '?' || *p == *s)) return glob_match(p + 1, s + 1);
+    return false;
 }
 std::string expand_tilde(const std::string& p) {
     if (p.rfind("~/", 0) == 0) return home() + p.substr(1);
@@ -21,15 +24,11 @@ std::string lower(std::string s) {
     for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
 }
-std::string local_user() {
-    if (const char* u = std::getenv("USER")) return u;
-    if (passwd* pw = getpwuid(getuid())) return pw->pw_name;
-    return "root";
-}
+std::string local_user() { return platform::user_name(); }
 } // namespace
 
 fs::path SshConfig::default_path() {
-    if (const char* p = std::getenv("OVERHEAT_SSH_CONFIG"); p && *p) return p;
+    if (std::string p = platform::getenv_str("OVERHEAT_SSH_CONFIG"); !p.empty()) return p;
     return fs::path(home()) / ".ssh" / "config";
 }
 
@@ -97,7 +96,7 @@ SshTarget SshConfig::resolve(const std::string& target) const {
         bool match = false;
         for (auto& p : b.patterns) {
             bool neg = !p.empty() && p[0] == '!';
-            if (fnmatch((neg ? p.substr(1) : p).c_str(), host.c_str(), 0) == 0) {
+            if (glob_match((neg ? p.substr(1) : p).c_str(), host.c_str())) {
                 if (neg) { match = false; break; }
                 match = true;
             }

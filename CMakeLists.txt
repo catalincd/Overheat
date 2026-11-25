@@ -1,22 +1,44 @@
 cmake_minimum_required(VERSION 3.20)
-project(overheat VERSION 0.1.0 LANGUAGES CXX)
+project(overheat VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Release builds for distribution set OVERHEAT_MARCH to a portable baseline (x86-64-v2).
+set(OVERHEAT_MARCH "native" CACHE STRING "-march for optimized builds")
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VULKAN REQUIRED IMPORTED_TARGET vulkan)
 pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
 pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
-pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
 pkg_check_modules(LIBSSH2 REQUIRED IMPORTED_TARGET libssh2)
-pkg_check_modules(TREESITTER REQUIRED IMPORTED_TARGET tree-sitter)
-pkg_check_modules(TREESITTER_C REQUIRED IMPORTED_TARGET tree-sitter-c)
-# AUR tree-sitter-cpp ships only the shared library (no .pc, no header).
-find_library(TREESITTER_CPP_LIB tree-sitter-cpp REQUIRED)
+if(NOT WIN32)
+    pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+endif()
+
+# tree-sitter core + grammars are vendored so every platform builds them the same way
+# (and packages need no tree-sitter runtime; distro/MSYS2 builds differ in ABI and pull wasmtime).
+add_library(tree_sitter STATIC third_party/tree-sitter/src/lib.c)
+target_include_directories(tree_sitter
+    PUBLIC third_party/tree-sitter/include
+    PRIVATE third_party/tree-sitter/src)
+set_target_properties(tree_sitter PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
+target_compile_definitions(tree_sitter PRIVATE _POSIX_C_SOURCE=200112L _DEFAULT_SOURCE)
+target_compile_options(tree_sitter PRIVATE -O2 -w)
+
+add_library(ts_grammars STATIC
+    third_party/tree-sitter-c/parser.c
+    third_party/tree-sitter-cpp/parser.c
+    third_party/tree-sitter-cpp/scanner.c)
+set_source_files_properties(third_party/tree-sitter-c/parser.c PROPERTIES
+    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/tree-sitter-c)
+set_source_files_properties(third_party/tree-sitter-cpp/parser.c third_party/tree-sitter-cpp/scanner.c PROPERTIES
+    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/tree-sitter-cpp)
+set_target_properties(ts_grammars PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
+target_compile_options(ts_grammars PRIVATE -O2 -w)
 
 find_program(GLSLC glslc REQUIRED)
 
@@ -38,7 +60,16 @@ foreach(SHADER ${SHADER_SOURCES})
     list(APPEND SPIRV_FILES ${SPIRV_FILE})
 endforeach()
 
-add_custom_target(shaders ALL DEPENDS ${SPIRV_FILES})
+set(SPIRV_HEADER "${SPIRV_OUTPUT_DIR}/spirv.h")
+string(REPLACE ";" "," SPIRV_FILES_ARG "${SPIRV_FILES}")
+add_custom_command(
+    OUTPUT ${SPIRV_HEADER}
+    COMMAND ${CMAKE_COMMAND} "-DINPUTS=${SPIRV_FILES_ARG}" -DOUT=${SPIRV_HEADER} -P ${CMAKE_SOURCE_DIR}/cmake/embed_spirv.cmake
+    DEPENDS ${SPIRV_FILES} ${CMAKE_SOURCE_DIR}/cmake/embed_spirv.cmake
+    COMMENT "Embedding SPIR-V"
+    VERBATIM
+)
+add_custom_target(shaders ALL DEPENDS ${SPIRV_HEADER})
 
 set(OVERHEAT_SOURCES
     src/main.cpp
@@ -77,7 +108,14 @@ set(OVERHEAT_SOURCES
     src/fonts.cpp
     src/remote.cpp
     src/lsp_glue.cpp
+    src/platform/platform_posix.cpp
+    src/platform/platform_win.cpp
 )
+if(WIN32)
+    # Icon + version info; the .rc references the .ico by absolute path.
+    configure_file(${CMAKE_SOURCE_DIR}/packaging/windows/overheat.rc.in ${CMAKE_BINARY_DIR}/overheat.rc @ONLY)
+    list(APPEND OVERHEAT_SOURCES ${CMAKE_BINARY_DIR}/overheat.rc)
+endif()
 
 add_executable(overheat ${OVERHEAT_SOURCES})
 add_dependencies(overheat shaders)
@@ -92,18 +130,22 @@ target_link_libraries(overheat PRIVATE
     PkgConfig::SDL3
     PkgConfig::FREETYPE
     PkgConfig::HARFBUZZ
-    PkgConfig::FONTCONFIG
     PkgConfig::LIBGIT2
     PkgConfig::LIBSSH2
-    PkgConfig::TREESITTER
-    PkgConfig::TREESITTER_C
-    ${TREESITTER_CPP_LIB}
-    pthread
-    util
+    tree_sitter
+    ts_grammars
 )
+if(WIN32)
+    # GUI subsystem; C++ runtime linked statically so only library DLLs ship.
+    target_link_libraries(overheat PRIVATE ws2_32 ole32 shell32 uuid)
+    target_link_options(overheat PRIVATE -mwindows -static-libgcc -static-libstdc++
+                        -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+else()
+    target_link_libraries(overheat PRIVATE PkgConfig::FONTCONFIG pthread util dl)
+endif()
 
 target_compile_definitions(overheat PRIVATE
-    SHADER_DIR="${SPIRV_OUTPUT_DIR}"
+    OVERHEAT_VERSION="${PROJECT_VERSION}"
     VULKAN_HPP_NO_EXCEPTIONS
     GLM_FORCE_RADIANS
     GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -113,8 +155,31 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(overheat PRIVATE OVERHEAT_DEBUG)
     target_compile_options(overheat PRIVATE -g -O0 -Wall -Wextra)
 else()
-    target_compile_options(overheat PRIVATE -O3 -march=native -flto)
-    target_link_options(overheat PRIVATE -flto)
+    target_compile_options(overheat PRIVATE -O3 -march=${OVERHEAT_MARCH} -flto=auto)
+    target_link_options(overheat PRIVATE -O3 -flto=auto)
+endif()
+
+# ---- install layout ----
+include(GNUInstallDirs)
+if(WIN32)
+    install(TARGETS overheat RUNTIME DESTINATION .)
+    install(FILES assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf assets/fonts/JetBrainsMono-OFL.txt
+            DESTINATION fonts)
+    install(FILES assets/logo/overheat.ico DESTINATION .)
+else()
+    install(TARGETS overheat RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES packaging/linux/overheat.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    foreach(size 16 24 32 48 64 128 256 512)
+        install(FILES assets/logo/overheat-${size}.png
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps RENAME overheat.png)
+    endforeach()
+    install(FILES assets/logo/overheat.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+    install(FILES assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf assets/fonts/JetBrainsMono-OFL.txt
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/overheat/fonts)
+endif()
+
+if(WIN32 OR CMAKE_CROSSCOMPILING)
+    return()  # the fuzz test needs the host sanitizers
 endif()
 
 enable_testing()

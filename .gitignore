@@ -3,3 +3,6 @@ build-release/
 *.spv
 compile_commands.json
 .cache/
+dist/
+build-win/
+build-linux/

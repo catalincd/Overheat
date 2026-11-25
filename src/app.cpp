@@ -1,4 +1,5 @@
 #include "app.h"
+#include "platform/platform.h"
 #include "fonts.h"
 #include <SDL3/SDL.h>
 #include <cmath>
@@ -95,9 +96,7 @@ bool App::init(int argc, char** argv) {
 
     // ---- Settings location ----
     {
-        const char* home = std::getenv("HOME");
-        const char* xdg = std::getenv("XDG_CONFIG_HOME");
-        config_dir_ = xdg && *xdg ? fs::path(xdg) / "overheat" : fs::path(home ? home : ".") / ".config" / "overheat";
+        config_dir_ = platform::config_dir();
         themes_.set_config_dir(config_dir_);
     }
 
@@ -161,7 +160,7 @@ bool App::init(int argc, char** argv) {
     tab_bar_.set_on_close_request([this](int i) { request_close_tab(i); });
 
     // ---- Terminal ----
-    terminal_.spawn({}, project_root_);
+    terminal_.spawn(local_shell(), project_root_);
 
     // ---- Open files from command line, or create empty editor ----
     if (!file_args.empty()) {
@@ -174,8 +173,7 @@ bool App::init(int argc, char** argv) {
 
     // ---- Plugins ----
     plugins_.init(this);
-    fs::path plugin_dir = fs::path(std::getenv("HOME") ? std::getenv("HOME") : "~")
-                          / ".config" / "overheat" / "plugins";
+    fs::path plugin_dir = config_dir_ / "plugins";
     plugins_.scan_directory(plugin_dir);
 
     // ---- Scan project files for command palette ----
@@ -331,7 +329,7 @@ void App::emit_probe(const std::string& label) {
         Position p = ed->cursors().primary_pos();
         std::fprintf(stderr, "  file=%s cursor=%zu:%zu (0-based) cursors=%zu scroll=(%.0f,%.0f) "
                      "focus=%s palette=%d modified=%d\n",
-                     ed->buffer().file_path().filename().c_str(), p.line, p.col, sel.size(),
+                     ed->buffer().file_path().filename().string().c_str(), p.line, p.col, sel.size(),
                      ed->scroll_x(), ed->scroll_y(), focus, command_palette_.is_visible(),
                      ed->is_modified());
         auto& s0 = sel.front();
@@ -668,7 +666,18 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "command_palette_commands") {
         command_palette_.show(CommandPalette::Mode::Commands);
     } else if (cmd == "toggle_terminal") {
-        terminal_visible_ = !terminal_visible_;
+        // Like VS Code: show + focus; hide when it already has focus; else just focus it.
+        if (terminal_visible_ && !terminal_.focused()) {
+            focus(&terminal_);
+        } else {
+            terminal_visible_ = !terminal_visible_;
+            if (terminal_visible_) {
+                if (!terminal_.is_alive()) restart_terminal();
+                focus(&terminal_);
+            } else if (terminal_.focused()) {
+                focus(&editor_view_);
+            }
+        }
     } else if (cmd == "toggle_sidebar") {
         sidebar_visible_ = !sidebar_visible_;
     } else if (cmd == "copy" || cmd == "cut") {
@@ -1283,17 +1292,16 @@ std::vector<std::string> App::build_font_chain(const std::string& family) const 
     std::vector<std::string> chain;
     if (!family.empty())
         if (std::string f = font_file_for_family(family); !f.empty()) chain.push_back(f);
-    const char* fallbacks[] = {
-        "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
-        "/usr/share/fonts/TTF/SymbolsNerdFontMono-Regular.ttf",
-        "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
-        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
-        "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
-    };
-    for (const char* fp : fallbacks)
-        if (fs::exists(fp) && std::find(chain.begin(), chain.end(), fp) == chain.end()) chain.push_back(fp);
+    std::error_code ec;
+    for (const std::string& fp : platform::default_font_files()) {
+        if (!fs::exists(fp, ec)) continue;
+        std::string canon = fs::weakly_canonical(fp, ec).string();
+        bool dup = false;
+        for (const auto& c : chain) dup |= fs::weakly_canonical(c, ec).string() == canon;
+        // One copy of the bundled JetBrains Mono Nerd Font is enough.
+        for (const auto& c : chain) dup |= fs::path(c).filename() == fs::path(fp).filename();
+        if (!dup) chain.push_back(fp);
+    }
     return chain;
 }
 
@@ -1579,7 +1587,7 @@ void App::render_terminal_header(RenderContext& ctx, Rect r) {
     float base = r.y + (r.h - font_.line_height()) * 0.5f + font_.ascender();
     float x = ctx.r->add_text(r.x + 14.0f, base, "TERMINAL", terminal_.focused() ? theme_.fg : theme_.fg_muted, font_);
     std::string label = remote_active_ ? "ssh: " + remote_target_.alias : "bash";
-    if (const char* sh = std::getenv("SHELL"); sh && !remote_active_) label = fs::path(sh).filename().string();
+    if (!remote_active_) label = fs::path(local_shell().front()).stem().string();
     ctx.r->add_text(x + 2.0f * cw, base, label, theme_.fg_muted, font_);
     // Underline the active "tab", like the editor tabs.
     ctx.r->add_rect({r.x + 10.0f, r.y + r.h - 2.0f, x - r.x - 6.0f, 2.0f}, theme_.accent);
@@ -1592,8 +1600,30 @@ void App::render_terminal_header(RenderContext& ctx, Rect r) {
     }
 }
 
+std::vector<std::string> App::local_shell() const {
+    // settings: terminal_shell = "pwsh -NoLogo" / "cmd.exe" / "C:\\Program Files\\Git\\bin\\bash.exe --login"
+    // Words split on spaces; double quotes group a path with spaces.
+    std::string spec = themes_.setting("terminal_shell");
+    std::vector<std::string> argv;
+    std::string cur;
+    bool quoted = false, any = false;
+    for (char c : spec) {
+        if (c == '"') { quoted = !quoted; any = true; continue; }
+        if (c == ' ' && !quoted) {
+            if (any) argv.push_back(cur);
+            cur.clear();
+            any = false;
+            continue;
+        }
+        cur += c;
+        any = true;
+    }
+    if (any) argv.push_back(cur);
+    return argv.empty() ? platform::default_shell() : argv;
+}
+
 void App::restart_terminal() {
-    if (terminal_argv_.empty()) terminal_.spawn({}, project_root_);
+    if (terminal_argv_.empty()) terminal_.spawn(local_shell(), project_root_);
     else terminal_.spawn(terminal_argv_);
     focus(&terminal_);
 }
@@ -1615,7 +1645,7 @@ void App::render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed) {
         return;
     }
     fs::path rel = p.lexically_relative(project_root_);
-    if (rel.empty() || rel.native().rfind("..", 0) == 0) rel = p.filename();
+    if (rel.empty() || rel.generic_string().rfind("..", 0) == 0) rel = p.filename();
     bool first = true;
     for (auto& part : rel) {
         if (!first) sep();
@@ -1667,7 +1697,8 @@ void App::apply_llm_backend(const std::string& kind, const std::string& endpoint
     llm_backend_.kind = kind == "omp" ? LLMBackend::Omp : LLMBackend::OpenAI;
     llm_backend_.endpoint = endpoint.empty() ? "http://127.0.0.1:8000" : endpoint;
     llm_backend_.model = themes_.setting("llm_model");
-    const char* key = std::getenv("OVERHEAT_LLM_API_KEY");  // never stored in settings
+    std::string key_env = platform::getenv_str("OVERHEAT_LLM_API_KEY");  // never stored in settings
+    const char* key = key_env.empty() ? nullptr : key_env.c_str();
     llm_backend_.api_key = key ? key : "";
     llm_backend_.name = llm_backend_.kind == LLMBackend::Omp ? "OMP agent"
                       : llm_backend_.endpoint.find("127.0.0.1:8000") != std::string::npos ? "Flint"

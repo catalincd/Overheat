@@ -1,14 +1,20 @@
 #include "ssh/session.h"
-#include <sys/time.h>
 #include <cerrno>
 #include <libssh2.h>
 #include <libssh2_sftp.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define OH_CLOSE_SOCKET closesocket
+#else
 #include <sys/socket.h>
-#include <sys/stat.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
+#define OH_CLOSE_SOCKET ::close
+#endif
 #include <cstring>
 #include <chrono>
 #include <thread>
@@ -78,9 +84,9 @@ void SSHSession::teardown() {
         libssh2_session_free(session_);
         session_ = nullptr;
     }
-    if (sock_ >= 0) {
-        ::close(sock_);
-        sock_ = -1;
+    if (sock_ != LIBSSH2_INVALID_SOCKET) {
+        OH_CLOSE_SOCKET(sock_);
+        sock_ = LIBSSH2_INVALID_SOCKET;
     }
     connected_ = false;
 }
@@ -103,18 +109,33 @@ SSHConnectStatus SSHSession::connect(const SSHConfig& config) {
     int last_errno = 0;
     for (addrinfo* ai = res; ai; ai = ai->ai_next) {
         sock_ = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (sock_ < 0) continue;
+        if (sock_ == LIBSSH2_INVALID_SOCKET) continue;
+#ifdef _WIN32
+        DWORD tv = 10000;  // bounded connect/handshake waits (ms)
+        setsockopt(sock_, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof tv);
+        setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof tv);
+#else
         timeval tv{10, 0};  // bounded connect/handshake waits
         setsockopt(sock_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
         setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        if (::connect(sock_, ai->ai_addr, ai->ai_addrlen) == 0) break;
+#endif
+        if (::connect(sock_, ai->ai_addr, static_cast<int>(ai->ai_addrlen)) == 0) break;
+#ifdef _WIN32
+        last_errno = WSAGetLastError();
+#else
         last_errno = errno;
-        ::close(sock_);
-        sock_ = -1;
+#endif
+        OH_CLOSE_SOCKET(sock_);
+        sock_ = LIBSSH2_INVALID_SOCKET;
     }
     freeaddrinfo(res);
-    if (sock_ < 0) {
-        last_error_ = "Cannot connect to " + config_.host + ":" + port_str + ": " + std::strerror(last_errno);
+    if (sock_ == LIBSSH2_INVALID_SOCKET) {
+#ifdef _WIN32
+        std::string reason = "error " + std::to_string(last_errno);
+#else
+        std::string reason = std::strerror(last_errno);
+#endif
+        last_error_ = "Cannot connect to " + config_.host + ":" + port_str + ": " + reason;
         return SSHConnectStatus::NetworkError;
     }
 
@@ -340,7 +361,7 @@ std::vector<FileEntry> SSHSession::list_dir(const std::string& remote_path) {
         entry.is_dir = (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) && LIBSSH2_SFTP_S_ISDIR(attrs.permissions);
         if ((attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) && LIBSSH2_SFTP_S_ISLNK(attrs.permissions)) {
             LIBSSH2_SFTP_ATTRIBUTES target{};  // follow symlinks to decide dir vs file
-            if (libssh2_sftp_stat(s, entry.path.c_str(), &target) == 0)
+            if (libssh2_sftp_stat(s, entry.path.generic_string().c_str(), &target) == 0)
                 entry.is_dir = LIBSSH2_SFTP_S_ISDIR(target.permissions);
         }
         entries.push_back(std::move(entry));

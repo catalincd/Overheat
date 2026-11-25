@@ -427,24 +427,14 @@ VkSampler VulkanContext::create_sampler(VkFilter filter) {
     return sampler;
 }
 
-VkShaderModule VulkanContext::load_shader(const std::string& path) {
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        fprintf(stderr, "Failed to open shader: %s\n", path.c_str());
-        return VK_NULL_HANDLE;
-    }
-    size_t size = static_cast<size_t>(file.tellg());
-    std::vector<char> code(size);
-    file.seekg(0);
-    file.read(code.data(), static_cast<std::streamsize>(size));
-
+VkShaderModule VulkanContext::load_shader(const uint32_t* code, size_t bytes) {
     VkShaderModuleCreateInfo ci{};
     ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    ci.codeSize = size;
-    ci.pCode    = reinterpret_cast<const uint32_t*>(code.data());
+    ci.codeSize = bytes;
+    ci.pCode    = code;
     VkShaderModule mod;
     if (vkCreateShaderModule(device_, &ci, nullptr, &mod) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create shader module: %s\n", path.c_str());
+        fprintf(stderr, "Failed to create shader module\n");
         return VK_NULL_HANDLE;
     }
     return mod;

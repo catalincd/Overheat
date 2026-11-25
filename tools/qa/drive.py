@@ -33,6 +33,11 @@ env = dict(os.environ)
 if os.environ.get("QA_REAL_CONFIG") != "1":
     env["XDG_CONFIG_HOME"] = os.path.join(os.path.abspath(outdir), "config")
     os.makedirs(os.path.join(env["XDG_CONFIG_HOME"], "overheat", "themes"), exist_ok=True)
+# Hidden, unfocused QA windows: a Hyprland rule (registered below) sends this app id
+# to a silent special workspace so test runs never take the user's keyboard focus.
+env["SDL_APP_ID"] = "overheat-qa"
+subprocess.run(["hyprctl", "eval", "hl.window_rule({ name = 'overheat-qa', match = { class = '^overheat-qa$' }, "
+                "workspace = 'special:ohqa silent', no_initial_focus = true, float = true })"], capture_output=True)
 if app_capture:
     extra = ["--shot-dir", os.path.abspath(outdir), *extra]
 proc = subprocess.Popen([binary, "--script", script, *extra], cwd=root, env=env,

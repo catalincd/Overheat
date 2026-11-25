@@ -1,9 +1,77 @@
 #include "fonts.h"
 #include <algorithm>
-#include <fontconfig/fontconfig.h>
 #include <set>
+#ifdef _WIN32
+#include "platform/platform.h"
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <map>
+#include <mutex>
+#else
+#include <fontconfig/fontconfig.h>
+#endif
 
 namespace oh {
+
+#ifdef _WIN32
+// No fontconfig on Windows: scan the system and per-user font folders with
+// FreeType once, keeping fixed-pitch faces (Regular preferred per family).
+namespace {
+const std::map<std::string, std::string>& windows_mono_fonts() {
+    static std::map<std::string, std::string> families;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        FT_Library ft;
+        if (FT_Init_FreeType(&ft)) return;
+        std::string windir = platform::getenv_str("WINDIR");
+        std::vector<fs::path> dirs = {
+            fs::path(windir.empty() ? "C:\\Windows" : windir) / "Fonts",
+            fs::path(platform::getenv_str("LOCALAPPDATA")) / "Microsoft" / "Windows" / "Fonts",
+            platform::exe_dir() / "fonts",
+        };
+        std::map<std::string, int> score;  // 2 = Regular, 1 = other upright
+        for (const auto& dir : dirs) {
+            std::error_code ec;
+            for (const auto& e : fs::directory_iterator(dir, ec)) {
+                std::string ext = e.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext != ".ttf" && ext != ".otf") continue;
+                FT_Face face;
+                std::string file = e.path().string();
+                if (FT_New_Face(ft, file.c_str(), 0, &face)) continue;
+                if (FT_IS_FIXED_WIDTH(face) && face->family_name && !(face->style_flags & FT_STYLE_FLAG_ITALIC)) {
+                    std::string style = face->style_name ? face->style_name : "";
+                    int s = (style == "Regular" || style == "Book" || style == "Normal") ? 2 : 1;
+                    if (face->style_flags & FT_STYLE_FLAG_BOLD) s = 0;
+                    std::string fam = face->family_name;
+                    if (!score.count(fam) || s > score[fam]) {
+                        score[fam] = s;
+                        families[fam] = file;
+                    }
+                }
+                FT_Done_Face(face);
+            }
+        }
+        FT_Done_FreeType(ft);
+    });
+    return families;
+}
+} // namespace
+
+std::string font_file_for_family(const std::string& family) {
+    const auto& f = windows_mono_fonts();
+    auto it = f.find(family);
+    return it == f.end() ? "" : it->second;
+}
+
+std::vector<FontFamily> list_monospace_families() {
+    std::vector<FontFamily> out;
+    for (const auto& [name, file] : windows_mono_fonts())
+        if (name.find("Symbols") == std::string::npos) out.push_back({name, file});
+    return out;
+}
+
+#else
 
 std::string font_file_for_family(const std::string& family) {
     FcPattern* pat = FcPatternCreate();
@@ -57,5 +125,7 @@ std::vector<FontFamily> list_monospace_families() {
     }
     return out;
 }
+
+#endif
 
 } // namespace oh

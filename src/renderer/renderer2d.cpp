@@ -1,4 +1,5 @@
 #include "renderer/renderer2d.h"
+#include "shaders/spirv.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -53,13 +54,10 @@ bool Renderer2D::init(VulkanContext& vk, FontAtlas& font) {
     if (vkCreatePipelineLayout(vk.device(), &pl_ci, nullptr, &pipeline_layout_) != VK_SUCCESS)
         return false;
 
-    std::string dir = SHADER_DIR;
-    VkShaderModule vert = vk.load_shader(dir + "/quad.vert.spv");
-    VkShaderModule frag = vk.load_shader(dir + "/quad.frag.spv");
-    if (!vert || !frag) {
-        fprintf(stderr, "Renderer2D: failed to load shaders from %s\n", dir.c_str());
-        return false;
-    }
+    // SPIR-V is compiled at build time and embedded (shaders/spirv.h).
+    VkShaderModule vert = vk.load_shader(spirv_quad_vert, sizeof spirv_quad_vert);
+    VkShaderModule frag = vk.load_shader(spirv_quad_frag, sizeof spirv_quad_frag);
+    if (!vert || !frag) return false;
     pipeline_ = vk.create_graphics_pipeline(vert, frag, pipeline_layout_, {}, {}, true);
     vkDestroyShaderModule(vk.device(), vert, nullptr);
     vkDestroyShaderModule(vk.device(), frag, nullptr);

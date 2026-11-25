@@ -1,13 +1,13 @@
 #include "app.h"
+#include <SDL3/SDL_main.h>
+#include "platform/platform.h"
 #include "git/repository.h"
 #include "ssh/session.h"
 #include <cstdio>
-#include <csignal>
 #include <cstdlib>
 
 int main(int argc, char** argv) {
-    // Child processes (LSP servers, shells) may exit mid-write; report EPIPE instead of dying.
-    std::signal(SIGPIPE, SIG_IGN);
+    oh::platform::init();
 
     oh::GitRepository::global_init();
     oh::SSHSession::global_init();
@@ -25,6 +25,7 @@ int main(int argc, char** argv) {
 
     oh::SSHSession::global_shutdown();
     oh::GitRepository::global_shutdown();
+    oh::platform::shutdown();
 
     return exit_code;
 }

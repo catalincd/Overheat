@@ -1,9 +1,6 @@
 #include "lsp/client.h"
 #include <cstdlib>
 #include <cerrno>
-#include <unistd.h>
-#include <signal.h>
-#include <sys/wait.h>
 #include <cstring>
 #include <cstdio>
 #include <sstream>
@@ -278,55 +275,14 @@ std::string LSPClient::uri_from_path(const fs::path& path) const {
 bool LSPClient::start(const std::string& command, const std::vector<std::string>& args) {
     if (running_) return false;
 
-    int stdin_pipe[2];
-    int stdout_pipe[2];
-
-    if (pipe(stdin_pipe) != 0) return false;
-    if (pipe(stdout_pipe) != 0) {
-        ::close(stdin_pipe[0]);
-        ::close(stdin_pipe[1]);
+    std::vector<std::string> argv{command};
+    argv.insert(argv.end(), args.begin(), args.end());
+    process_ = std::make_unique<platform::Process>();
+    if (!process_->start(argv)) {
+        process_.reset();
         return false;
     }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        ::close(stdin_pipe[0]);
-        ::close(stdin_pipe[1]);
-        ::close(stdout_pipe[0]);
-        ::close(stdout_pipe[1]);
-        return false;
-    }
-
-    if (pid == 0) {
-        // Child process
-        ::close(stdin_pipe[1]);   // close write end of stdin pipe
-        ::close(stdout_pipe[0]);  // close read end of stdout pipe
-
-        dup2(stdin_pipe[0], STDIN_FILENO);
-        dup2(stdout_pipe[1], STDOUT_FILENO);
-
-        ::close(stdin_pipe[0]);
-        ::close(stdout_pipe[1]);
-
-        // Build argv
-        std::vector<char*> argv;
-        argv.push_back(const_cast<char*>(command.c_str()));
-        for (auto& a : args) {
-            argv.push_back(const_cast<char*>(a.c_str()));
-        }
-        argv.push_back(nullptr);
-
-        execvp(command.c_str(), argv.data());
-        _exit(127); // exec failed
-    }
-
-    // Parent process
-    ::close(stdin_pipe[0]);   // close read end of stdin pipe
-    ::close(stdout_pipe[1]);  // close write end of stdout pipe
-
-    stdin_fd_ = stdin_pipe[1];
-    stdout_fd_ = stdout_pipe[0];
-    child_pid_ = pid;
+    rpos_ = rlen_ = 0;
     running_ = true;
 
     reader_thread_ = std::thread(&LSPClient::reader_loop, this);
@@ -343,24 +299,13 @@ void LSPClient::stop() {
     }
     outbox_cv_.notify_all();
 
-    // Killing the server first makes any blocked write/read return (EPIPE/EOF),
-    // so both threads can be joined before their fds are closed.
-    if (child_pid_ > 0) {
-        kill(child_pid_, SIGTERM);
-        int status;
-        waitpid(child_pid_, &status, 0);
-        child_pid_ = -1;
-    }
+    // Stopping the server first makes any blocked write/read return (EPIPE/EOF),
+    // so both threads can be joined before the pipes are closed.
+    if (process_) process_->terminate();
     if (writer_thread_.joinable()) writer_thread_.join();
     if (reader_thread_.joinable()) reader_thread_.join();
-    if (stdin_fd_ >= 0) {
-        ::close(stdin_fd_);
-        stdin_fd_ = -1;
-    }
-    if (stdout_fd_ >= 0) {
-        ::close(stdout_fd_);
-        stdout_fd_ = -1;
-    }
+    if (process_) process_->wait();
+    process_.reset();
 
     // Clear pending requests
     std::lock_guard<std::mutex> lock(pending_mutex_);
@@ -368,7 +313,7 @@ void LSPClient::stop() {
 }
 
 void LSPClient::send_message(const std::string& json) {
-    if (stdin_fd_ < 0) return;
+    if (!process_) return;
     std::string message = "Content-Length: " + std::to_string(json.size()) + "\r\n\r\n" + json;
     {
         std::lock_guard<std::mutex> lock(outbox_mutex_);
@@ -388,15 +333,7 @@ void LSPClient::writer_loop() {
             batch.swap(outbox_);
         }
         for (auto& message : batch) {
-            const char* data = message.data();
-            size_t remaining = message.size();
-            while (remaining > 0) {
-                ssize_t written = ::write(stdin_fd_, data, remaining);
-                if (written < 0 && errno == EINTR) continue;
-                if (written <= 0) return;  // server gone
-                data += written;
-                remaining -= static_cast<size_t>(written);
-            }
+            if (!process_->write(message.data(), message.size())) return;  // server gone
         }
     }
 }
@@ -423,6 +360,27 @@ void LSPClient::send_notification(const std::string& method, const std::string& 
     send_message(json);
 }
 
+bool LSPClient::read_byte(char& c) {
+    if (rpos_ == rlen_) {
+        long n = process_->read(rbuf_, sizeof(rbuf_));
+        if (n <= 0) return false;
+        rpos_ = 0;
+        rlen_ = static_cast<size_t>(n);
+    }
+    c = rbuf_[rpos_++];
+    return true;
+}
+
+long LSPClient::read_bytes(char* out, size_t n) {
+    if (rpos_ < rlen_) {  // drain what the header reader buffered first
+        size_t take = std::min(n, rlen_ - rpos_);
+        std::memcpy(out, rbuf_ + rpos_, take);
+        rpos_ += take;
+        return static_cast<long>(take);
+    }
+    return process_->read(out, n);
+}
+
 void LSPClient::reader_loop() {
     while (running_) {
         // Read headers byte by byte until \r\n\r\n
@@ -432,8 +390,7 @@ void LSPClient::reader_loop() {
 
         while (running_) {
             char c;
-            ssize_t n = ::read(stdout_fd_, &c, 1);
-            if (n <= 0) {
+            if (!read_byte(c)) {
                 running_ = false;
                 return;
             }
@@ -473,8 +430,7 @@ void LSPClient::reader_loop() {
         std::string body(static_cast<size_t>(content_length), '\0');
         size_t total_read = 0;
         while (total_read < static_cast<size_t>(content_length) && running_) {
-            ssize_t n = ::read(stdout_fd_, &body[total_read],
-                              static_cast<size_t>(content_length) - total_read);
+            long n = read_bytes(&body[total_read], static_cast<size_t>(content_length) - total_read);
             if (n <= 0) {
                 running_ = false;
                 return;
@@ -555,7 +511,7 @@ void LSPClient::handle_message(const std::string& json) {
 void LSPClient::initialize(const fs::path& root_uri) {
     std::string uri = uri_from_path(root_uri);
     std::string params =
-        "{\"processId\":" + std::to_string(getpid()) +
+        "{\"processId\":" + std::to_string(platform::process_id()) +
         ",\"rootUri\":\"" + escape_json(uri) + "\""
         ",\"capabilities\":{"
             "\"general\":{\"positionEncodings\":[\"utf-8\",\"utf-16\"]},"
