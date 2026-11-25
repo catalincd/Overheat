@@ -6,7 +6,21 @@ namespace oh {
 
 class CommandPalette : public Panel {
 public:
-    enum class Mode { Commands, Files, Symbols };
+    enum class Mode { Commands, Files, Symbols, Pick };
+
+    // Generic chooser. on_pick gets the chosen item index, or -1 with the typed
+    // text when allow_free_text is set and nothing matches. on_preview fires as the
+    // highlighted item changes; on_cancel fires on Escape.
+    struct PickOptions {
+        std::string placeholder;
+        std::vector<std::string> items;
+        std::function<void(int index, const std::string& query)> on_pick;
+        std::function<void(int index)> on_preview;
+        std::function<void()> on_cancel;
+        bool allow_free_text = false;
+        int initial = 0;
+    };
+    void pick(PickOptions opts);
 
     void show(Mode mode = Mode::Commands);
     void hide();
@@ -38,8 +52,14 @@ private:
         int index;
         int score;
         std::string display;
+        std::string detail;  // muted secondary text (folder, shortcut)
+        bool detail_right = false;
     };
     std::vector<MatchResult> filtered_;
+    PickOptions pick_;
+    int first_visible_ = 0;
+    int last_previewed_ = -1;
+    void select(int index);
 
     void update_filter();
     int fuzzy_score(const std::string& pattern, const std::string& text) const;

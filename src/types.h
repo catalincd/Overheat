@@ -10,6 +10,7 @@
 #include <chrono>
 #include <mutex>
 #include <atomic>
+#include <algorithm>
 #include <glm/glm.hpp>
 
 namespace oh {
@@ -36,34 +37,72 @@ struct Rect {
     Rect inset(float d) const { return {x + d, y + d, w - 2*d, h - 2*d}; }
 };
 
+// Colour tokens. Values come from a theme (see theme.h); these defaults are the
+// built-in "Overheat Dark" so a Theme is always usable.
 struct Theme {
-    // High-contrast debug palette: every region and token class is unmistakable,
-    // so layout and hit-testing bugs are easy to spot in screenshots.
-    Color bg            = Color::hex(0x000000);
-    Color fg            = Color::hex(0xffffff);
-    Color sidebar_bg    = Color::hex(0x002266);
-    Color tab_bg        = Color::hex(0x550000);
-    Color tab_active_bg = Color::hex(0xcc0000);
-    Color status_bg     = Color::hex(0x006600);
-    Color selection     = Color::hex(0x0066ff, 0.65f);
-    Color current_line  = Color::hex(0x262626);
-    Color cursor_color  = Color::hex(0xffff00);
-    Color line_number   = Color::hex(0x00ffff);
-    Color comment       = Color::hex(0x999999);
-    Color keyword       = Color::hex(0xff00ff);
-    Color string_color  = Color::hex(0x00ff00);
-    Color number        = Color::hex(0xff8800);
-    Color function_name = Color::hex(0x00bbff);
-    Color type_color    = Color::hex(0xffff00);
-    Color operator_color= Color::hex(0xff4444);
-    Color error         = Color::hex(0xff0000);
-    Color warning       = Color::hex(0xffaa00);
-    Color git_added     = Color::hex(0x00ff00);
-    Color git_modified  = Color::hex(0x00bbff);
-    Color git_deleted   = Color::hex(0xff0000);
-    Color border        = Color::hex(0xffffff);
-    Color scrollbar     = Color::hex(0xffffff, 0.5f);
-    Color terminal_bg   = Color::hex(0x333300);
+    std::string name    = "Overheat Dark";
+    bool dark           = true;
+
+    // Surfaces (flat: separation comes from tone, not borders)
+    Color bg            = Color::hex(0x16171a);   // editor
+    Color sidebar_bg    = Color::hex(0x111214);
+    Color gutter_bg     = Color::hex(0x16171a);
+    Color tab_bg        = Color::hex(0x111214);   // tab strip
+    Color tab_active_bg = Color::hex(0x16171a);
+    Color status_bg     = Color::hex(0x111214);
+    Color terminal_bg   = Color::hex(0x111214);
+    Color surface       = Color::hex(0x1e1f23);   // palette, popups
+    Color surface_hover = Color::hex(0x26272c);
+    Color input_bg      = Color::hex(0x111214);
+    Color border        = Color::hex(0x24252a);   // used sparingly
+    Color shadow        = Color::hex(0x000000, 0.45f);
+
+    // Text
+    Color fg            = Color::hex(0xd6d7db);
+    Color fg_muted      = Color::hex(0x8a8d96);
+    Color line_number   = Color::hex(0x4d5058);
+    Color line_number_active = Color::hex(0xb5b8c0);
+    Color tab_inactive_fg = Color::hex(0x8a8d96);
+    Color status_fg     = Color::hex(0x8a8d96);
+    Color terminal_fg   = Color::hex(0xc8cad0);
+
+    // Accent and selection
+    Color accent        = Color::hex(0x5b9cff);
+    Color selection     = Color::hex(0x5b9cff, 0.28f);
+    Color current_line  = Color::hex(0x1b1c20);
+    Color cursor_color  = Color::hex(0x5b9cff);
+    Color tree_selection = Color::hex(0x5b9cff, 0.18f);
+    Color scrollbar     = Color::hex(0xffffff, 0.10f);
+
+    // Syntax
+    Color comment       = Color::hex(0x6b6f78);
+    Color keyword       = Color::hex(0xb392f0);
+    Color string_color  = Color::hex(0x9ccf8a);
+    Color number        = Color::hex(0xe6b673);
+    Color function_name = Color::hex(0x7fb4ff);
+    Color type_color    = Color::hex(0x6fd0c5);
+    Color operator_color= Color::hex(0xa9adb7);
+    Color punctuation   = Color::hex(0x8a8d96);
+    Color property      = Color::hex(0xc7cbd6);
+    Color preprocessor  = Color::hex(0xb392f0);
+
+    // Diagnostics and git
+    Color error         = Color::hex(0xf26d6d);
+    Color warning       = Color::hex(0xe5b350);
+    Color info          = Color::hex(0x5b9cff);
+    Color git_added     = Color::hex(0x5cc97b);
+    Color git_modified  = Color::hex(0x6aa8ff);
+    Color git_deleted   = Color::hex(0xf26d6d);
+    Color git_untracked = Color::hex(0x5cc97b);
+    Color git_ignored   = Color::hex(0x4d5058);
+
+    // Terminal ANSI palette (0-7 normal, 8-15 bright)
+    Color ansi[16] = {
+        Color::hex(0x1e1f23), Color::hex(0xf26d6d), Color::hex(0x5cc97b), Color::hex(0xe5b350),
+        Color::hex(0x5b9cff), Color::hex(0xb392f0), Color::hex(0x5fc8d0), Color::hex(0xc8cad0),
+        Color::hex(0x5c5f68), Color::hex(0xff8a8a), Color::hex(0x7ddc95), Color::hex(0xf2cc72),
+        Color::hex(0x82b4ff), Color::hex(0xc9aaff), Color::hex(0x80dbe2), Color::hex(0xf2f3f5),
+    };
 };
 
 struct GlyphInfo {

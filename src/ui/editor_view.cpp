@@ -59,7 +59,7 @@ void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
     float scroll_y = editor_->scroll_y();
 
     // Gutter background
-    ctx.r->add_rect(gutter_rect, ctx.theme->sidebar_bg);
+    ctx.r->add_rect(gutter_rect, ctx.theme->gutter_bg);
 
     size_t first_line = static_cast<size_t>(scroll_y / line_h);
     size_t visible_lines = static_cast<size_t>(gutter_rect.h / line_h) + 2;
@@ -87,7 +87,7 @@ void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
 
         // Highlight current line number
         Color color = ((first_line + i) == cursor_line)
-                           ? ctx.theme->fg
+                           ? ctx.theme->line_number_active
                            : ctx.theme->line_number;
 
         ctx.r->add_text(text_x, y + ctx.font->ascender(), num_buf, color,
@@ -134,8 +134,9 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
                 case TokenType::Function:     c = ctx.theme->function_name; break;
                 case TokenType::Type:         c = ctx.theme->type_color; break;
                 case TokenType::Operator:     c = ctx.theme->operator_color; break;
-                case TokenType::Preprocessor: c = ctx.theme->keyword; break;
-                case TokenType::Property:     c = ctx.theme->function_name; break;
+                case TokenType::Preprocessor: c = ctx.theme->preprocessor; break;
+                case TokenType::Punctuation:  c = ctx.theme->punctuation; break;
+                case TokenType::Property:     c = ctx.theme->property; break;
                 case TokenType::Error:        c = ctx.theme->error; break;
                 default: break;
             }

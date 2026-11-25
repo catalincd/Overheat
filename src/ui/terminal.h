@@ -8,10 +8,23 @@
 
 namespace oh {
 
+// Cell colours are references resolved against the theme at draw time, so a theme
+// switch recolours existing output: DEFAULT, ANSI index (0-255) or 24-bit RGB.
+namespace termcolor {
+constexpr uint32_t DEFAULT = 0;
+constexpr uint32_t INDEXED = 1u << 24;
+constexpr uint32_t RGB = 2u << 24;
+inline uint32_t indexed(int i) { return INDEXED | static_cast<uint32_t>(i & 0xFF); }
+inline uint32_t rgb(int r, int g, int b) {
+    return RGB | (static_cast<uint32_t>(r & 0xFF) << 16) | (static_cast<uint32_t>(g & 0xFF) << 8) |
+           static_cast<uint32_t>(b & 0xFF);
+}
+} // namespace termcolor
+
 struct TermCell {
     uint32_t ch = ' ';
-    Color fg = Color::hex(0xcdd6f4);
-    Color bg = {0, 0, 0, 0};
+    uint32_t fg = termcolor::DEFAULT;
+    uint32_t bg = termcolor::DEFAULT;
     bool bold = false;
 };
 
@@ -57,8 +70,8 @@ private:
     ParseState parse_state_ = ParseState::Normal;
     std::string csi_params_;
     std::string osc_data_;
-    Color current_fg_ = Color::hex(0xcdd6f4);
-    Color current_bg_ = {0, 0, 0, 0};
+    uint32_t current_fg_ = termcolor::DEFAULT;
+    uint32_t current_bg_ = termcolor::DEFAULT;
     bool bold_ = false;
 
     void process_output(const char* data, size_t len);
@@ -71,7 +84,7 @@ private:
     void process_sgr(const std::vector<int>& params);
     void scroll_up();
     void clear_line(int y, int from_x = 0, int to_x = -1);
-    Color ansi_color(int idx) const;
+    static Color resolve(uint32_t code, const Theme& th, bool foreground);
 };
 
 } // namespace oh

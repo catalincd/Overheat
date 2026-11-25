@@ -196,49 +196,22 @@ void Terminal::update(float /*dt*/) {
 // ANSI color palette (Catppuccin Mocha)
 // ---------------------------------------------------------------------------
 
-Color Terminal::ansi_color(int idx) const {
-    // Standard 0-15 (Catppuccin Mocha-inspired)
-    static const Color palette[16] = {
-        Color::hex(0x45475a), // 0  black   (Surface1)
-        Color::hex(0xf38ba8), // 1  red
-        Color::hex(0xa6e3a1), // 2  green
-        Color::hex(0xf9e2af), // 3  yellow
-        Color::hex(0x89b4fa), // 4  blue
-        Color::hex(0xf5c2e7), // 5  magenta (pink)
-        Color::hex(0x94e2d5), // 6  cyan    (teal)
-        Color::hex(0xbac2de), // 7  white   (Subtext1)
-        // Bright
-        Color::hex(0x585b70), // 8  bright black  (Surface2)
-        Color::hex(0xf38ba8), // 9  bright red
-        Color::hex(0xa6e3a1), // 10 bright green
-        Color::hex(0xf9e2af), // 11 bright yellow
-        Color::hex(0x89b4fa), // 12 bright blue
-        Color::hex(0xf5c2e7), // 13 bright magenta
-        Color::hex(0x94e2d5), // 14 bright cyan
-        Color::hex(0xcdd6f4), // 15 bright white (Text)
-    };
-
-    if (idx < 0) return Color::hex(0xcdd6f4);
-    if (idx < 16) return palette[idx];
-
-    // 16-231: 6x6x6 color cube
-    if (idx < 232) {
-        int ci = idx - 16;
-        int b = ci % 6;
-        ci /= 6;
-        int g = ci % 6;
-        int r = ci / 6;
-        auto comp = [](int v) -> float { return v == 0 ? 0.0f : (55.0f + 40.0f * v) / 255.0f; };
-        return {comp(r), comp(g), comp(b), 1.0f};
-    }
-
-    // 232-255: grayscale ramp
-    if (idx < 256) {
-        float v = (8.0f + 10.0f * (idx - 232)) / 255.0f;
+Color Terminal::resolve(uint32_t code, const Theme& th, bool foreground) {
+    uint32_t kind = code & 0xFF000000u;
+    if (kind == termcolor::RGB)
+        return {((code >> 16) & 0xFF) / 255.0f, ((code >> 8) & 0xFF) / 255.0f, (code & 0xFF) / 255.0f, 1.0f};
+    if (kind == termcolor::INDEXED) {
+        int idx = static_cast<int>(code & 0xFF);
+        if (idx < 16) return th.ansi[idx];
+        if (idx < 232) {  // 6x6x6 cube
+            int ci = idx - 16;
+            auto comp = [](int v) { return v == 0 ? 0.0f : (55.0f + 40.0f * v) / 255.0f; };
+            return {comp(ci / 36), comp((ci / 6) % 6), comp(ci % 6), 1.0f};
+        }
+        float v = (8.0f + 10.0f * (idx - 232)) / 255.0f;  // grayscale ramp
         return {v, v, v, 1.0f};
     }
-
-    return Color::hex(0xcdd6f4);
+    return foreground ? th.terminal_fg : Color{0, 0, 0, 0};
 }
 
 // ---------------------------------------------------------------------------
@@ -354,8 +327,8 @@ void Terminal::process_char(char c) {
             parse_state_ = ParseState::Normal;
         } else if (uc == 'c') {
             // Reset terminal
-            current_fg_ = Color::hex(0xcdd6f4);
-            current_bg_ = {0, 0, 0, 0};
+            current_fg_ = termcolor::DEFAULT;
+            current_bg_ = termcolor::DEFAULT;
             bold_ = false;
             cursor_x_ = 0;
             cursor_y_ = 0;
@@ -580,8 +553,8 @@ void Terminal::process_csi(char final_char) {
 void Terminal::process_sgr(const std::vector<int>& params) {
     if (params.empty() || (params.size() == 1 && params[0] == 0)) {
         // Reset
-        current_fg_ = Color::hex(0xcdd6f4);
-        current_bg_ = {0, 0, 0, 0};
+        current_fg_ = termcolor::DEFAULT;
+        current_bg_ = termcolor::DEFAULT;
         bold_ = false;
         return;
     }
@@ -590,8 +563,8 @@ void Terminal::process_sgr(const std::vector<int>& params) {
         int p = params[i];
         switch (p) {
         case 0:
-            current_fg_ = Color::hex(0xcdd6f4);
-            current_bg_ = {0, 0, 0, 0};
+            current_fg_ = termcolor::DEFAULT;
+            current_bg_ = termcolor::DEFAULT;
             bold_ = false;
             break;
         case 1:
@@ -602,55 +575,51 @@ void Terminal::process_sgr(const std::vector<int>& params) {
             break;
         case 30: case 31: case 32: case 33:
         case 34: case 35: case 36: case 37:
-            current_fg_ = ansi_color(p - 30 + (bold_ ? 8 : 0));
+            current_fg_ = termcolor::indexed(p - 30 + (bold_ ? 8 : 0));
             break;
         case 38:
             // Extended foreground
             if (i + 1 < params.size()) {
                 if (params[i + 1] == 5 && i + 2 < params.size()) {
                     // 256-color
-                    current_fg_ = ansi_color(params[i + 2]);
+                    current_fg_ = termcolor::indexed(params[i + 2]);
                     i += 2;
                 } else if (params[i + 1] == 2 && i + 4 < params.size()) {
                     // 24-bit
-                    current_fg_ = {params[i + 2] / 255.0f,
-                                   params[i + 3] / 255.0f,
-                                   params[i + 4] / 255.0f, 1.0f};
+                    current_fg_ = termcolor::rgb(params[i + 2], params[i + 3], params[i + 4]);
                     i += 4;
                 }
             }
             break;
         case 39:
-            current_fg_ = Color::hex(0xcdd6f4);
+            current_fg_ = termcolor::DEFAULT;
             break;
         case 40: case 41: case 42: case 43:
         case 44: case 45: case 46: case 47:
-            current_bg_ = ansi_color(p - 40);
+            current_bg_ = termcolor::indexed(p - 40);
             break;
         case 48:
             // Extended background
             if (i + 1 < params.size()) {
                 if (params[i + 1] == 5 && i + 2 < params.size()) {
-                    current_bg_ = ansi_color(params[i + 2]);
+                    current_bg_ = termcolor::indexed(params[i + 2]);
                     i += 2;
                 } else if (params[i + 1] == 2 && i + 4 < params.size()) {
-                    current_bg_ = {params[i + 2] / 255.0f,
-                                   params[i + 3] / 255.0f,
-                                   params[i + 4] / 255.0f, 1.0f};
+                    current_bg_ = termcolor::rgb(params[i + 2], params[i + 3], params[i + 4]);
                     i += 4;
                 }
             }
             break;
         case 49:
-            current_bg_ = {0, 0, 0, 0};
+            current_bg_ = termcolor::DEFAULT;
             break;
         case 90: case 91: case 92: case 93:
         case 94: case 95: case 96: case 97:
-            current_fg_ = ansi_color(p - 90 + 8);
+            current_fg_ = termcolor::indexed(p - 90 + 8);
             break;
         case 100: case 101: case 102: case 103:
         case 104: case 105: case 106: case 107:
-            current_bg_ = ansi_color(p - 100 + 8);
+            current_bg_ = termcolor::indexed(p - 100 + 8);
             break;
         default:
             break;
@@ -724,13 +693,14 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
             float px = bounds.x + x * cw;
 
             // Cell background (only if non-transparent)
-            if (cell.bg.a > 0.001f) {
-                ctx.r->add_rect({px, py, cw, lh}, cell.bg);
+            if (cell.bg != termcolor::DEFAULT) {
+                ctx.r->add_rect({px, py, cw, lh}, resolve(cell.bg, *ctx.theme, false));
             }
 
             // Character
             if (cell.ch > ' ') {
-                ctx.r->add_char(px, py + ctx.font->ascender(), cell.ch, cell.fg, *ctx.font);
+                ctx.r->add_char(px, py + ctx.font->ascender(), cell.ch,
+                                resolve(cell.fg, *ctx.theme, true), *ctx.font);
             }
         }
     }

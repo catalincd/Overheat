@@ -11,6 +11,10 @@ import json, os, subprocess, sys, time
 W, H, steps_path, outdir = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
 extra = sys.argv[5:]
 os.makedirs(outdir, exist_ok=True)
+
+# Never inject real input into a locked session (it would land in the lock screen).
+if subprocess.run(["pgrep", "-x", "hyprlock"], capture_output=True).returncode == 0:
+    sys.exit("refusing to run: session is locked (hyprlock running)")
 root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 binary = os.environ.get("OVERHEAT_BIN", f"{root}/build/overheat")
 

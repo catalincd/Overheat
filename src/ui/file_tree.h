@@ -22,6 +22,8 @@ private:
     std::vector<FileEntry*> visible_entries_;
     int selected_index_ = -1;
     float scroll_y_ = 0;
+    float row_h_ = 24.0f;
+    static constexpr float HEADER_H = 30.0f;
     OpenCallback on_open_;
 
     void scan_directory(FileEntry& entry);

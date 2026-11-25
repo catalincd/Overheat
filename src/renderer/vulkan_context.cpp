@@ -119,6 +119,35 @@ bool VulkanContext::begin_frame(uint32_t& image_index) {
 void VulkanContext::end_frame(uint32_t image_index) {
     auto& frame = frames_[current_frame_];
     vkCmdEndRenderPass(frame.cmd);
+
+    Buffer capture{};
+    if (!capture_path_.empty()) {
+        capture = create_buffer(VkDeviceSize(swapchain_extent_.width) * swapchain_extent_.height * 4,
+                                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VkImageMemoryBarrier b{};
+        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        b.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = swapchain_images_[image_index];
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        vkCmdPipelineBarrier(frame.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+        VkBufferImageCopy region{};
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageExtent = {swapchain_extent_.width, swapchain_extent_.height, 1};
+        vkCmdCopyImageToBuffer(frame.cmd, b.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               capture.buffer, 1, &region);
+        b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        b.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        b.dstAccessMask = 0;
+        vkCmdPipelineBarrier(frame.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+    }
     vkEndCommandBuffer(frame.cmd);
 
     VkSubmitInfo submit{};
@@ -135,6 +164,13 @@ void VulkanContext::end_frame(uint32_t image_index) {
     submit.pSignalSemaphores    = signal_sems;
     vkQueueSubmit(graphics_queue_, 1, &submit, frame.in_flight);
 
+    if (capture.buffer) {
+        vkWaitForFences(device_, 1, &frame.in_flight, VK_TRUE, UINT64_MAX);
+        write_capture(capture);
+        destroy_buffer(capture);
+        capture_path_.clear();
+    }
+
     VkPresentInfoKHR present{};
     present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present.waitSemaphoreCount = 1;
@@ -150,6 +186,30 @@ void VulkanContext::end_frame(uint32_t image_index) {
     }
 
     current_frame_ = (current_frame_ + 1) % MAX_FRAMES;
+}
+
+void VulkanContext::write_capture(const Buffer& buf) const {
+    // Swapchain is B8G8R8A8 (sRGB-encoded); PPM wants RGB bytes.
+    FILE* f = std::fopen(capture_path_.c_str(), "wb");
+    if (!f) {
+        std::fprintf(stderr, "capture: cannot write %s\n", capture_path_.c_str());
+        return;
+    }
+    uint32_t w = swapchain_extent_.width, h = swapchain_extent_.height;
+    std::fprintf(f, "P6\n%u %u\n255\n", w, h);
+    const auto* px = static_cast<const uint8_t*>(buf.mapped);
+    std::vector<uint8_t> row(size_t(w) * 3);
+    bool bgr = swapchain_format_ == VK_FORMAT_B8G8R8A8_SRGB || swapchain_format_ == VK_FORMAT_B8G8R8A8_UNORM;
+    for (uint32_t y = 0; y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            const uint8_t* p = px + (size_t(y) * w + x) * 4;
+            row[x * 3 + 0] = bgr ? p[2] : p[0];
+            row[x * 3 + 1] = p[1];
+            row[x * 3 + 2] = bgr ? p[0] : p[2];
+        }
+        std::fwrite(row.data(), 1, row.size(), f);
+    }
+    std::fclose(f);
 }
 
 void VulkanContext::recreate_swapchain() {
@@ -759,6 +819,8 @@ bool VulkanContext::create_swapchain() {
     ci.imageExtent      = swapchain_extent_;
     ci.imageArrayLayers = 1;
     ci.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+        ci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;  // in-app frame capture
 
     uint32_t families[] = {graphics_family_, present_family_};
     if (graphics_family_ != present_family_) {

@@ -56,110 +56,65 @@ void TabBar::prev_tab() {
     set_active((active_ - 1 + n) % n);
 }
 
+std::string TabBar::tab_title(const Tab& tab) const {
+    const auto& path = tab.editor->buffer().file_path();
+    return path.empty() ? "Untitled" : path.filename().string();
+}
+
+float TabBar::tab_width(const Tab& tab) const {
+    std::string t = tab_title(tab);
+    size_t chars = 0;
+    for (unsigned char c : t) chars += (c & 0xC0) != 0x80;
+    return std::round(PAD * 2.0f + static_cast<float>(chars) * char_w_ + CLOSE_W + 6.0f);
+}
+
 void TabBar::render(RenderContext& ctx, Rect bounds) {
     bounds_ = bounds;
+    const Theme& th = *ctx.theme;
+    char_w_ = ctx.font->char_width();
+    ctx.r->add_rect(bounds, th.tab_bg);
 
-    float char_w = ctx.font->char_width();
-    float tab_height = bounds.h;
-
-    // Background
-    ctx.r->add_rect(bounds, ctx.theme->tab_bg);
-
-    // Bottom border
-    ctx.r->add_rect({bounds.x, bounds.y + bounds.h - 1.0f, bounds.w, 1.0f},
-                     ctx.theme->border);
-
+    float baseline = bounds.y + (bounds.h - ctx.font->line_height()) * 0.5f + ctx.font->ascender();
     float x = bounds.x - scroll_x_;
-    constexpr float tab_padding = 16.0f;
-    constexpr float close_btn_w = 16.0f;
-
     for (size_t i = 0; i < tabs_.size(); i++) {
-        auto& tab = tabs_[i];
-        std::string title = tab.editor->title();
-
-        float text_w = static_cast<float>(title.size()) * char_w;
-        float tab_w = text_w + tab_padding * 2.0f + close_btn_w;
-
-        // Tab background
-        bool is_active = (static_cast<int>(i) == active_);
-        Color bg = is_active ? ctx.theme->tab_active_bg : ctx.theme->tab_bg;
-        ctx.r->add_rect({x, bounds.y, tab_w, tab_height}, bg);
-
-        // Active tab top accent
-        if (is_active) {
-            ctx.r->add_rect({x, bounds.y, tab_w, 2.0f}, ctx.theme->keyword);
+        const Tab& tab = tabs_[i];
+        float w = tab_width(tab);
+        bool active = static_cast<int>(i) == active_;
+        if (active) {
+            ctx.r->add_rect({x, bounds.y, w, bounds.h}, th.tab_active_bg);
+            ctx.r->add_rect({x, bounds.y + bounds.h - 2.0f, w, 2.0f}, th.accent);
         }
+        ctx.r->add_text(x + PAD, baseline, tab_title(tab), active ? th.fg : th.tab_inactive_fg, *ctx.font);
 
-        // Right border separator
-        ctx.r->add_rect({x + tab_w - 1.0f, bounds.y, 1.0f, tab_height},
-                         ctx.theme->border);
-
-        // Tab title text
-        Color text_color = is_active ? ctx.theme->fg : ctx.theme->comment;
-        ctx.r->add_text(x + tab_padding,
-                           bounds.y + ctx.font->ascender() + 4.0f,
-                           title, text_color, *ctx.font);
-
-        // Close button "x"
-        float close_x = x + tab_w - close_btn_w - 4.0f;
-        float close_y = bounds.y + ctx.font->ascender() + 4.0f;
-        ctx.r->add_text(close_x, close_y, "x", ctx.theme->comment, *ctx.font);
-
-        x += tab_w;
+        // Close glyph; an unsaved tab shows a dot in its place.
+        float cx = x + w - PAD - CLOSE_W + 4.0f;
+        if (tab.editor->is_modified())
+            ctx.r->add_char(cx, baseline, 0x25CF, active ? th.fg : th.tab_inactive_fg, *ctx.font);
+        else
+            ctx.r->add_char(cx, baseline, 0xEA76, active ? th.fg_muted : th.line_number, *ctx.font);
+        x += w;
     }
 }
 
 bool TabBar::handle_mouse(const MouseEvent& e) {
     if (!bounds_.contains(e.x, e.y)) return false;
-
-    // Scroll tabs horizontally
     if (e.scroll_y != 0.0f) {
-        scroll_x_ -= e.scroll_y * 30.0f;
-        scroll_x_ = std::max(0.0f, scroll_x_);
+        scroll_x_ = std::max(0.0f, scroll_x_ - e.scroll_y * 30.0f);
         return true;
     }
+    if (!e.pressed || e.motion) return false;
 
-    if (!e.pressed) return false;
-
-    float char_w = 9.0f; // Approximate; real comes from font
     float x = bounds_.x - scroll_x_;
-    constexpr float tab_padding = 16.0f;
-    constexpr float close_btn_w = 16.0f;
-
     for (size_t i = 0; i < tabs_.size(); i++) {
-        auto& tab = tabs_[i];
-        std::string title = tab.editor->title();
-
-        float text_w = static_cast<float>(title.size()) * char_w;
-        float tab_w = text_w + tab_padding * 2.0f + close_btn_w;
-
-        Rect tab_rect = {x, bounds_.y, tab_w, bounds_.h};
-        if (tab_rect.contains(e.x, e.y)) {
-            // Check if close button was clicked
-            float close_x = x + tab_w - close_btn_w - 4.0f;
-            Rect close_rect = {close_x, bounds_.y, close_btn_w + 4.0f, bounds_.h};
-
-            if (e.button == 1 && close_rect.contains(e.x, e.y)) {
-                close_tab(static_cast<int>(i));
-                return true;
-            }
-
-            // Middle-click to close
-            if (e.button == 2) {
-                close_tab(static_cast<int>(i));
-                return true;
-            }
-
-            // Left-click to select
-            if (e.button == 1) {
-                set_active(static_cast<int>(i));
-                return true;
-            }
+        float w = tab_width(tabs_[i]);
+        if (e.x >= x && e.x < x + w) {
+            bool on_close = e.x >= x + w - PAD - CLOSE_W;
+            if (e.button == 2 || (e.button == 1 && on_close)) close_tab(static_cast<int>(i));
+            else if (e.button == 1) set_active(static_cast<int>(i));
+            return true;
         }
-
-        x += tab_w;
+        x += w;
     }
-
     return false;
 }
 

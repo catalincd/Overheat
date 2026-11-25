@@ -25,7 +25,17 @@ src = open(script).read()
 src = re.sub(r"\{([^}]+)\}", lambda m: str(int(eval(m.group(1), {"W": W, "H": H}))), src)
 script = os.path.join(outdir, "script.txt")
 open(script, "w").write(src)
-proc = subprocess.Popen([binary, "--script", script, *extra], cwd=root,
+# Default: the app captures its own frames (works with the screen locked or the
+# window hidden). QA_CAPTURE=grim screenshots through the compositor instead.
+app_capture = os.environ.get("QA_CAPTURE", "app") == "app"
+# Isolate tests from the user's real settings/themes unless QA_REAL_CONFIG=1.
+env = dict(os.environ)
+if os.environ.get("QA_REAL_CONFIG") != "1":
+    env["XDG_CONFIG_HOME"] = os.path.join(os.path.abspath(outdir), "config")
+    os.makedirs(os.path.join(env["XDG_CONFIG_HOME"], "overheat", "themes"), exist_ok=True)
+if app_capture:
+    extra = ["--shot-dir", os.path.abspath(outdir), *extra]
+proc = subprocess.Popen([binary, "--script", script, *extra], cwd=root, env=env,
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 win = None
 for _ in range(100):
@@ -44,7 +54,7 @@ for line in proc.stdout:
     log.write(line); log.flush()
     if line.startswith("PROBE") or line.startswith("  ") or "exceeded" in line or "first paint" in line or "rror" in line:
         sys.stdout.write(line)
-    if line.startswith("PROBE shot:"):
+    if line.startswith("PROBE shot:") and not app_capture:
         name = line.split("shot:", 1)[1].split(":", 1)[0].strip()
         time.sleep(0.12)  # let the presented frame reach the compositor
         c = find_window(proc.pid)
@@ -57,4 +67,10 @@ for line in proc.stdout:
             print(f"[shot] {path} ({w}x{h})")
         proc.stdin.write("\n"); proc.stdin.flush()
 proc.wait(timeout=10)
+for f in sorted(os.listdir(outdir)):
+    if f.endswith(".ppm"):
+        src = os.path.join(outdir, f)
+        subprocess.run(["magick", src, src[:-4] + ".png"])
+        os.remove(src)
+        print(f"[shot] {src[:-4]}.png")
 print("exit", proc.returncode)

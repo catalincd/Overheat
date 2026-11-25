@@ -58,6 +58,8 @@ bool App::init(int argc, char** argv) {
             project_root_ = fs::absolute(argv[++i]);
         } else if (arg == "--script" && i + 1 < argc) {
             script_path = argv[++i];
+        } else if (arg == "--shot-dir" && i + 1 < argc) {
+            shot_dir_ = argv[++i];
         } else if (arg == "--debug-hit") {
             debug_hit_ = true;
         } else if (arg[0] != '-') {
@@ -107,6 +109,16 @@ bool App::init(int argc, char** argv) {
     if (!renderer_.init(vk_, font_)) {
         std::fprintf(stderr, "Renderer2D::init failed\n");
         return false;
+    }
+
+    // ---- Theme ----
+    {
+        const char* home = std::getenv("HOME");
+        const char* xdg = std::getenv("XDG_CONFIG_HOME");
+        fs::path config = xdg && *xdg ? fs::path(xdg) / "overheat" : fs::path(home ? home : ".") / ".config" / "overheat";
+        themes_.init(config);
+        std::string choice = themes_.saved_choice();
+        if (choice.empty() || !themes_.apply(choice, theme_)) themes_.apply("Overheat Dark", theme_);
     }
 
     // ---- Key bindings ----
@@ -198,8 +210,14 @@ void App::run() {
             // Screenshot probes block until the driver acks on stdin, so the capture
             // shows exactly this state (the frame for it was presented last iteration).
             if (label.rfind("shot:", 0) == 0) {
-                char ack[16];
-                if (!std::fgets(ack, sizeof(ack), stdin)) {}
+                if (!shot_dir_.empty()) {
+                    // Capture this iteration's frame ourselves; no compositor involved.
+                    std::string name = label.substr(5);
+                    vk_.request_capture((fs::path(shot_dir_) / (name + ".ppm")).string());
+                } else {
+                    char ack[16];
+                    if (!std::fgets(ack, sizeof(ack), stdin)) {}
+                }
             }
         }
         pending_probes_.clear();
@@ -519,6 +537,8 @@ void App::handle_command(const std::string& cmd) {
         // TODO: adjust font size and reinit font atlas
     } else if (cmd == "zoom_out") {
         // TODO: adjust font size and reinit font atlas
+    } else if (cmd == "select_theme") {
+        select_theme();
     } else if (cmd == "quit") {
         quit();
     }
@@ -537,7 +557,7 @@ App::Layout App::compute_layout() const {
     Layout l{};
 
     // Status bar: full width, 24px at bottom
-    float status_h = 24.0f;
+    float status_h = 26.0f;
     l.status_bar = {0, fh - status_h, fw, status_h};
 
     float content_h = fh - status_h;
@@ -550,7 +570,7 @@ App::Layout App::compute_layout() const {
     float right_w = fw - sb_w;
 
     // Tab bar: 32px tall at top of right region
-    float tab_h = 32.0f;
+    float tab_h = 36.0f;
     l.tab_bar = {right_x, 0, right_w, tab_h};
 
     // Terminal: at bottom of right region (above status bar)
@@ -571,7 +591,34 @@ App::Layout App::compute_layout() const {
 // Update
 // ---------------------------------------------------------------------------
 
+void App::select_theme() {
+    auto names = themes_.names();
+    std::string original = themes_.current();
+    int initial = 0;
+    for (size_t i = 0; i < names.size(); i++)
+        if (names[i] == original) initial = static_cast<int>(i);
+    CommandPalette::PickOptions opts;
+    opts.placeholder = "Select color theme (live preview)";
+    opts.items = names;
+    opts.initial = initial;
+    opts.on_preview = [this, names](int i) { themes_.apply(names[static_cast<size_t>(i)], theme_); };
+    opts.on_cancel = [this, original] { themes_.apply(original, theme_); };
+    opts.on_pick = [this, names](int i, const std::string&) {
+        if (i < 0) return;
+        themes_.apply(names[static_cast<size_t>(i)], theme_);
+        themes_.save_choice(names[static_cast<size_t>(i)]);
+        set_status_message("Theme: " + names[static_cast<size_t>(i)]);
+    };
+    command_palette_.pick(std::move(opts));
+}
+
 void App::update(float dt) {
+    theme_poll_timer_ += dt;
+    if (theme_poll_timer_ > 1.0f) {
+        theme_poll_timer_ = 0;
+        if (themes_.poll_reload(theme_)) set_status_message("Theme reloaded");
+    }
+
     terminal_.update(dt);
     editor_view_.update(dt);
     status_bar_.update(dt);
@@ -601,19 +648,10 @@ void App::render() {
     // One ordered quad stream for the whole frame
     renderer_.begin(extent);
 
-    if (sidebar_visible_) {
-        renderer_.add_rect(layout.sidebar, theme_.sidebar_bg);
-        renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1, layout.sidebar.y, 1, layout.sidebar.h},
-                              theme_.border);
-    }
-    renderer_.add_rect(layout.tab_bar, theme_.tab_bg);
-    renderer_.add_rect(layout.editor, theme_.bg);
-    if (terminal_visible_) {
-        renderer_.add_rect(layout.terminal, theme_.terminal_bg);
-        renderer_.add_rect({layout.terminal.x, layout.terminal.y, layout.terminal.w, 1},
-                              theme_.border);
-    }
-    renderer_.add_rect(layout.status_bar, theme_.status_bg);
+    // Flat layout: panels separate by tone; only a hairline above the terminal.
+    renderer_.add_rect({0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)}, theme_.bg);
+    if (terminal_visible_)
+        renderer_.add_rect({layout.terminal.x, layout.terminal.y, layout.terminal.w, 1}, theme_.border);
 
     // All panels add their UI rects (selections, highlights, gutter bg)
     auto clipped = [&](Panel& panel, Rect r) {
@@ -769,6 +807,7 @@ void App::register_commands() {
     add("toggle_fullscreen",       "Toggle Fullscreen",         "F11");
     add("zoom_in",                 "Zoom In",                   "Ctrl++");
     add("zoom_out",                "Zoom Out",                  "Ctrl+-");
+    add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");
     add("quit",                    "Quit",                      "Ctrl+Q");
 }
 

@@ -16,6 +16,27 @@ void CommandPalette::show(Mode mode) {
     update_filter();
 }
 
+void CommandPalette::pick(PickOptions opts) {
+    pick_ = std::move(opts);
+    visible_ = true;
+    mode_ = Mode::Pick;
+    query_.clear();
+    last_previewed_ = -1;
+    update_filter();
+    select(std::clamp(pick_.initial, 0, std::max(0, static_cast<int>(filtered_.size()) - 1)));
+}
+
+void CommandPalette::select(int index) {
+    selected_index_ = filtered_.empty() ? 0 : std::clamp(index, 0, static_cast<int>(filtered_.size()) - 1);
+    if (mode_ == Mode::Pick && pick_.on_preview && !filtered_.empty()) {
+        int item = filtered_[static_cast<size_t>(selected_index_)].index;
+        if (item != last_previewed_) {
+            last_previewed_ = item;
+            pick_.on_preview(item);
+        }
+    }
+}
+
 void CommandPalette::hide() {
     visible_ = false;
     query_.clear();
@@ -75,18 +96,25 @@ int CommandPalette::fuzzy_score(const std::string& pattern, const std::string& t
 
 void CommandPalette::update_filter() {
     filtered_.clear();
+    first_visible_ = 0;
+
+    if (mode_ == Mode::Pick) {
+        for (size_t i = 0; i < pick_.items.size(); i++) {
+            int score = fuzzy_score(query_, pick_.items[i]);
+            if (score >= 0) filtered_.push_back({static_cast<int>(i), query_.empty() ? 0 : score, pick_.items[i]});
+        }
+        if (!query_.empty())
+            std::stable_sort(filtered_.begin(), filtered_.end(),
+                             [](const MatchResult& a, const MatchResult& b) { return a.score > b.score; });
+        return;
+    }
 
     if (mode_ == Mode::Commands) {
         for (size_t i = 0; i < commands_.size(); i++) {
-            std::string display = commands_[i].label;
-            if (!commands_[i].keybinding.empty()) {
-                display += "  [" + commands_[i].keybinding + "]";
-            }
-
             int score = fuzzy_score(query_, commands_[i].label);
-            if (score >= 0) {
-                filtered_.push_back({static_cast<int>(i), score, std::move(display)});
-            }
+            if (score >= 0)
+                filtered_.push_back({static_cast<int>(i), score, commands_[i].label,
+                                     commands_[i].keybinding, true});
         }
     } else if (mode_ == Mode::Files) {
         for (size_t i = 0; i < file_list_.size(); i++) {
@@ -101,13 +129,14 @@ void CommandPalette::update_filter() {
                 score = fuzzy_score(query_, full_path);
             }
             if (score >= 0) {
-                filtered_.push_back({static_cast<int>(i), score, full_path});
+                std::string dir = fs::path(full_path).parent_path().string();
+                filtered_.push_back({static_cast<int>(i), score, filename, dir, false});
             }
         }
     }
 
-    // Sort by score descending
-    std::sort(filtered_.begin(), filtered_.end(),
+    // Sort by score descending (stable keeps the natural order among ties)
+    std::stable_sort(filtered_.begin(), filtered_.end(),
               [](const MatchResult& a, const MatchResult& b) {
                   return a.score > b.score;
               });
@@ -121,111 +150,121 @@ void CommandPalette::update_filter() {
 void CommandPalette::render(RenderContext& ctx, Rect bounds) {
     if (!visible_) return;
     bounds_ = bounds;
+    const Theme& th = *ctx.theme;
 
     float char_w = ctx.font->char_width();
     float line_h = ctx.font->line_height();
+    float row_h = line_h + 8.0f;
+    float pad = 8.0f;
 
-    // Palette dimensions: centered at top, 50% of width
     float palette_w = std::min(640.0f, bounds.w - 32.0f);
-    float palette_x = bounds.x + (bounds.w - palette_w) * 0.5f;
-    float palette_y = bounds.y + std::min(40.0f, bounds.h * 0.08f);
+    float palette_x = std::floor(bounds.x + (bounds.w - palette_w) * 0.5f);
+    float palette_y = bounds.y + std::min(48.0f, bounds.h * 0.08f);
+    float input_h = line_h + 16.0f;
+    int max_visible = std::max(1, std::min(12, static_cast<int>((bounds.h - palette_y - input_h - 3 * pad) / row_h)));
+    int count = static_cast<int>(filtered_.size());
+    int visible = std::min(count, max_visible);
+    if (selected_index_ < first_visible_) first_visible_ = selected_index_;
+    if (selected_index_ >= first_visible_ + max_visible) first_visible_ = selected_index_ - max_visible + 1;
+    float list_h = visible > 0 ? visible * row_h + pad : (query_.empty() ? 0.0f : row_h + pad);
+    float palette_h = pad + input_h + list_h + pad * 0.5f;
+    Rect box{palette_x, palette_y, palette_w, palette_h};
 
-    // Max visible results
-    constexpr int max_visible = 12;
-    int result_count = std::min(static_cast<int>(filtered_.size()), max_visible);
-    float input_h = line_h + 12.0f;
-    float results_h = static_cast<float>(result_count) * line_h;
-    float palette_h = input_h + results_h + 8.0f;
-
-    // Dimmed overlay behind palette
-    Color dim = {0.0f, 0.0f, 0.0f, 0.3f};
-    ctx.r->add_rect(bounds, dim);
-
-    // Palette background with border
-    ctx.r->add_rect({palette_x, palette_y, palette_w, palette_h},
-                     ctx.theme->bg, 6.0f, 1.0f, ctx.theme->border);
-
-    // Input field background
-    Rect input_rect = {palette_x + 4.0f, palette_y + 4.0f,
-                       palette_w - 8.0f, input_h - 4.0f};
-    ctx.r->add_rect(input_rect, ctx.theme->tab_active_bg, 4.0f);
-
-    // Prompt prefix based on mode
-    std::string prefix;
-    switch (mode_) {
-        case Mode::Commands: prefix = "> "; break;
-        case Mode::Files:    prefix = ""; break;
-        case Mode::Symbols:  prefix = "@ "; break;
+    // Soft shadow: a few widening, fading rounded rects under the surface.
+    for (int i = 3; i >= 1; i--) {
+        Color sh = th.shadow;
+        sh.a *= 0.22f;
+        float g = 4.0f * i;
+        ctx.r->add_rect({box.x - g, box.y - g + 6.0f, box.w + 2 * g, box.h + 2 * g}, sh, 10.0f + g);
     }
+    ctx.r->add_rect(box, th.surface, 10.0f);
 
-    // Input text
-    float input_text_x = input_rect.x + 8.0f;
-    float input_text_y = input_rect.y + ctx.font->ascender() + 4.0f;
-    ctx.r->add_text(input_text_x, input_text_y, prefix + query_,
-                       ctx.theme->fg, *ctx.font);
+    Rect input_rect = {palette_x + pad, palette_y + pad, palette_w - 2 * pad, input_h};
+    ctx.r->add_rect(input_rect, th.input_bg, 6.0f);
 
-    // Cursor in input field
-    float cursor_x = input_text_x +
-                     static_cast<float>(prefix.size() + query_.size()) * char_w;
-    ctx.r->add_rect({cursor_x, input_rect.y + 4.0f, 2.0f, input_h - 12.0f},
-                     ctx.theme->cursor_color);
+    std::string prefix = mode_ == Mode::Commands ? "> " : mode_ == Mode::Symbols ? "@ " : "";
+    float text_x = input_rect.x + 10.0f;
+    float baseline = input_rect.y + (input_h - line_h) * 0.5f + ctx.font->ascender();
+    std::string shown = prefix + query_;
+    if (query_.empty() && mode_ == Mode::Pick && !pick_.placeholder.empty()) {
+        ctx.r->add_text(text_x, baseline, pick_.placeholder, th.fg_muted, *ctx.font);
+    } else if (query_.empty() && mode_ == Mode::Files) {
+        ctx.r->add_text(text_x, baseline, "Search files by name", th.fg_muted, *ctx.font);
+    }
+    float caret_x = ctx.r->add_text(text_x, baseline, shown, th.fg, *ctx.font);
+    ctx.r->add_rect({caret_x, input_rect.y + 6.0f, 2.0f, input_h - 12.0f}, th.accent);
 
-    // Separator line
-    float sep_y = palette_y + input_h;
-    ctx.r->add_rect({palette_x + 4.0f, sep_y, palette_w - 8.0f, 1.0f},
-                     ctx.theme->border);
-
-    // Results
-    ctx.r->push_clip({palette_x + 4.0f, sep_y, palette_w - 8.0f, palette_h - (sep_y - palette_y)});
-    ctx.r->set_fade(palette_x + palette_w - 40.0f, palette_x + palette_w - 8.0f);
-    float result_y = sep_y + 4.0f;
-    for (int i = 0; i < result_count; i++) {
-        auto& match = filtered_[static_cast<size_t>(i)];
-
-        // Highlight selected
-        if (i == selected_index_) {
-            ctx.r->add_rect({palette_x + 4.0f, result_y,
-                              palette_w - 8.0f, line_h},
-                             ctx.theme->selection, 3.0f);
+    float list_y = input_rect.y + input_h + pad * 0.5f;
+    ctx.r->push_clip({palette_x, list_y, palette_w, palette_h - (list_y - palette_y)});
+    for (int vi = 0; vi < visible; vi++) {
+        int i = first_visible_ + vi;
+        auto& m = filtered_[static_cast<size_t>(i)];
+        float y = list_y + vi * row_h;
+        bool sel = i == selected_index_;
+        if (sel) ctx.r->add_rect({palette_x + pad * 0.5f, y, palette_w - pad, row_h}, th.surface_hover, 6.0f);
+        if (sel) ctx.r->add_rect({palette_x + pad * 0.5f, y + 6.0f, 2.0f, row_h - 12.0f}, th.accent, 1.0f);
+        float by = y + (row_h - line_h) * 0.5f + ctx.font->ascender();
+        float right = palette_x + palette_w - pad - 8.0f;
+        float detail_w = static_cast<float>(m.detail.size()) * char_w;
+        if (m.detail_right && !m.detail.empty()) {
+            ctx.r->add_text(right - detail_w, by, m.detail, th.fg_muted, *ctx.font);
+            right -= detail_w + 16.0f;
         }
-
-        Color text_color = (i == selected_index_) ? ctx.theme->fg : ctx.theme->comment;
-        ctx.r->add_text(palette_x + 16.0f,
-                           result_y + ctx.font->ascender(),
-                           match.display, text_color, *ctx.font);
-
-        result_y += line_h;
+        ctx.r->push_clip({palette_x, y, right - palette_x, row_h});
+        ctx.r->set_fade(right - 24.0f, right);
+        float end = ctx.r->add_text(palette_x + 18.0f, by, m.display, sel ? th.fg : th.fg, *ctx.font);
+        if (!m.detail_right && !m.detail.empty())
+            ctx.r->add_text(end + 12.0f, by, m.detail, th.fg_muted, *ctx.font);
+        ctx.r->set_fade(0, 0);
+        ctx.r->pop_clip();
     }
-    ctx.r->set_fade(0, 0);
+    if (count == 0 && !query_.empty()) {
+        const char* msg = (mode_ == Mode::Pick && pick_.allow_free_text) ? "Press Enter to use this value"
+                                                                         : "No matching results";
+        ctx.r->add_text(palette_x + 18.0f, list_y + (row_h - line_h) * 0.5f + ctx.font->ascender(),
+                        msg, th.fg_muted, *ctx.font);
+    }
     ctx.r->pop_clip();
-
-    // Show "no results" message if applicable
-    if (filtered_.empty() && !query_.empty()) {
-        ctx.r->add_text(palette_x + 16.0f,
-                           sep_y + 4.0f + ctx.font->ascender(),
-                           "No results found", ctx.theme->comment, *ctx.font);
-    }
 }
 
 bool CommandPalette::handle_key(const KeyEvent& e) {
     if (!visible_ || !e.pressed) return false;
 
     switch (e.keycode) {
-        case SDLK_ESCAPE:
+        case SDLK_ESCAPE: {
+            auto cancel = mode_ == Mode::Pick ? pick_.on_cancel : nullptr;
             hide();
+            if (cancel) cancel();
             return true;
+        }
 
         case SDLK_UP:
-            if (selected_index_ > 0) selected_index_--;
+            select(selected_index_ - 1);
             return true;
 
         case SDLK_DOWN:
-            if (selected_index_ < static_cast<int>(filtered_.size()) - 1)
-                selected_index_++;
+            select(selected_index_ + 1);
+            return true;
+
+        case SDLK_PAGEUP:
+            select(selected_index_ - 10);
+            return true;
+
+        case SDLK_PAGEDOWN:
+            select(selected_index_ + 10);
             return true;
 
         case SDLK_RETURN:
         case SDLK_RETURN2: {
+            if (mode_ == Mode::Pick) {
+                auto cb = pick_.on_pick;
+                std::string q = query_;
+                int item = filtered_.empty() ? -1 : filtered_[static_cast<size_t>(selected_index_)].index;
+                if (item < 0 && !pick_.allow_free_text) return true;
+                hide();
+                if (cb) cb(item, q);
+                return true;
+            }
             if (selected_index_ >= 0 &&
                 selected_index_ < static_cast<int>(filtered_.size())) {
                 auto& match = filtered_[static_cast<size_t>(selected_index_)];
@@ -260,19 +299,14 @@ bool CommandPalette::handle_key(const KeyEvent& e) {
                 } else {
                     query_.pop_back();
                 }
-                selected_index_ = 0;
                 update_filter();
+                select(0);
             }
             return true;
 
         case SDLK_TAB:
             // Tab cycles through results (same as down)
-            if (e.mods & KeyMod::Shift) {
-                if (selected_index_ > 0) selected_index_--;
-            } else {
-                if (selected_index_ < static_cast<int>(filtered_.size()) - 1)
-                    selected_index_++;
-            }
+            select(selected_index_ + ((e.mods & KeyMod::Shift) ? -1 : 1));
             return true;
 
         default:
@@ -286,8 +320,8 @@ bool CommandPalette::handle_text(const std::string& text) {
     if (!visible_) return false;
 
     query_ += text;
-    selected_index_ = 0;
     update_filter();
+    select(0);
     return true;
 }
 

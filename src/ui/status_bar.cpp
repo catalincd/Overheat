@@ -25,61 +25,73 @@ void StatusBar::update(float dt) {
 
 void StatusBar::render(RenderContext& ctx, Rect bounds) {
     bounds_ = bounds;
-
+    const Theme& th = *ctx.theme;
     float char_w = ctx.font->char_width();
-    float text_y = bounds.y + ctx.font->ascender() + 2.0f;
+    float baseline = bounds.y + (bounds.h - ctx.font->line_height()) * 0.5f + ctx.font->ascender();
+    ctx.r->add_rect(bounds, th.status_bg);
 
-    // Background
-    ctx.r->add_rect(bounds, ctx.theme->status_bg);
-
-    // Top border
-    ctx.r->add_rect({bounds.x, bounds.y, bounds.w, 1.0f}, ctx.theme->border);
-
-    float left_x = bounds.x + 12.0f;
-    float right_x = bounds.x + bounds.w - 12.0f;
-
-    // Right side first (cursor | language | branch | encoding); it wins when space is short.
-    std::vector<std::pair<std::string, Color>> right_segments;
-    right_segments.push_back({"UTF-8", ctx.theme->comment});
-    if (!git_branch_.empty()) right_segments.push_back({git_branch_, ctx.theme->git_modified});
+    // Right segments, laid out right-to-left: language, encoding, indent, position.
+    std::vector<std::string> right;
     if (editor_) {
         std::string lang = editor_->syntax().language_id();
-        if (!lang.empty()) right_segments.push_back({lang, ctx.theme->comment});
+        static const std::pair<const char*, const char*> names[] = {
+            {"cpp", "C++"}, {"c", "C"}, {"python", "Python"}, {"rust", "Rust"},
+            {"javascript", "JavaScript"}, {"typescript", "TypeScript"}, {"go", "Go"},
+            {"java", "Java"}, {"lua", "Lua"}, {"bash", "Shell"}, {"json", "JSON"},
+            {"markdown", "Markdown"}, {"cmake", "CMake"}, {"glsl", "GLSL"}, {"yaml", "YAML"},
+            {"toml", "TOML"}, {"html", "HTML"}, {"css", "CSS"}};
+        std::string shown = lang.empty() ? "Plain Text" : lang;
+        for (auto& [id, name] : names)
+            if (lang == id) shown = name;
+        right.push_back(shown);
+        right.push_back("UTF-8");
+        right.push_back("Spaces: 4");
         auto pos = editor_->cursors().primary_pos();
         size_t col = utf8::display_col(editor_->buffer().line_text(pos.line), pos.col);
-        char pos_buf[64];
-        std::snprintf(pos_buf, sizeof(pos_buf), "Ln %zu, Col %zu", pos.line + 1, col + 1);
-        right_segments.push_back({pos_buf, ctx.theme->fg});
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "Ln %zu, Col %zu", pos.line + 1, col + 1);
+        right.push_back(buf);
+    }
+    float rx = bounds.x + bounds.w - 12.0f;
+    float left_limit = bounds.x + bounds.w * 0.35f;
+    for (auto& seg : right) {
+        float w = static_cast<float>(seg.size()) * char_w;
+        if (rx - w < left_limit) break;
+        rx -= w;
+        ctx.r->add_text(rx, baseline, seg, th.status_fg, *ctx.font);
+        rx -= 18.0f;
     }
 
-    float rx = right_x;
-    for (size_t i = 0; i < right_segments.size(); i++) {
-        auto& [text, color] = right_segments[i];
-        float text_w = static_cast<float>(text.size()) * char_w;
-        if (rx - text_w < left_x) break;
-        rx -= text_w;
-        ctx.r->add_text(rx, text_y, text, color, *ctx.font);
-        if (i + 1 < right_segments.size()) {
-            rx -= 8.0f;
-            ctx.r->add_text(rx - char_w, text_y, "|", ctx.theme->comment, *ctx.font);
-            rx -= char_w + 8.0f;
+    float x = bounds.x;
+    if (!remote_.empty()) {
+        // Remote badge: accent block with the host, like VS Code's remote indicator.
+        float w = static_cast<float>(remote_.size() + 3) * char_w + 16.0f;
+        ctx.r->add_rect({x, bounds.y, w, bounds.h}, th.accent);
+        ctx.r->add_char(x + 8.0f, baseline, 0xEB39, th.tab_active_bg, *ctx.font);
+        ctx.r->add_text(x + 8.0f + 2.0f * char_w, baseline, remote_, th.tab_active_bg, *ctx.font);
+        x += w;
+    }
+    x += 12.0f;
+
+    ctx.r->push_clip({bounds.x, bounds.y, std::max(0.0f, rx - bounds.x), bounds.h});
+    ctx.r->set_fade(rx - 32.0f, rx);
+    if (!git_branch_.empty()) {
+        ctx.r->add_char(x, baseline, 0xEA68, th.status_fg, *ctx.font);
+        x = ctx.r->add_text(x + 2.0f * char_w, baseline, git_branch_, th.status_fg, *ctx.font);
+        if (ahead_ || behind_) {
+            char buf[48];
+            std::snprintf(buf, sizeof buf, " %d\u2193 %d\u2191", behind_, ahead_);
+            x = ctx.r->add_text(x, baseline, buf, th.status_fg, *ctx.font);
         }
+        x += 18.0f;
     }
-
-    // Left side: timed message, or mode + filename, clipped to what is left.
-    ctx.r->push_clip({bounds.x, bounds.y, std::max(0.0f, rx - 16.0f - bounds.x), bounds.h});
-    ctx.r->set_fade(rx - 48.0f, rx - 16.0f);
     if (!message_.empty()) {
-        ctx.r->add_text(left_x, text_y, message_, ctx.theme->fg, *ctx.font);
-    } else {
-        std::string mode = "NORMAL";
-        ctx.r->add_text(left_x, text_y, mode, ctx.theme->keyword, *ctx.font);
-        left_x += static_cast<float>(mode.size()) * char_w + 16.0f;
-        ctx.r->add_text(left_x, text_y, "|", ctx.theme->comment, *ctx.font);
-        left_x += char_w + 8.0f;
-        if (editor_) {
-            ctx.r->add_text(left_x, text_y, editor_->title(), ctx.theme->fg, *ctx.font);
-        }
+        ctx.r->add_text(x, baseline, message_, th.fg, *ctx.font);
+    } else if (editor_) {
+        ctx.r->add_text(x, baseline, editor_->buffer().file_path().empty()
+                                         ? std::string("Untitled")
+                                         : editor_->buffer().file_path().filename().string(),
+                        th.status_fg, *ctx.font);
     }
     ctx.r->set_fade(0, 0);
     ctx.r->pop_clip();

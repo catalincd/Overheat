@@ -32,6 +32,12 @@ public:
     bool handle_mouse(const MouseEvent& e) override;
 
 private:
+    static constexpr float PAD = 14.0f;
+    static constexpr float CLOSE_W = 16.0f;
+    float char_w_ = 9.0f;
+    std::string tab_title(const Tab& tab) const;
+    float tab_width(const Tab& tab) const;
+
     std::vector<Tab> tabs_;
     int active_ = -1;
     float scroll_x_ = 0;

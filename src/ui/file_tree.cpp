@@ -83,62 +83,62 @@ void FileTree::toggle_expand(FileEntry& entry) {
 
 void FileTree::render(RenderContext& ctx, Rect bounds) {
     bounds_ = bounds;
-
-    float line_h = ctx.font->line_height();
+    const Theme& th = *ctx.theme;
+    row_h_ = std::round(ctx.font->line_height() + 4.0f);
     float char_w = ctx.font->char_width();
 
-    // Background
-    ctx.r->add_rect(bounds, ctx.theme->sidebar_bg);
+    ctx.r->add_rect(bounds, th.sidebar_bg);
 
-    // Right border
-    ctx.r->add_rect({bounds.x + bounds.w - 1.0f, bounds.y, 1.0f, bounds.h},
-                     ctx.theme->border);
+    // Header: small muted section title with the project name.
+    float hb = bounds.y + (HEADER_H - ctx.font->line_height()) * 0.5f + ctx.font->ascender();
+    float hx = ctx.r->add_text(bounds.x + 14.0f, hb, "EXPLORER", th.fg_muted, *ctx.font);
+    ctx.r->add_text(hx + char_w, hb, root_entry_.name, th.fg_muted, *ctx.font);
 
-    size_t first_entry = static_cast<size_t>(scroll_y_ / line_h);
-    size_t visible_count = static_cast<size_t>(bounds.h / line_h) + 2;
-
-    for (size_t i = 0; i < visible_count && (first_entry + i) < visible_entries_.size(); i++) {
-        size_t idx = first_entry + i;
+    Rect list{bounds.x, bounds.y + HEADER_H, bounds.w, bounds.h - HEADER_H};
+    ctx.r->push_clip(list);
+    size_t first = static_cast<size_t>(scroll_y_ / row_h_);
+    size_t count = static_cast<size_t>(list.h / row_h_) + 2;
+    for (size_t idx = first; idx < first + count && idx < visible_entries_.size(); idx++) {
         FileEntry* entry = visible_entries_[idx];
+        float y = list.y + static_cast<float>(idx) * row_h_ - scroll_y_;
+        float baseline = y + (row_h_ - ctx.font->line_height()) * 0.5f + ctx.font->ascender();
 
-        float y = bounds.y + static_cast<float>(i) * line_h -
-                  std::fmod(scroll_y_, line_h);
-
-        if (y + line_h < bounds.y || y > bounds.y + bounds.h) continue;
-
-        // Selection highlight
         if (static_cast<int>(idx) == selected_index_) {
-            ctx.r->add_rect({bounds.x, y, bounds.w, line_h}, ctx.theme->tab_active_bg);
+            ctx.r->add_rect({bounds.x + 4.0f, y, bounds.w - 8.0f, row_h_}, th.tree_selection, 4.0f);
         }
 
-        // Indent
-        float indent = 8.0f + static_cast<float>(entry->depth) * 16.0f;
-        float text_x = bounds.x + indent;
-
-        // Directory indicator or file icon space
+        float x = bounds.x + 10.0f + static_cast<float>(entry->depth) * 14.0f;
         if (entry->is_dir) {
-            const char* indicator = entry->expanded ? "v " : "> ";
-            ctx.r->add_text(text_x, y + ctx.font->ascender(),
-                               indicator, ctx.theme->fg, *ctx.font);
-            text_x += char_w * 2.0f;
+            ctx.r->add_char(x, baseline, entry->expanded ? 0xEAB4 : 0xEAB6, th.fg_muted, *ctx.font);
+            ctx.r->add_char(x + char_w + 6.0f, baseline, entry->expanded ? 0xEAF7 : 0xEA83, th.accent, *ctx.font);
         } else {
-            text_x += char_w * 2.0f; // Same indent as dir indicator
+            ctx.r->add_char(x + char_w + 6.0f, baseline, 0xEA7B, th.fg_muted, *ctx.font);
         }
+        float name_x = x + 2.0f * char_w + 14.0f;
 
-        // File/dir name with color based on git status
-        Color name_color = ctx.theme->fg;
+        Color name_color = th.fg;
+        const char* badge = nullptr;
         switch (entry->git_status) {
-            case FileStatus::Modified: name_color = ctx.theme->git_modified; break;
-            case FileStatus::Added:
-            case FileStatus::Untracked: name_color = ctx.theme->git_added; break;
-            case FileStatus::Deleted: name_color = ctx.theme->git_deleted; break;
-            case FileStatus::Ignored: name_color = ctx.theme->comment; break;
+            case FileStatus::Modified:  name_color = th.git_modified;  badge = "M"; break;
+            case FileStatus::Added:     name_color = th.git_added;     badge = "A"; break;
+            case FileStatus::Untracked: name_color = th.git_untracked; badge = "U"; break;
+            case FileStatus::Deleted:   name_color = th.git_deleted;   badge = "D"; break;
+            case FileStatus::Renamed:   name_color = th.git_modified;  badge = "R"; break;
+            case FileStatus::Ignored:   name_color = th.git_ignored; break;
             default: break;
         }
-
-        ctx.r->add_text(text_x, y + ctx.font->ascender(),
-                           entry->name, name_color, *ctx.font);
+        float right = bounds.x + bounds.w - 12.0f;
+        if (badge) {
+            ctx.r->add_text(right - char_w, baseline, badge, name_color, *ctx.font);
+            right -= char_w + 8.0f;
+        }
+        ctx.r->push_clip({bounds.x, y, right - bounds.x, row_h_});
+        ctx.r->set_fade(right - 20.0f, right);
+        ctx.r->add_text(name_x, baseline, entry->name, name_color, *ctx.font);
+        ctx.r->set_fade(0, 0);
+        ctx.r->pop_clip();
     }
+    ctx.r->pop_clip();
 }
 
 bool FileTree::handle_key(const KeyEvent& e) {
@@ -189,42 +189,28 @@ bool FileTree::handle_key(const KeyEvent& e) {
 }
 
 bool FileTree::handle_mouse(const MouseEvent& e) {
-    if (!bounds_.contains(e.x, e.y) && e.scroll_y == 0.0f) return false;
+    if (!bounds_.contains(e.x, e.y)) return false;
+    float list_h = bounds_.h - HEADER_H;
 
-    // Scroll
-    if (e.scroll_y != 0.0f && bounds_.contains(e.x, e.y)) {
-        float line_h = 20.0f; // Approximate
-        scroll_y_ -= e.scroll_y * line_h * 3.0f;
-        scroll_y_ = std::max(0.0f, scroll_y_);
-        float max_scroll = std::max(0.0f,
-            static_cast<float>(visible_entries_.size()) * line_h - bounds_.h);
-        scroll_y_ = std::min(scroll_y_, max_scroll);
+    if (e.scroll_y != 0.0f) {
+        float max_scroll = std::max(0.0f, static_cast<float>(visible_entries_.size()) * row_h_ - list_h);
+        scroll_y_ = std::clamp(scroll_y_ - e.scroll_y * row_h_ * 3.0f, 0.0f, max_scroll);
         return true;
     }
+    if (e.button != 1 || !e.pressed || e.motion) return e.button == 1;
 
-    if (e.button == 1 && e.pressed) {
-        float line_h = 20.0f;
-        float rel_y = e.y - bounds_.y + scroll_y_;
-        int clicked = static_cast<int>(rel_y / line_h);
-
-        if (clicked >= 0 && clicked < static_cast<int>(visible_entries_.size())) {
-            selected_index_ = clicked;
-            auto* entry = visible_entries_[static_cast<size_t>(clicked)];
-
-            if (e.double_click) {
-                if (entry->is_dir) {
-                    toggle_expand(*entry);
-                } else if (on_open_) {
-                    on_open_(entry->path);
-                }
-            } else if (entry->is_dir) {
-                toggle_expand(*entry);
-            }
-        }
-        return true;
+    float rel_y = e.y - bounds_.y - HEADER_H + scroll_y_;
+    if (rel_y < 0) return true;
+    int clicked = static_cast<int>(rel_y / row_h_);
+    if (clicked < 0 || clicked >= static_cast<int>(visible_entries_.size())) return true;
+    selected_index_ = clicked;
+    auto* entry = visible_entries_[static_cast<size_t>(clicked)];
+    if (entry->is_dir) {
+        if (!e.double_click) toggle_expand(*entry);
+    } else if (on_open_) {
+        on_open_(entry->path);
     }
-
-    return false;
+    return true;
 }
 
 } // namespace oh

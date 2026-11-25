@@ -38,6 +38,8 @@ public:
     bool begin_frame(uint32_t& image_index);
     void end_frame(uint32_t image_index);
     void recreate_swapchain();
+    // Writes the next presented frame to `path` as binary PPM (works off-screen/locked).
+    void request_capture(const std::string& path) { capture_path_ = path; }
 
     // Resource creation helpers
     Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props);
@@ -101,6 +103,8 @@ private:
     FrameData frames_[MAX_FRAMES];
     uint32_t current_frame_ = 0;
     bool framebuffer_resized_ = false;
+    std::string capture_path_;
+    void write_capture(const Buffer& buf) const;
 
     bool create_instance();
     bool create_surface();

@@ -15,6 +15,7 @@
 #include "plugin/api.h"
 #include "keys.h"
 #include "script.h"
+#include "theme.h"
 #include <SDL3/SDL.h>
 
 namespace oh {
@@ -45,6 +46,8 @@ private:
     Renderer2D renderer_;
 
     Theme theme_;
+    ThemeManager themes_;
+    float theme_poll_timer_ = 0;
     KeyMap keymap_;
 
     TabBar tab_bar_;
@@ -62,6 +65,7 @@ private:
     ScriptRunner script_;
     std::vector<std::string> pending_probes_;
     bool debug_hit_ = false;
+    std::string shot_dir_;  // --shot-dir: frames for shot: probes are captured in-app
     std::string own_clipboard_;        // what we last put on the clipboard
     std::string clipboard_line_text_;  // last whole-line copy, to paste as lines
     float last_click_x_ = -1, last_click_y_ = -1;
@@ -101,6 +105,7 @@ private:
     KeyMod sdl_mods(SDL_Keymod m) const;
     void emit_probe(const std::string& label);
     void focus_editor();
+    void select_theme();
     void print_frame_stats() const;
 };
 
