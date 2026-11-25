@@ -1,4 +1,5 @@
 #include "lsp/client.h"
+#include <cerrno>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -300,13 +301,29 @@ bool LSPClient::start(const std::string& command, const std::vector<std::string>
     running_ = true;
 
     reader_thread_ = std::thread(&LSPClient::reader_loop, this);
+    writer_thread_ = std::thread(&LSPClient::writer_loop, this);
     return true;
 }
 
 void LSPClient::stop() {
     if (!running_) return;
-    running_ = false;
+    {
+        std::lock_guard<std::mutex> lock(outbox_mutex_);
+        running_ = false;
+        outbox_.clear();
+    }
+    outbox_cv_.notify_all();
 
+    // Killing the server first makes any blocked write/read return (EPIPE/EOF),
+    // so both threads can be joined before their fds are closed.
+    if (child_pid_ > 0) {
+        kill(child_pid_, SIGTERM);
+        int status;
+        waitpid(child_pid_, &status, 0);
+        child_pid_ = -1;
+    }
+    if (writer_thread_.joinable()) writer_thread_.join();
+    if (reader_thread_.joinable()) reader_thread_.join();
     if (stdin_fd_ >= 0) {
         ::close(stdin_fd_);
         stdin_fd_ = -1;
@@ -314,15 +331,6 @@ void LSPClient::stop() {
     if (stdout_fd_ >= 0) {
         ::close(stdout_fd_);
         stdout_fd_ = -1;
-    }
-    if (child_pid_ > 0) {
-        kill(child_pid_, SIGTERM);
-        int status;
-        waitpid(child_pid_, &status, 0);
-        child_pid_ = -1;
-    }
-    if (reader_thread_.joinable()) {
-        reader_thread_.join();
     }
 
     // Clear pending requests
@@ -332,17 +340,35 @@ void LSPClient::stop() {
 
 void LSPClient::send_message(const std::string& json) {
     if (stdin_fd_ < 0) return;
+    std::string message = "Content-Length: " + std::to_string(json.size()) + "\r\n\r\n" + json;
+    {
+        std::lock_guard<std::mutex> lock(outbox_mutex_);
+        if (!running_) return;
+        outbox_.push_back(std::move(message));
+    }
+    outbox_cv_.notify_one();
+}
 
-    std::string header = "Content-Length: " + std::to_string(json.size()) + "\r\n\r\n";
-    std::string message = header + json;
-
-    const char* data = message.c_str();
-    size_t remaining = message.size();
-    while (remaining > 0) {
-        ssize_t written = ::write(stdin_fd_, data, remaining);
-        if (written <= 0) break;
-        data += written;
-        remaining -= static_cast<size_t>(written);
+void LSPClient::writer_loop() {
+    for (;;) {
+        std::vector<std::string> batch;
+        {
+            std::unique_lock<std::mutex> lock(outbox_mutex_);
+            outbox_cv_.wait(lock, [this] { return !running_ || !outbox_.empty(); });
+            if (!running_) return;
+            batch.swap(outbox_);
+        }
+        for (auto& message : batch) {
+            const char* data = message.data();
+            size_t remaining = message.size();
+            while (remaining > 0) {
+                ssize_t written = ::write(stdin_fd_, data, remaining);
+                if (written < 0 && errno == EINTR) continue;
+                if (written <= 0) return;  // server gone
+                data += written;
+                remaining -= static_cast<size_t>(written);
+            }
+        }
     }
 }
 

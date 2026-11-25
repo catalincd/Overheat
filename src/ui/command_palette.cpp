@@ -1,7 +1,6 @@
 #include "ui/command_palette.h"
 #include "renderer/font_atlas.h"
-#include "renderer/text_renderer.h"
-#include "renderer/ui_renderer.h"
+#include "renderer/renderer2d.h"
 #include <SDL3/SDL_keycode.h>
 #include <algorithm>
 #include <cctype>
@@ -92,7 +91,9 @@ void CommandPalette::update_filter() {
     } else if (mode_ == Mode::Files) {
         for (size_t i = 0; i < file_list_.size(); i++) {
             std::string filename = file_list_[i].filename().string();
-            std::string full_path = file_list_[i].string();
+            std::string full_path = root_.empty()
+                ? file_list_[i].string()
+                : file_list_[i].lexically_relative(root_).string();
 
             // Score against filename primarily, with path as tiebreaker
             int score = fuzzy_score(query_, filename);
@@ -125,9 +126,9 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
     float line_h = ctx.font->line_height();
 
     // Palette dimensions: centered at top, 50% of width
-    float palette_w = std::min(600.0f, bounds.w * 0.5f);
+    float palette_w = std::min(640.0f, bounds.w - 32.0f);
     float palette_x = bounds.x + (bounds.w - palette_w) * 0.5f;
-    float palette_y = bounds.y + 40.0f;
+    float palette_y = bounds.y + std::min(40.0f, bounds.h * 0.08f);
 
     // Max visible results
     constexpr int max_visible = 12;
@@ -138,16 +139,16 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
 
     // Dimmed overlay behind palette
     Color dim = {0.0f, 0.0f, 0.0f, 0.3f};
-    ctx.ui->add_rect(bounds, dim);
+    ctx.r->add_rect(bounds, dim);
 
     // Palette background with border
-    ctx.ui->add_rect({palette_x, palette_y, palette_w, palette_h},
+    ctx.r->add_rect({palette_x, palette_y, palette_w, palette_h},
                      ctx.theme->bg, 6.0f, 1.0f, ctx.theme->border);
 
     // Input field background
     Rect input_rect = {palette_x + 4.0f, palette_y + 4.0f,
                        palette_w - 8.0f, input_h - 4.0f};
-    ctx.ui->add_rect(input_rect, ctx.theme->tab_active_bg, 4.0f);
+    ctx.r->add_rect(input_rect, ctx.theme->tab_active_bg, 4.0f);
 
     // Prompt prefix based on mode
     std::string prefix;
@@ -160,43 +161,47 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
     // Input text
     float input_text_x = input_rect.x + 8.0f;
     float input_text_y = input_rect.y + ctx.font->ascender() + 4.0f;
-    ctx.text->add_text(input_text_x, input_text_y, prefix + query_,
+    ctx.r->add_text(input_text_x, input_text_y, prefix + query_,
                        ctx.theme->fg, *ctx.font);
 
     // Cursor in input field
     float cursor_x = input_text_x +
                      static_cast<float>(prefix.size() + query_.size()) * char_w;
-    ctx.ui->add_rect({cursor_x, input_rect.y + 4.0f, 2.0f, input_h - 12.0f},
+    ctx.r->add_rect({cursor_x, input_rect.y + 4.0f, 2.0f, input_h - 12.0f},
                      ctx.theme->cursor_color);
 
     // Separator line
     float sep_y = palette_y + input_h;
-    ctx.ui->add_rect({palette_x + 4.0f, sep_y, palette_w - 8.0f, 1.0f},
+    ctx.r->add_rect({palette_x + 4.0f, sep_y, palette_w - 8.0f, 1.0f},
                      ctx.theme->border);
 
     // Results
+    ctx.r->push_clip({palette_x + 4.0f, sep_y, palette_w - 8.0f, palette_h - (sep_y - palette_y)});
+    ctx.r->set_fade(palette_x + palette_w - 40.0f, palette_x + palette_w - 8.0f);
     float result_y = sep_y + 4.0f;
     for (int i = 0; i < result_count; i++) {
         auto& match = filtered_[static_cast<size_t>(i)];
 
         // Highlight selected
         if (i == selected_index_) {
-            ctx.ui->add_rect({palette_x + 4.0f, result_y,
+            ctx.r->add_rect({palette_x + 4.0f, result_y,
                               palette_w - 8.0f, line_h},
                              ctx.theme->selection, 3.0f);
         }
 
         Color text_color = (i == selected_index_) ? ctx.theme->fg : ctx.theme->comment;
-        ctx.text->add_text(palette_x + 16.0f,
+        ctx.r->add_text(palette_x + 16.0f,
                            result_y + ctx.font->ascender(),
                            match.display, text_color, *ctx.font);
 
         result_y += line_h;
     }
+    ctx.r->set_fade(0, 0);
+    ctx.r->pop_clip();
 
     // Show "no results" message if applicable
     if (filtered_.empty() && !query_.empty()) {
-        ctx.text->add_text(palette_x + 16.0f,
+        ctx.r->add_text(palette_x + 16.0f,
                            sep_y + 4.0f + ctx.font->ascender(),
                            "No results found", ctx.theme->comment, *ctx.font);
     }

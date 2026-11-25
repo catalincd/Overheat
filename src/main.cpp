@@ -2,9 +2,13 @@
 #include "git/repository.h"
 #include "ssh/session.h"
 #include <cstdio>
+#include <csignal>
 #include <cstdlib>
 
 int main(int argc, char** argv) {
+    // Child processes (LSP servers, shells) may exit mid-write; report EPIPE instead of dying.
+    std::signal(SIGPIPE, SIG_IGN);
+
     oh::GitRepository::global_init();
     oh::SSHSession::global_init();
 

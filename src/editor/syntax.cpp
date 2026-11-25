@@ -2,10 +2,25 @@
 #include "editor/buffer.h"
 #include <tree_sitter/api.h>
 #include <tree_sitter/tree-sitter-c.h>
+
+extern "C" const TSLanguage* tree_sitter_cpp();
 #include <algorithm>
 #include <cstring>
 
 namespace oh {
+
+// Feeds tree-sitter straight from the piece table, one piece at a time.
+static TSInput buffer_input(const TextBuffer& buffer) {
+    TSInput input{};
+    input.payload = const_cast<TextBuffer*>(&buffer);
+    input.read = [](void* payload, uint32_t byte, TSPoint, uint32_t* bytes_read) -> const char* {
+        std::string_view chunk = static_cast<const TextBuffer*>(payload)->chunk_at(byte);
+        *bytes_read = static_cast<uint32_t>(chunk.size());
+        return chunk.data();
+    };
+    input.encoding = TSInputEncodingUTF8;
+    return input;
+}
 
 SyntaxHighlighter::SyntaxHighlighter() {
     parser_ = ts_parser_new();
@@ -13,6 +28,7 @@ SyntaxHighlighter::SyntaxHighlighter() {
 }
 
 SyntaxHighlighter::~SyntaxHighlighter() {
+    discard_pending();
     if (tree_) ts_tree_delete(tree_);
     if (parser_) ts_parser_delete(parser_);
 }
@@ -44,6 +60,13 @@ void SyntaxHighlighter::build_type_map() {
     m["primitive_type"] = TokenType::Type;
     m["type_identifier"] = TokenType::Type;
     m["sized_type_specifier"] = TokenType::Type;
+    m["namespace_identifier"] = TokenType::Type;
+    m["auto"] = TokenType::Type;
+    m["raw_string_literal"] = TokenType::String;
+    m["raw_string_content"] = TokenType::String;
+    m["\""] = TokenType::String;
+    m["'"] = TokenType::String;
+    m["::"] = TokenType::Punctuation;
 
     // Preprocessor
     m["preproc_include"] = TokenType::Preprocessor;
@@ -106,7 +129,14 @@ void SyntaxHighlighter::build_type_map() {
                       "static", "extern", "const", "volatile", "inline",
                       "register", "auto", "void", "signed", "unsigned",
                       "long", "short", "true", "false", "null", "NULL",
-                      "#include", "#define"}) {
+                      "#include", "#define",
+                      "namespace", "class", "template", "typename", "public", "private",
+                      "protected", "virtual", "override", "final", "new", "delete", "using",
+                      "constexpr", "consteval", "constinit", "noexcept", "operator", "this",
+                      "nullptr", "try", "catch", "throw", "friend", "explicit", "mutable",
+                      "static_cast", "dynamic_cast", "reinterpret_cast", "const_cast",
+                      "co_await", "co_return", "co_yield", "concept", "requires", "decltype",
+                      "static_assert", "alignas", "alignof", "thread_local"}) {
         m[kw] = TokenType::Keyword;
     }
     // Override the preprocessor directives back
@@ -114,15 +144,44 @@ void SyntaxHighlighter::build_type_map() {
     m["#define"] = TokenType::Preprocessor;
 }
 
+void SyntaxHighlighter::discard_pending() {
+    if (!pending_.valid()) return;
+    if (TSTree* t = pending_.get()) ts_tree_delete(t);
+}
+
+void SyntaxHighlighter::parse_async(std::string text) {
+    discard_pending();
+    const TSLanguage* lang = parser_ ? ts_parser_language(parser_) : nullptr;
+    if (!lang) return;
+    pending_ = std::async(std::launch::async, [lang, text = std::move(text)]() -> TSTree* {
+        TSParser* p = ts_parser_new();
+        ts_parser_set_language(p, lang);
+        TSTree* t = ts_parser_parse_string(p, nullptr, text.c_str(), static_cast<uint32_t>(text.size()));
+        ts_parser_delete(p);
+        request_redraw();
+        return t;
+    });
+}
+
+bool SyntaxHighlighter::poll() {
+    if (!pending_.valid()) return true;
+    if (pending_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return false;
+    if (tree_) ts_tree_delete(tree_);
+    tree_ = pending_.get();
+    return true;
+}
+
 void SyntaxHighlighter::set_language(const std::string& lang_id) {
+    discard_pending();
     lang_id_ = lang_id;
     if (tree_) {
         ts_tree_delete(tree_);
         tree_ = nullptr;
     }
 
-    if (lang_id == "c" || lang_id == "cpp" || lang_id == "h") {
-        // Use C grammar for C/C++ and headers
+    if (lang_id == "cpp") {
+        ts_parser_set_language(parser_, tree_sitter_cpp());
+    } else if (lang_id == "c") {
         ts_parser_set_language(parser_, tree_sitter_c());
     } else {
         // No grammar available — disable parsing
@@ -138,7 +197,7 @@ std::string SyntaxHighlighter::detect_language(const fs::path& path) {
     for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
     if (ext == ".c") return "c";
-    if (ext == ".h") return "c";
+    if (ext == ".h") return "cpp";  // C++ grammar also handles C headers
     if (ext == ".cpp" || ext == ".cxx" || ext == ".cc" || ext == ".c++") return "cpp";
     if (ext == ".hpp" || ext == ".hxx" || ext == ".hh" || ext == ".h++") return "cpp";
     if (ext == ".py" || ext == ".pyw") return "python";
@@ -174,51 +233,29 @@ std::string SyntaxHighlighter::detect_language(const fs::path& path) {
 }
 
 void SyntaxHighlighter::update(const TextBuffer& buffer) {
-    if (!parser_) return;
-
-    // Check if a language is set
-    if (!ts_parser_language(parser_)) return;
-
-    std::string src = buffer.text();
-
-    TSTree* old_tree = tree_;
-    tree_ = ts_parser_parse_string(parser_, old_tree, src.c_str(),
-                                   static_cast<uint32_t>(src.size()));
-    if (old_tree) ts_tree_delete(old_tree);
+    if (!parser_ || !ts_parser_language(parser_)) return;
+    if (tree_) ts_tree_delete(tree_);
+    tree_ = ts_parser_parse(parser_, nullptr, buffer_input(buffer));
 }
 
-void SyntaxHighlighter::update_incremental(const TextBuffer& buffer,
-                                           size_t start_byte,
-                                           size_t old_end,
-                                           size_t new_end) {
-    if (!parser_ || !tree_) {
-        update(buffer);
-        return;
+void SyntaxHighlighter::apply_changes(const TextBuffer& buffer,
+                                      const std::vector<TextBuffer::Change>& changes) {
+    if (changes.empty() || !parser_ || !ts_parser_language(parser_)) return;
+    if (!tree_) { update(buffer); return; }
+    auto pt = [](Position p) { return TSPoint{static_cast<uint32_t>(p.line), static_cast<uint32_t>(p.col)}; };
+    for (auto& c : changes) {
+        TSInputEdit e;
+        e.start_byte    = static_cast<uint32_t>(c.start);
+        e.old_end_byte  = static_cast<uint32_t>(c.start + c.old_len);
+        e.new_end_byte  = static_cast<uint32_t>(c.start + c.new_len);
+        e.start_point   = pt(c.start_pt);
+        e.old_end_point = pt(c.old_end_pt);
+        e.new_end_point = pt(c.new_end_pt);
+        ts_tree_edit(tree_, &e);
     }
-
-    // Build the edit description
-    Position start_pos = buffer.position_of(start_byte);
-    Position old_end_pos = buffer.position_of(std::min(old_end, buffer.length()));
-    Position new_end_pos = buffer.position_of(std::min(new_end, buffer.length()));
-
-    TSInputEdit edit;
-    edit.start_byte = static_cast<uint32_t>(start_byte);
-    edit.old_end_byte = static_cast<uint32_t>(old_end);
-    edit.new_end_byte = static_cast<uint32_t>(new_end);
-    edit.start_point = {static_cast<uint32_t>(start_pos.line),
-                        static_cast<uint32_t>(start_pos.col)};
-    edit.old_end_point = {static_cast<uint32_t>(old_end_pos.line),
-                          static_cast<uint32_t>(old_end_pos.col)};
-    edit.new_end_point = {static_cast<uint32_t>(new_end_pos.line),
-                          static_cast<uint32_t>(new_end_pos.col)};
-
-    ts_tree_edit(tree_, &edit);
-
-    std::string src = buffer.text();
-    TSTree* new_tree = ts_parser_parse_string(parser_, tree_, src.c_str(),
-                                              static_cast<uint32_t>(src.size()));
+    TSTree* next = ts_parser_parse(parser_, tree_, buffer_input(buffer));
     ts_tree_delete(tree_);
-    tree_ = new_tree;
+    tree_ = next;
 }
 
 TokenType SyntaxHighlighter::classify_node(TSNode node) const {
@@ -233,6 +270,9 @@ TokenType SyntaxHighlighter::classify_node(TSNode node) const {
     // Special case: identifiers may be function names
     if (std::strcmp(type, "identifier") == 0) {
         TSNode parent = ts_node_parent(node);
+        // `A::b(` / `std::max(`: judge the name by what the qualified identifier is part of.
+        while (!ts_node_is_null(parent) && std::strcmp(ts_node_type(parent), "qualified_identifier") == 0)
+            parent = ts_node_parent(parent);
         if (!ts_node_is_null(parent)) {
             const char* parent_type = ts_node_type(parent);
             if (std::strcmp(parent_type, "function_declarator") == 0 ||
@@ -262,75 +302,37 @@ TokenType SyntaxHighlighter::classify_node(TSNode node) const {
     return TokenType::Normal;
 }
 
-std::vector<Token> SyntaxHighlighter::tokens_for_line(size_t line,
+std::vector<Token> SyntaxHighlighter::tokens_for_line(size_t /*line*/,
                                                        size_t line_start_byte,
                                                        size_t line_length) const {
     std::vector<Token> tokens;
     if (!tree_ || line_length == 0) return tokens;
 
-    TSNode root = ts_tree_root_node(tree_);
+    const uint32_t lo = static_cast<uint32_t>(line_start_byte);
+    const uint32_t hi = static_cast<uint32_t>(line_start_byte + line_length);
 
-    // Create a cursor to walk descendants that intersect this line
-    TSTreeCursor cursor = ts_tree_cursor_new(root);
-
-    uint32_t line_start = static_cast<uint32_t>(line_start_byte);
-    uint32_t line_end = static_cast<uint32_t>(line_start_byte + line_length);
-
-    // We'll collect leaf tokens
-    struct LeafToken {
-        uint32_t start;
-        uint32_t end;
-        TokenType type;
-    };
-    std::vector<LeafToken> leaves;
-
-    // Walk the tree using a stack-based approach for better coverage
-    std::vector<TSNode> stack;
-    stack.push_back(root);
-
-    while (!stack.empty()) {
-        TSNode node = stack.back();
-        stack.pop_back();
-
-        uint32_t node_start = ts_node_start_byte(node);
-        uint32_t node_end = ts_node_end_byte(node);
-
-        // Skip nodes entirely outside our line
-        if (node_end <= line_start || node_start >= line_end) continue;
-
-        uint32_t child_count = ts_node_child_count(node);
-        if (child_count == 0) {
-            // Leaf node — classify it
-            TokenType tt = classify_node(node);
-            uint32_t s = std::max(node_start, line_start);
-            uint32_t e = std::min(node_end, line_end);
-            if (s < e) {
-                leaves.push_back({s, e, tt});
-            }
-        } else {
-            // Push children in reverse order so we process left-to-right
-            for (int i = static_cast<int>(child_count) - 1; i >= 0; i--) {
-                stack.push_back(ts_node_child(node, static_cast<uint32_t>(i)));
-            }
+    // Seek straight to the children overlapping [lo, hi) at every level, so the
+    // cost is O(depth + tokens on the line), not O(nodes in the file).
+    TSTreeCursor cursor = ts_tree_cursor_new(ts_tree_root_node(tree_));
+    auto visit = [&](auto& self) -> void {
+        TSNode node = ts_tree_cursor_current_node(&cursor);
+        if (ts_node_child_count(node) == 0) {
+            uint32_t s = std::max(ts_node_start_byte(node), lo);
+            uint32_t e = std::min(ts_node_end_byte(node), hi);
+            if (s < e) tokens.push_back({s - lo, e - s, classify_node(node)});
+            return;
         }
-    }
-
+        if (ts_tree_cursor_goto_first_child_for_byte(&cursor, lo) < 0) return;
+        do {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            if (ts_node_start_byte(child) >= hi) break;
+            if (ts_node_end_byte(child) > lo) self(self);
+        } while (ts_tree_cursor_goto_next_sibling(&cursor));
+        ts_tree_cursor_goto_parent(&cursor);
+    };
+    visit(visit);
     ts_tree_cursor_delete(&cursor);
-
-    // Sort leaves by start byte
-    std::sort(leaves.begin(), leaves.end(),
-              [](const LeafToken& a, const LeafToken& b) { return a.start < b.start; });
-
-    // Convert to Token structs relative to line start
-    for (auto& lf : leaves) {
-        Token t;
-        t.start = lf.start - line_start;
-        t.length = lf.end - lf.start;
-        t.type = lf.type;
-        tokens.push_back(t);
-    }
-
-    return tokens;
+    return tokens;  // already in document order
 }
 
 } // namespace oh

@@ -23,6 +23,7 @@ void TextBuffer::load_string(const std::string& text) {
     line_cache_dirty_ = true;
     undo_stack_.clear();
     redo_stack_.clear();
+    changes_.clear();
     current_group_ = nullptr;
     save_point_ = 0;
     modified_ = false;
@@ -100,8 +101,21 @@ void TextBuffer::split_piece(size_t piece_idx, size_t local_offset) {
     pieces_.insert(pieces_.begin() + static_cast<ptrdiff_t>(piece_idx) + 1, right);
 }
 
+void TextBuffer::record_change(size_t start, const std::string& removed, const std::string& inserted) {
+    Position s = position_of(start);
+    auto advance = [](Position p, const std::string& t) {
+        for (char c : t) {
+            if (c == '\n') { p.line++; p.col = 0; }
+            else p.col++;
+        }
+        return p;
+    };
+    changes_.push_back({start, removed.size(), inserted.size(), s, advance(s, removed), advance(s, inserted)});
+}
+
 void TextBuffer::insert(size_t offset, const std::string& text) {
     if (text.empty()) return;
+    record_change(offset, "", text);
 
     size_t add_start = add_buf_.size();
     add_buf_.append(text);
@@ -110,21 +124,11 @@ void TextBuffer::insert(size_t offset, const std::string& text) {
 
     auto [pi, local] = find_piece(offset);
 
-    // Save state for undo
-    Edit edit;
-    edit.offset = offset;
-    edit.piece_idx = pi;
-
     if (local == 0) {
         // Insert before this piece
-        edit.old_pieces = {};
-        edit.new_pieces = {new_piece};
         pieces_.insert(pieces_.begin() + static_cast<ptrdiff_t>(pi), new_piece);
     } else if (local == pieces_[pi].length) {
         // Insert after this piece
-        edit.piece_idx = pi + 1;
-        edit.old_pieces = {};
-        edit.new_pieces = {new_piece};
         pieces_.insert(pieces_.begin() + static_cast<ptrdiff_t>(pi) + 1, new_piece);
     } else {
         // Split the piece and insert in the middle
@@ -132,17 +136,12 @@ void TextBuffer::insert(size_t offset, const std::string& text) {
         Piece left = {p.source, p.start, local};
         Piece right = {p.source, p.start + local, p.length - local};
 
-        edit.old_pieces = {p};
-        edit.new_pieces = {left, new_piece, right};
-
         pieces_[pi] = left;
         pieces_.insert(pieces_.begin() + static_cast<ptrdiff_t>(pi) + 1, right);
         pieces_.insert(pieces_.begin() + static_cast<ptrdiff_t>(pi) + 1, new_piece);
     }
 
-    if (current_group_) {
-        current_group_->edits.push_back(std::move(edit));
-    }
+    if (current_group_) current_group_->edits.push_back({offset, "", text});
 
     line_cache_dirty_ = true;
     modified_ = true;
@@ -150,21 +149,16 @@ void TextBuffer::insert(size_t offset, const std::string& text) {
 
 void TextBuffer::erase(size_t offset, size_t len) {
     if (len == 0) return;
+    std::string removed;
+    removed.reserve(len);
+    for (size_t i = 0; i < len; i++) removed.push_back(char_at(offset + i));
+    record_change(offset, removed, "");
 
     size_t erase_end = offset + len;
 
     // Find start piece and end piece
     auto [start_pi, start_local] = find_piece(offset);
     auto [end_pi, end_local] = find_piece(erase_end);
-
-    Edit edit;
-    edit.offset = offset;
-    edit.piece_idx = start_pi;
-
-    // Collect old pieces that are affected
-    for (size_t i = start_pi; i <= end_pi && i < pieces_.size(); ++i) {
-        edit.old_pieces.push_back(pieces_[i]);
-    }
 
     // Build replacement pieces
     std::vector<Piece> replacements;
@@ -180,8 +174,6 @@ void TextBuffer::erase(size_t offset, size_t len) {
                                 pieces_[end_pi].length - end_local});
     }
 
-    edit.new_pieces = replacements;
-
     // Replace the range of pieces
     auto begin_it = pieces_.begin() + static_cast<ptrdiff_t>(start_pi);
     auto end_it = (end_pi < pieces_.size())
@@ -196,9 +188,7 @@ void TextBuffer::erase(size_t offset, size_t len) {
         pieces_.push_back({Source::Original, 0, 0});
     }
 
-    if (current_group_) {
-        current_group_->edits.push_back(std::move(edit));
-    }
+    if (current_group_) current_group_->edits.push_back({offset, std::move(removed), ""});
 
     line_cache_dirty_ = true;
     modified_ = true;
@@ -220,6 +210,12 @@ std::string TextBuffer::text() const {
         }
     }
     return result;
+}
+
+std::string_view TextBuffer::chunk_at(size_t offset) const {
+    auto [pi, local] = find_piece(offset);
+    if (pi >= pieces_.size() || local >= pieces_[pi].length) return {};
+    return {piece_text(pieces_[pi]) + local, pieces_[pi].length - local};
 }
 
 char TextBuffer::char_at(size_t offset) const {
@@ -358,88 +354,34 @@ void TextBuffer::end_undo_group() {
     current_group_ = nullptr;
 }
 
-bool TextBuffer::undo() {
-    if (undo_stack_.empty()) return false;
-
+std::optional<size_t> TextBuffer::undo() {
+    if (undo_stack_.empty() || current_group_) return std::nullopt;
     UndoGroup group = std::move(undo_stack_.back());
     undo_stack_.pop_back();
-
-    // Replay edits in reverse to undo
+    size_t cursor = 0;
     for (auto it = group.edits.rbegin(); it != group.edits.rend(); ++it) {
-        auto& edit = *it;
-        // Find the new_pieces in the current pieces_ and replace with old_pieces
-        // The piece_idx tells us where the edit was applied
-        size_t idx = edit.piece_idx;
-        size_t new_count = edit.new_pieces.size();
-        size_t old_count = edit.old_pieces.size();
-
-        auto begin_it = pieces_.begin() + static_cast<ptrdiff_t>(idx);
-        auto end_it = begin_it + static_cast<ptrdiff_t>(new_count);
-        pieces_.erase(begin_it, end_it);
-        pieces_.insert(pieces_.begin() + static_cast<ptrdiff_t>(idx),
-                       edit.old_pieces.begin(), edit.old_pieces.end());
+        erase(it->offset, it->inserted.size());
+        insert(it->offset, it->removed);
+        cursor = it->offset + it->removed.size();
     }
-
-    // Ensure at least one piece
-    if (pieces_.empty()) {
-        pieces_.push_back({Source::Original, 0, 0});
-    }
-
-    // Push to redo stack (swap old/new for redo)
-    UndoGroup redo_group;
-    for (auto& edit : group.edits) {
-        Edit redo_edit;
-        redo_edit.offset = edit.offset;
-        redo_edit.piece_idx = edit.piece_idx;
-        redo_edit.old_pieces = std::move(edit.new_pieces);
-        redo_edit.new_pieces = std::move(edit.old_pieces);
-        redo_group.edits.push_back(std::move(redo_edit));
-    }
-    redo_stack_.push_back(std::move(redo_group));
-
-    line_cache_dirty_ = true;
+    redo_stack_.push_back(std::move(group));
     modified_ = (undo_stack_.size() != save_point_);
-    return true;
+    return cursor;
 }
 
-bool TextBuffer::redo() {
-    if (redo_stack_.empty()) return false;
-
+std::optional<size_t> TextBuffer::redo() {
+    if (redo_stack_.empty() || current_group_) return std::nullopt;
     UndoGroup group = std::move(redo_stack_.back());
     redo_stack_.pop_back();
-
-    // Replay edits in reverse (redo group has swapped old/new, so reverse undo = forward redo)
-    for (auto it = group.edits.rbegin(); it != group.edits.rend(); ++it) {
-        auto& edit = *it;
-        size_t idx = edit.piece_idx;
-        size_t old_count = edit.old_pieces.size();
-
-        auto begin_it = pieces_.begin() + static_cast<ptrdiff_t>(idx);
-        auto end_it = begin_it + static_cast<ptrdiff_t>(old_count);
-        pieces_.erase(begin_it, end_it);
-        pieces_.insert(pieces_.begin() + static_cast<ptrdiff_t>(idx),
-                       edit.new_pieces.begin(), edit.new_pieces.end());
+    size_t cursor = 0;
+    for (auto& e : group.edits) {
+        erase(e.offset, e.removed.size());
+        insert(e.offset, e.inserted);
+        cursor = e.offset + e.inserted.size();
     }
-
-    if (pieces_.empty()) {
-        pieces_.push_back({Source::Original, 0, 0});
-    }
-
-    // Push back to undo stack (swap again)
-    UndoGroup undo_group;
-    for (auto& edit : group.edits) {
-        Edit undo_edit;
-        undo_edit.offset = edit.offset;
-        undo_edit.piece_idx = edit.piece_idx;
-        undo_edit.old_pieces = std::move(edit.new_pieces);
-        undo_edit.new_pieces = std::move(edit.old_pieces);
-        undo_group.edits.push_back(std::move(undo_edit));
-    }
-    undo_stack_.push_back(std::move(undo_group));
-
-    line_cache_dirty_ = true;
+    undo_stack_.push_back(std::move(group));
     modified_ = (undo_stack_.size() != save_point_);
-    return true;
+    return cursor;
 }
 
 } // namespace oh

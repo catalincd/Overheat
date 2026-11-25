@@ -1,4 +1,5 @@
 #include "editor/editor.h"
+#include "editor/utf8.h"
 #include <algorithm>
 #include <sstream>
 
@@ -14,7 +15,9 @@ void Editor::load_file(const fs::path& path) {
 
     std::string lang = SyntaxHighlighter::detect_language(path);
     syntax_.set_language(lang);
-    syntax_.update(buffer_);
+    constexpr size_t SYNC_PARSE_LIMIT = 256 * 1024;  // small files never show uncoloured
+    if (buffer_.length() <= SYNC_PARSE_LIMIT) syntax_.update(buffer_);
+    else syntax_.parse_async(buffer_.text());
 }
 
 void Editor::save() {
@@ -167,8 +170,13 @@ void Editor::delete_backward() {
                 new_positions.push_back(sel.head);
                 continue;
             }
-            Position new_pos = buffer_.position_of(offset - 1);
-            buffer_.erase(offset - 1, 1);
+            size_t n = 1;  // at column 0 this joins with the previous line
+            if (sel.head.col > 0) {
+                std::string line = buffer_.line_text(sel.head.line);
+                n = sel.head.col - utf8::prev_boundary(line, sel.head.col);
+            }
+            Position new_pos = buffer_.position_of(offset - n);
+            buffer_.erase(offset - n, n);
             new_positions.push_back(new_pos);
         }
     }
@@ -209,7 +217,11 @@ void Editor::delete_forward() {
                 new_positions.push_back(sel.head);
                 continue;
             }
-            buffer_.erase(offset, 1);
+            size_t n = 1;
+            std::string line = buffer_.line_text(sel.head.line);
+            if (sel.head.col < line.size())
+                n = utf8::next_boundary(line, sel.head.col) - sel.head.col;
+            buffer_.erase(offset, n);
             new_positions.push_back(sel.head);
         }
     }
@@ -668,11 +680,12 @@ void Editor::toggle_comment() {
 void Editor::scroll_to_cursor(float view_width, float view_height,
                                float char_w, float line_h) {
     Position pos = cursors_.primary_pos();
-    float cursor_x = static_cast<float>(pos.col) * char_w;
+    float cursor_x = static_cast<float>(utf8::display_col(buffer_.line_text(pos.line), pos.col)) * char_w;
     float cursor_y = static_cast<float>(pos.line) * line_h;
 
-    float margin_x = char_w * 4;
-    float margin_y = line_h * 3;
+    // Margins shrink with the view so tiny panes don't oscillate between both edges.
+    float margin_x = std::min(char_w * 4, view_width * 0.25f);
+    float margin_y = std::min(line_h * 3, std::max(0.0f, (view_height - line_h) * 0.5f));
 
     // Horizontal scroll
     if (cursor_x < scroll_x_ + margin_x) {
@@ -691,8 +704,23 @@ void Editor::scroll_to_cursor(float view_width, float view_height,
     }
 }
 
+void Editor::undo() {
+    if (auto off = buffer_.undo()) cursors_.set_primary(buffer_.position_of(*off));
+    on_text_changed();
+}
+
+void Editor::redo() {
+    if (auto off = buffer_.redo()) cursors_.set_primary(buffer_.position_of(*off));
+    on_text_changed();
+}
+
 void Editor::on_text_changed() {
-    syntax_.update(buffer_);
+    sync_syntax();
+}
+
+void Editor::sync_syntax() {
+    if (!syntax_.poll()) return;  // background parse running; edits stay queued
+    syntax_.apply_changes(buffer_, buffer_.take_changes());
 }
 
 } // namespace oh

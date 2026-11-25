@@ -1,0 +1,14 @@
+wait 900
+probe shot:initial
+click 385 142
+wait 150
+probe click_5_10
+probe shot:click_5_10
+click 295 42
+wait 150
+probe click_0_0
+click 520 362
+wait 150
+probe click_16_25
+probe shot:click_16_25
+quit

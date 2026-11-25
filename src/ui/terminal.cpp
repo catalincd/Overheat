@@ -1,7 +1,6 @@
 #include "ui/terminal.h"
 #include "renderer/font_atlas.h"
-#include "renderer/text_renderer.h"
-#include "renderer/ui_renderer.h"
+#include "renderer/renderer2d.h"
 #include "renderer/vulkan_context.h"
 
 #include <pty.h>
@@ -13,7 +12,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
-#include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL.h>
 
 namespace oh {
 
@@ -71,6 +70,7 @@ bool Terminal::spawn(const std::string& shell) {
             ssize_t n = ::read(master_fd_, buf, sizeof(buf));
             if (n > 0) {
                 process_output(buf, static_cast<size_t>(n));
+                request_redraw();
             } else if (n == 0) {
                 // EOF – child closed
                 alive_ = false;
@@ -268,6 +268,21 @@ void Terminal::process_output(const char* data, size_t len) {
     }
 }
 
+void Terminal::put_codepoint(uint32_t cp) {
+    utf8_remaining_ = 0;
+    if (cursor_x_ >= cols_) {
+        cursor_x_ = 0;
+        if (cursor_y_ < rows_ - 1) cursor_y_++;
+        else scroll_up();
+    }
+    auto& cell = screen_[cursor_y_][cursor_x_];
+    cell.ch = cp;
+    cell.fg = current_fg_;
+    cell.bg = current_bg_;
+    cell.bold = bold_;
+    cursor_x_++;
+}
+
 void Terminal::process_char(char c) {
     unsigned char uc = static_cast<unsigned char>(c);
 
@@ -289,23 +304,18 @@ void Terminal::process_char(char c) {
             cursor_x_ = std::min(((cursor_x_ / 8) + 1) * 8, cols_ - 1);
         } else if (uc == '\a') {
             // Bell – ignore
-        } else if (uc >= 0x20) {
-            // Printable character
-            if (cursor_x_ >= cols_) {
-                // Line wrap
-                cursor_x_ = 0;
-                if (cursor_y_ < rows_ - 1) {
-                    cursor_y_++;
-                } else {
-                    scroll_up();
+        } else if (uc >= 0x80) {
+            if ((uc & 0xC0) == 0x80) {
+                if (utf8_remaining_ > 0) {
+                    utf8_cp_ = (utf8_cp_ << 6) | (uc & 0x3F);
+                    if (--utf8_remaining_ == 0) put_codepoint(utf8_cp_);
                 }
+            } else {
+                utf8_remaining_ = (uc >= 0xF0) ? 3 : (uc >= 0xE0) ? 2 : 1;
+                utf8_cp_ = uc & (0x3F >> utf8_remaining_);
             }
-            auto& cell = screen_[cursor_y_][cursor_x_];
-            cell.ch = uc;
-            cell.fg = current_fg_;
-            cell.bg = current_bg_;
-            cell.bold = bold_;
-            cursor_x_++;
+        } else if (uc >= 0x20) {
+            put_codepoint(uc);
         }
         break;
 
@@ -640,6 +650,8 @@ void Terminal::process_sgr(const std::vector<int>& params) {
 
 void Terminal::render(RenderContext& ctx, Rect bounds) {
     std::lock_guard<std::mutex> lock(buffer_mutex_);
+    ctx.r->add_rect(bounds, ctx.theme->terminal_bg);
+    bounds = {bounds.x + 6.0f, bounds.y + 4.0f, bounds.w - 12.0f, bounds.h - 8.0f};
 
     float cw = ctx.font->char_width();
     float lh = ctx.font->line_height();
@@ -667,7 +679,7 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
     }
 
     // Background
-    ctx.ui->add_rect(bounds, ctx.theme->terminal_bg);
+    ctx.r->add_rect(bounds, ctx.theme->terminal_bg);
 
     // Clamp scroll offset
     int max_scroll = static_cast<int>(scrollback_.size());
@@ -699,12 +711,12 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
 
             // Cell background (only if non-transparent)
             if (cell.bg.a > 0.001f) {
-                ctx.ui->add_rect({px, py, cw, lh}, cell.bg);
+                ctx.r->add_rect({px, py, cw, lh}, cell.bg);
             }
 
             // Character
             if (cell.ch > ' ') {
-                ctx.text->add_char(px, py + ctx.font->ascender(), cell.ch, cell.fg, *ctx.font);
+                ctx.r->add_char(px, py + ctx.font->ascender(), cell.ch, cell.fg, *ctx.font);
             }
         }
     }
@@ -713,14 +725,14 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
     if (scroll_lines == 0 && focused_ && alive_) {
         float cx = bounds.x + cursor_x_ * cw;
         float cy = bounds.y + cursor_y_ * lh;
-        ctx.ui->add_rect({cx, cy, cw, lh}, ctx.theme->cursor_color);
+        ctx.r->add_rect({cx, cy, cw, lh}, ctx.theme->cursor_color);
 
         // Draw the character under cursor with inverted color
         if (cursor_y_ >= 0 && cursor_y_ < rows_ &&
             cursor_x_ >= 0 && cursor_x_ < cols_) {
             auto& cell = screen_[cursor_y_][cursor_x_];
             if (cell.ch > ' ') {
-                ctx.text->add_char(cx, cy + ctx.font->ascender(), cell.ch,
+                ctx.r->add_char(cx, cy + ctx.font->ascender(), cell.ch,
                                    ctx.theme->terminal_bg, *ctx.font);
             }
         }

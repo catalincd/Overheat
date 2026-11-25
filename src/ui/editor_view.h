@@ -20,6 +20,7 @@ public:
     bool wants_focus() const override { return true; }
 
     float gutter_width(const FontAtlas& font) const;
+    float last_gutter_width() const { return cached_gutter_w_; }
 
 private:
     std::shared_ptr<Editor> editor_;
@@ -35,7 +36,12 @@ private:
     void render_cursors(RenderContext& ctx, Rect text_rect);
     void render_selections(RenderContext& ctx, Rect text_rect);
     void render_minimap(RenderContext& ctx, Rect minimap_rect);
-    Position pixel_to_position(float x, float y, Rect text_rect, const FontAtlas& font) const;
+    Position position_at(float x, float y) const;
+    float row_y(size_t line, Rect text_rect) const;
+    float col_x(const std::string& line_text, size_t byte_col, Rect text_rect) const;
+    std::pair<size_t, size_t> visible_lines(Rect text_rect) const;  // [first, end)
+
+    static constexpr float TEXT_PAD = 4.0f;
 };
 
 } // namespace oh

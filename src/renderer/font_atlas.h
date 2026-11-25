@@ -3,34 +3,54 @@
 #include "renderer/vulkan_context.h"
 #include <string>
 #include <unordered_map>
+#include <vector>
+
+typedef struct FT_LibraryRec_* FT_Library;
+typedef struct FT_FaceRec_* FT_Face;
 
 namespace oh {
 
+// Glyph cache: glyphs are rasterized on first use from the first face in the
+// fallback chain that has them, shelf-packed into one R8 atlas, and uploaded
+// in a batch by upload_pending() before the frame's render pass begins.
 class FontAtlas {
 public:
-    bool init(VulkanContext& vk, const std::string& font_path, float font_size);
+    bool init(VulkanContext& vk, const std::vector<std::string>& font_paths, float font_size);
     void cleanup(VulkanContext& vk);
 
+    // Logically const: a cache miss rasterizes and records a pending upload.
     const GlyphInfo* glyph(uint32_t codepoint) const;
+    void upload_pending(VulkanContext& vk);
+
     float line_height() const { return line_height_; }
     float char_width() const { return char_width_; }
     float ascender() const { return ascender_; }
     float descender() const { return descender_; }
     VkImageView image_view() const { return atlas_image_.view; }
     VkSampler sampler() const { return sampler_; }
-    uint32_t atlas_width() const { return atlas_w_; }
-    uint32_t atlas_height() const { return atlas_h_; }
+    uint32_t atlas_width() const { return ATLAS_SIZE; }
+    uint32_t atlas_height() const { return ATLAS_SIZE; }
+
+    static constexpr uint32_t ATLAS_SIZE = 2048;
 
 private:
-    std::unordered_map<uint32_t, GlyphInfo> glyphs_;
+    const GlyphInfo* rasterize(uint32_t codepoint) const;
+
+    FT_Library ft_ = nullptr;
+    std::vector<FT_Face> faces_;
+
+    mutable std::unordered_map<uint32_t, GlyphInfo> glyphs_;
+    mutable std::vector<uint8_t> pixels_;
+    mutable uint32_t pen_x_ = 1, pen_y_ = 1, shelf_h_ = 0;
+    mutable uint32_t dirty_x0_ = UINT32_MAX, dirty_y0_ = UINT32_MAX, dirty_x1_ = 0, dirty_y1_ = 0;
+    mutable bool full_warned_ = false;
+
     Image atlas_image_;
     VkSampler sampler_ = VK_NULL_HANDLE;
     float line_height_ = 0;
     float char_width_ = 0;
     float ascender_ = 0;
     float descender_ = 0;
-    float font_size_ = 0;
-    uint32_t atlas_w_ = 0, atlas_h_ = 0;
 };
 
 } // namespace oh

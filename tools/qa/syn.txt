@@ -1,0 +1,19 @@
+wait 900
+probe shot:before
+click 295 62
+type /* ωορλδ → ✓ */
+wait 200
+probe shot:after_utf8
+key Return
+type int extra = 1;
+wait 200
+probe shot:after_newline
+key ctrl+z
+key ctrl+z
+key ctrl+z
+wait 200
+probe shot:after_undo
+key ctrl+shift+z
+wait 200
+probe shot:after_redo
+quit

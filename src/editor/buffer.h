@@ -1,6 +1,9 @@
 #pragma once
 #include "types.h"
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace oh {
@@ -20,6 +23,8 @@ public:
 
     // Accessors
     std::string text() const;
+    // Contiguous run of text starting at offset (empty at end), without copying.
+    std::string_view chunk_at(size_t offset) const;
     std::string line_text(size_t line) const;
     char char_at(size_t offset) const;
     size_t length() const;
@@ -34,8 +39,17 @@ public:
     // Undo/redo
     void begin_undo_group();
     void end_undo_group();
-    bool undo();
-    bool redo();
+    // Return the offset just past the replayed text (where a cursor belongs), if any.
+    std::optional<size_t> undo();
+    std::optional<size_t> redo();
+    // Every text mutation (including undo/redo) since the last take_changes(), in
+    // order, with byte ranges and row/byte-column points as tree-sitter expects.
+    struct Change {
+        size_t start, old_len, new_len;
+        Position start_pt, old_end_pt, new_end_pt;
+    };
+    std::vector<Change> take_changes() { return std::exchange(changes_, {}); }
+
     bool is_modified() const { return modified_; }
     void set_unmodified() { modified_ = false; save_point_ = undo_stack_.size(); }
 
@@ -49,11 +63,12 @@ private:
         size_t start;
         size_t length;
     };
+    // Undo records are positional, not piece-indexed, so they stay valid however
+    // the piece list is later split or merged.
     struct Edit {
-        size_t piece_idx;
-        std::vector<Piece> old_pieces;
-        std::vector<Piece> new_pieces;
         size_t offset;
+        std::string removed;
+        std::string inserted;
     };
     struct UndoGroup {
         std::vector<Edit> edits;
@@ -71,6 +86,9 @@ private:
     size_t save_point_ = 0;
     bool modified_ = false;
     fs::path file_path_;
+
+    std::vector<Change> changes_;
+    void record_change(size_t start, const std::string& removed, const std::string& inserted);
 
     void rebuild_line_cache() const;
     const char* piece_text(const Piece& p) const;

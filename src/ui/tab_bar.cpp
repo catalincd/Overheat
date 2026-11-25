@@ -1,8 +1,7 @@
 #include "ui/tab_bar.h"
 #include "editor/editor.h"
 #include "renderer/font_atlas.h"
-#include "renderer/text_renderer.h"
-#include "renderer/ui_renderer.h"
+#include "renderer/renderer2d.h"
 #include <algorithm>
 #include <cmath>
 
@@ -64,10 +63,10 @@ void TabBar::render(RenderContext& ctx, Rect bounds) {
     float tab_height = bounds.h;
 
     // Background
-    ctx.ui->add_rect(bounds, ctx.theme->tab_bg);
+    ctx.r->add_rect(bounds, ctx.theme->tab_bg);
 
     // Bottom border
-    ctx.ui->add_rect({bounds.x, bounds.y + bounds.h - 1.0f, bounds.w, 1.0f},
+    ctx.r->add_rect({bounds.x, bounds.y + bounds.h - 1.0f, bounds.w, 1.0f},
                      ctx.theme->border);
 
     float x = bounds.x - scroll_x_;
@@ -77,7 +76,6 @@ void TabBar::render(RenderContext& ctx, Rect bounds) {
     for (size_t i = 0; i < tabs_.size(); i++) {
         auto& tab = tabs_[i];
         std::string title = tab.editor->title();
-        if (tab.editor->is_modified()) title = "* " + title;
 
         float text_w = static_cast<float>(title.size()) * char_w;
         float tab_w = text_w + tab_padding * 2.0f + close_btn_w;
@@ -85,27 +83,27 @@ void TabBar::render(RenderContext& ctx, Rect bounds) {
         // Tab background
         bool is_active = (static_cast<int>(i) == active_);
         Color bg = is_active ? ctx.theme->tab_active_bg : ctx.theme->tab_bg;
-        ctx.ui->add_rect({x, bounds.y, tab_w, tab_height}, bg);
+        ctx.r->add_rect({x, bounds.y, tab_w, tab_height}, bg);
 
         // Active tab top accent
         if (is_active) {
-            ctx.ui->add_rect({x, bounds.y, tab_w, 2.0f}, ctx.theme->keyword);
+            ctx.r->add_rect({x, bounds.y, tab_w, 2.0f}, ctx.theme->keyword);
         }
 
         // Right border separator
-        ctx.ui->add_rect({x + tab_w - 1.0f, bounds.y, 1.0f, tab_height},
+        ctx.r->add_rect({x + tab_w - 1.0f, bounds.y, 1.0f, tab_height},
                          ctx.theme->border);
 
         // Tab title text
         Color text_color = is_active ? ctx.theme->fg : ctx.theme->comment;
-        ctx.text->add_text(x + tab_padding,
+        ctx.r->add_text(x + tab_padding,
                            bounds.y + ctx.font->ascender() + 4.0f,
                            title, text_color, *ctx.font);
 
         // Close button "x"
         float close_x = x + tab_w - close_btn_w - 4.0f;
         float close_y = bounds.y + ctx.font->ascender() + 4.0f;
-        ctx.text->add_text(close_x, close_y, "x", ctx.theme->comment, *ctx.font);
+        ctx.r->add_text(close_x, close_y, "x", ctx.theme->comment, *ctx.font);
 
         x += tab_w;
     }
@@ -131,7 +129,6 @@ bool TabBar::handle_mouse(const MouseEvent& e) {
     for (size_t i = 0; i < tabs_.size(); i++) {
         auto& tab = tabs_[i];
         std::string title = tab.editor->title();
-        if (tab.editor->is_modified()) title = "* " + title;
 
         float text_w = static_cast<float>(title.size()) * char_w;
         float tab_w = text_w + tab_padding * 2.0f + close_btn_w;

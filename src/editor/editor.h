@@ -30,6 +30,8 @@ public:
     void indent();
     void unindent();
     void toggle_comment();
+    void undo();
+    void redo();
     void newline();
     void tab();
 
@@ -50,6 +52,9 @@ public:
     float scroll_y() const { return scroll_y_; }
     void set_scroll(float x, float y) { scroll_x_ = x; scroll_y_ = y; }
     void scroll_to_cursor(float view_width, float view_height, float char_w, float line_h);
+
+    // Brings the syntax tree up to date with all buffer edits (including undo/redo).
+    void sync_syntax();
 
     // State
     bool is_modified() const { return buffer_.is_modified(); }

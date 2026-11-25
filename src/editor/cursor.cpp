@@ -1,4 +1,5 @@
 #include "editor/cursor.h"
+#include "editor/utf8.h"
 #include "editor/buffer.h"
 #include <algorithm>
 
@@ -30,7 +31,20 @@ void CursorSet::clear_secondary() {
 }
 
 void CursorSet::update_preferred_col() {
-    preferred_col_ = selections_[0].head.col;
+    preferred_col_ = SIZE_MAX;  // recomputed from the primary head on the next vertical move
+}
+
+size_t CursorSet::vertical_target_col(const TextBuffer& buf, size_t line) {
+    if (preferred_col_ == SIZE_MAX) {
+        const Position& h = selections_[0].head;
+        preferred_col_ = utf8::display_col(buf.line_text(h.line), h.col);
+    }
+    return utf8::byte_col_at(buf.line_text(line), preferred_col_);
+}
+
+void CursorSet::extend_primary(Position pos) {
+    selections_[0].head = pos;
+    update_preferred_col();
 }
 
 void CursorSet::merge_overlapping() {
@@ -86,7 +100,7 @@ void CursorSet::move_left(const TextBuffer& buf, bool select) {
         }
         Position h = sel.head;
         if (h.col > 0) {
-            apply_move(sel, {h.line, h.col - 1}, select);
+            apply_move(sel, {h.line, utf8::prev_boundary(buf.line_text(h.line), h.col)}, select);
         } else if (h.line > 0) {
             size_t prev_len = buf.line_length(h.line - 1);
             apply_move(sel, {h.line - 1, prev_len}, select);
@@ -106,7 +120,7 @@ void CursorSet::move_right(const TextBuffer& buf, bool select) {
         Position h = sel.head;
         size_t ll = buf.line_length(h.line);
         if (h.col < ll) {
-            apply_move(sel, {h.line, h.col + 1}, select);
+            apply_move(sel, {h.line, utf8::next_boundary(buf.line_text(h.line), h.col)}, select);
         } else if (h.line + 1 < buf.line_count()) {
             apply_move(sel, {h.line + 1, 0}, select);
         }
@@ -119,12 +133,7 @@ void CursorSet::move_up(const TextBuffer& buf, bool select) {
     for (auto& sel : selections_) {
         Position h = sel.head;
         if (h.line > 0) {
-            size_t target_col = std::max(preferred_col_, h.col);
-            // Use preferred_col_ for vertical movement
-            target_col = preferred_col_;
-            size_t prev_len = buf.line_length(h.line - 1);
-            size_t col = std::min(target_col, prev_len);
-            apply_move(sel, {h.line - 1, col}, select);
+            apply_move(sel, {h.line - 1, vertical_target_col(buf, h.line - 1)}, select);
         }
     }
     merge_overlapping();
@@ -135,10 +144,7 @@ void CursorSet::move_down(const TextBuffer& buf, bool select) {
     for (auto& sel : selections_) {
         Position h = sel.head;
         if (h.line + 1 < buf.line_count()) {
-            size_t target_col = preferred_col_;
-            size_t next_len = buf.line_length(h.line + 1);
-            size_t col = std::min(target_col, next_len);
-            apply_move(sel, {h.line + 1, col}, select);
+            apply_move(sel, {h.line + 1, vertical_target_col(buf, h.line + 1)}, select);
         }
     }
     merge_overlapping();
@@ -225,9 +231,7 @@ void CursorSet::move_page_up(const TextBuffer& buf, size_t page_lines, bool sele
     for (auto& sel : selections_) {
         Position h = sel.head;
         size_t new_line = (h.line >= page_lines) ? h.line - page_lines : 0;
-        size_t ll = buf.line_length(new_line);
-        size_t col = std::min(preferred_col_, ll);
-        apply_move(sel, {new_line, col}, select);
+        apply_move(sel, {new_line, vertical_target_col(buf, new_line)}, select);
     }
     merge_overlapping();
 }
@@ -236,9 +240,7 @@ void CursorSet::move_page_down(const TextBuffer& buf, size_t page_lines, bool se
     for (auto& sel : selections_) {
         Position h = sel.head;
         size_t new_line = std::min(h.line + page_lines, buf.line_count() - 1);
-        size_t ll = buf.line_length(new_line);
-        size_t col = std::min(preferred_col_, ll);
-        apply_move(sel, {new_line, col}, select);
+        apply_move(sel, {new_line, vertical_target_col(buf, new_line)}, select);
     }
     merge_overlapping();
 }

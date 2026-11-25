@@ -14,6 +14,7 @@ public:
 
     void set_commands(std::vector<Command> cmds) { commands_ = std::move(cmds); }
     void set_file_list(std::vector<fs::path> files) { file_list_ = std::move(files); }
+    void set_root(fs::path root) { root_ = std::move(root); }
 
     using FileOpenCallback = std::function<void(const fs::path&)>;
     void set_on_file_open(FileOpenCallback cb) { on_file_open_ = cb; }
@@ -23,6 +24,7 @@ public:
     bool handle_text(const std::string& text) override;
 
 private:
+    fs::path root_;
     bool visible_ = false;
     Mode mode_ = Mode::Commands;
     std::string query_;

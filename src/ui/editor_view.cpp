@@ -1,7 +1,7 @@
 #include "ui/editor_view.h"
+#include "editor/utf8.h"
 #include "renderer/font_atlas.h"
-#include "renderer/text_renderer.h"
-#include "renderer/ui_renderer.h"
+#include "renderer/renderer2d.h"
 #include <SDL3/SDL_keycode.h>
 #include <algorithm>
 #include <cmath>
@@ -30,6 +30,7 @@ float EditorView::gutter_width(const FontAtlas& font) const {
 void EditorView::render(RenderContext& ctx, Rect bounds) {
     bounds_ = bounds;
     if (!editor_) return;
+    editor_->sync_syntax();
 
     cached_line_h_ = ctx.font->line_height();
     cached_char_w_ = ctx.font->char_width();
@@ -40,13 +41,15 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     Rect text_rect = {bounds.x + gw, bounds.y, bounds.w - gw, bounds.h};
 
     // Editor background
-    ctx.ui->add_rect(bounds, ctx.theme->bg);
+    ctx.r->add_rect(bounds, ctx.theme->bg);
 
     // Render layers
     render_gutter(ctx, gutter_rect);
+    ctx.r->push_clip(text_rect);
     render_selections(ctx, text_rect);
     render_text(ctx, text_rect);
     render_cursors(ctx, text_rect);
+    ctx.r->pop_clip();
 }
 
 void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
@@ -56,7 +59,7 @@ void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
     float scroll_y = editor_->scroll_y();
 
     // Gutter background
-    ctx.ui->add_rect(gutter_rect, ctx.theme->sidebar_bg);
+    ctx.r->add_rect(gutter_rect, ctx.theme->sidebar_bg);
 
     size_t first_line = static_cast<size_t>(scroll_y / line_h);
     size_t visible_lines = static_cast<size_t>(gutter_rect.h / line_h) + 2;
@@ -87,40 +90,40 @@ void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
                            ? ctx.theme->fg
                            : ctx.theme->line_number;
 
-        ctx.text->add_text(text_x, y + ctx.font->ascender(), num_buf, color,
+        ctx.r->add_text(text_x, y + ctx.font->ascender(), num_buf, color,
                            *ctx.font);
     }
+}
+
+float EditorView::row_y(size_t line, Rect text_rect) const {
+    return text_rect.y + static_cast<float>(line) * cached_line_h_ - editor_->scroll_y();
+}
+
+float EditorView::col_x(const std::string& line_text, size_t byte_col, Rect text_rect) const {
+    return text_rect.x + TEXT_PAD - editor_->scroll_x() +
+           static_cast<float>(utf8::display_col(line_text, byte_col)) * cached_char_w_;
+}
+
+std::pair<size_t, size_t> EditorView::visible_lines(Rect text_rect) const {
+    size_t first = static_cast<size_t>(std::max(0.0f, editor_->scroll_y()) / cached_line_h_);
+    size_t count = static_cast<size_t>(text_rect.h / cached_line_h_) + 2;
+    size_t end = std::min(first + count, editor_->buffer().line_count());
+    return {first, end};
 }
 
 void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
     auto& buf = editor_->buffer();
     auto& syntax = editor_->syntax();
-    float line_h = ctx.font->line_height();
-    float char_w = ctx.font->char_width();
-    float scroll_x = editor_->scroll_x();
-    float scroll_y = editor_->scroll_y();
+    float char_w = cached_char_w_;
+    auto [first, end] = visible_lines(text_rect);
 
-    size_t first_line = static_cast<size_t>(scroll_y / line_h);
-    size_t visible_lines = static_cast<size_t>(text_rect.h / line_h) + 2;
-    size_t total_lines = buf.line_count();
-
-    for (size_t i = 0; i < visible_lines && (first_line + i) < total_lines; i++) {
-        size_t line_idx = first_line + i;
+    for (size_t line_idx = first; line_idx < end; line_idx++) {
         std::string line = buf.line_text(line_idx);
-        float y = text_rect.y + static_cast<float>(i) * line_h -
-                  std::fmod(scroll_y, line_h);
-
-        if (y + line_h < text_rect.y || y > text_rect.y + text_rect.h)
-            continue;
-
-        // Get syntax tokens for this line
-        size_t line_start = buf.line_start(line_idx);
+        float y = row_y(line_idx, text_rect);
         size_t line_len = line.size();
-        auto tokens = syntax.tokens_for_line(line_idx, line_start, line_len);
+        auto tokens = syntax.tokens_for_line(line_idx, buf.line_start(line_idx), line_len);
 
-        // Build a color array for each character, default to fg
-        std::vector<Color> char_colors(line_len, ctx.theme->fg);
-
+        std::vector<Color> byte_colors(line_len, ctx.theme->fg);
         for (auto& tok : tokens) {
             Color c = ctx.theme->fg;
             switch (tok.type) {
@@ -132,150 +135,89 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
                 case TokenType::Type:         c = ctx.theme->type_color; break;
                 case TokenType::Operator:     c = ctx.theme->operator_color; break;
                 case TokenType::Preprocessor: c = ctx.theme->keyword; break;
-                case TokenType::Variable:     c = ctx.theme->fg; break;
                 case TokenType::Property:     c = ctx.theme->function_name; break;
                 case TokenType::Error:        c = ctx.theme->error; break;
                 default: break;
             }
-            for (uint32_t j = tok.start; j < tok.start + tok.length && j < line_len; j++) {
-                char_colors[j] = c;
-            }
+            for (size_t j = tok.start; j < tok.start + tok.length && j < line_len; j++)
+                byte_colors[j] = c;
         }
 
-        // Render each character
-        float x_base = text_rect.x + 4.0f - scroll_x;
-        for (size_t col = 0; col < line_len; col++) {
-            char ch = line[col];
-            if (ch == '\n' || ch == '\r') continue;
-
-            float x = x_base + static_cast<float>(col) * char_w;
-            // Skip characters outside visible area
-            if (x + char_w < text_rect.x || x > text_rect.x + text_rect.w) continue;
-
-            if (ch == '\t') {
-                // Tab — just skip the space, it already gets spacing from col width
-                continue;
+        float x_base = text_rect.x + TEXT_PAD - editor_->scroll_x();
+        float baseline = y + ctx.font->ascender();
+        size_t dcol = 0;
+        for (size_t i = 0; i < line_len;) {
+            size_t start = i;
+            size_t next = utf8::next_boundary(line, i);
+            char lead = line[i];
+            size_t width = utf8::cell_width(lead, dcol);
+            float x = x_base + static_cast<float>(dcol) * char_w;
+            if (x > text_rect.x + text_rect.w) break;
+            if (lead != '\t' && lead != '\r' && x + char_w * width >= text_rect.x) {
+                uint32_t cp = static_cast<unsigned char>(lead);
+                if (cp >= 0x80) {
+                    int extra = next - start - 1;
+                    cp &= 0x3F >> extra;
+                    for (size_t k = start + 1; k < next; k++)
+                        cp = (cp << 6) | (static_cast<unsigned char>(line[k]) & 0x3F);
+                }
+                ctx.r->add_char(x, baseline, cp, byte_colors[start], *ctx.font);
             }
-
-            ctx.text->add_char(x, y + ctx.font->ascender(),
-                               static_cast<uint32_t>(ch),
-                               char_colors[col], *ctx.font);
+            dcol += width;
+            i = next;
         }
     }
 }
 
 void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
     auto& buf = editor_->buffer();
-    float line_h = ctx.font->line_height();
-    float char_w = ctx.font->char_width();
-    float scroll_x = editor_->scroll_x();
-    float scroll_y = editor_->scroll_y();
+    auto [first, end] = visible_lines(text_rect);
 
-    size_t first_line = static_cast<size_t>(scroll_y / line_h);
-    size_t visible_lines = static_cast<size_t>(text_rect.h / line_h) + 2;
+    // Current line first, so selections paint over it.
+    size_t cursor_line = editor_->cursors().primary_pos().line;
+    if (cursor_line >= first && cursor_line < end)
+        ctx.r->add_rect({text_rect.x, row_y(cursor_line, text_rect), text_rect.w, cached_line_h_},
+                        ctx.theme->current_line);
 
     for (auto& sel : editor_->cursors().selections()) {
         if (sel.empty()) continue;
-
-        Position sel_min = sel.min();
-        Position sel_max = sel.max();
-
-        for (size_t i = 0; i < visible_lines; i++) {
-            size_t line_idx = first_line + i;
-            if (line_idx >= buf.line_count()) break;
-            if (line_idx < sel_min.line || line_idx > sel_max.line) continue;
-
-            size_t line_len = buf.line_length(line_idx);
-            size_t start_col = 0;
-            size_t end_col = line_len;
-
-            if (line_idx == sel_min.line) start_col = sel_min.col;
-            if (line_idx == sel_max.line) end_col = sel_max.col;
-
-            if (start_col >= end_col && line_idx != sel_max.line) {
-                // Select to end of line (including newline space)
-                end_col = line_len + 1;
-            }
-            if (start_col >= end_col) continue;
-
-            float y = text_rect.y + static_cast<float>(line_idx - first_line) * line_h -
-                      std::fmod(scroll_y, line_h);
-            float x = text_rect.x + 4.0f - scroll_x +
-                      static_cast<float>(start_col) * char_w;
-            float w = static_cast<float>(end_col - start_col) * char_w;
-
-            ctx.ui->add_rect({x, y, w, line_h}, ctx.theme->selection);
+        Position mn = sel.min(), mx = sel.max();
+        for (size_t line_idx = std::max(first, mn.line); line_idx < end && line_idx <= mx.line; line_idx++) {
+            std::string line = buf.line_text(line_idx);
+            float x0 = col_x(line, line_idx == mn.line ? mn.col : 0, text_rect);
+            float x1 = col_x(line, line_idx == mx.line ? mx.col : line.size(), text_rect);
+            if (line_idx != mx.line) x1 += cached_char_w_;  // show the selected newline
+            if (x1 <= x0) continue;
+            ctx.r->add_rect({x0, row_y(line_idx, text_rect), x1 - x0, cached_line_h_},
+                            ctx.theme->selection);
         }
-    }
-
-    // Also highlight the current line (subtle)
-    size_t cursor_line = editor_->cursors().primary_pos().line;
-    if (cursor_line >= first_line && cursor_line < first_line + visible_lines) {
-        float y = text_rect.y +
-                  static_cast<float>(cursor_line - first_line) * line_h -
-                  std::fmod(scroll_y, line_h);
-        Color line_highlight = ctx.theme->fg;
-        line_highlight.a = 0.04f;
-        ctx.ui->add_rect({text_rect.x, y, text_rect.w, line_h}, line_highlight);
     }
 }
 
 void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {
     if (!cursor_visible_ || !focused_) return;
-
-    float line_h = ctx.font->line_height();
-    float char_w = ctx.font->char_width();
-    float scroll_x = editor_->scroll_x();
-    float scroll_y = editor_->scroll_y();
-
-    size_t first_line = static_cast<size_t>(scroll_y / line_h);
-    size_t visible_lines = static_cast<size_t>(text_rect.h / line_h) + 2;
-
+    auto& buf = editor_->buffer();
+    auto [first, end] = visible_lines(text_rect);
     for (auto& sel : editor_->cursors().selections()) {
         Position pos = sel.head;
-        if (pos.line < first_line || pos.line >= first_line + visible_lines) continue;
-
-        float x = text_rect.x + 4.0f - scroll_x +
-                  static_cast<float>(pos.col) * char_w;
-        float y = text_rect.y +
-                  static_cast<float>(pos.line - first_line) * line_h -
-                  std::fmod(scroll_y, line_h);
-
-        // 2px wide cursor bar
-        ctx.ui->add_rect({x, y, 2.0f, line_h}, ctx.theme->cursor_color);
+        if (pos.line < first || pos.line >= end) continue;
+        float x = col_x(buf.line_text(pos.line), pos.col, text_rect);
+        ctx.r->add_rect({x, row_y(pos.line, text_rect), 2.0f, cached_line_h_}, ctx.theme->cursor_color);
     }
 }
 
-void EditorView::render_minimap(RenderContext& /*ctx*/, Rect /*minimap_rect*/) {
-    // Minimap rendering — deferred for future implementation
-}
+void EditorView::render_minimap(RenderContext& /*ctx*/, Rect /*minimap_rect*/) {}
 
-Position EditorView::pixel_to_position(float x, float y, Rect text_rect,
-                                       const FontAtlas& font) const {
-    if (!editor_) return {0, 0};
-
-    float line_h = font.line_height();
-    float char_w = font.char_width();
-    float scroll_x = editor_->scroll_x();
-    float scroll_y = editor_->scroll_y();
-
-    float rel_y = y - text_rect.y + scroll_y;
-    float rel_x = x - text_rect.x - 4.0f + scroll_x;
-
-    size_t line = 0;
-    if (rel_y > 0) {
-        line = static_cast<size_t>(rel_y / line_h);
-    }
-    line = std::min(line, editor_->buffer().line_count() - 1);
-
-    size_t col = 0;
-    if (rel_x > 0) {
-        col = static_cast<size_t>((rel_x + char_w * 0.5f) / char_w);
-    }
-    size_t line_len = editor_->buffer().line_length(line);
-    col = std::min(col, line_len);
-
-    return {line, col};
+Position EditorView::position_at(float x, float y) const {
+    Rect text_rect = {bounds_.x + cached_gutter_w_, bounds_.y, bounds_.w - cached_gutter_w_, bounds_.h};
+    auto& buf = editor_->buffer();
+    float rel_y = y - text_rect.y + editor_->scroll_y();
+    float rel_x = x - text_rect.x - TEXT_PAD + editor_->scroll_x();
+    size_t line = rel_y > 0 ? static_cast<size_t>(rel_y / cached_line_h_) : 0;
+    line = std::min(line, buf.line_count() - 1);
+    // Round to the nearest cell edge; byte_col_at snaps to a character boundary.
+    size_t dcol = rel_x > 0 ? static_cast<size_t>(rel_x / cached_char_w_ + 0.5f) : 0;
+    return {line, utf8::byte_col_at(buf.line_text(line), dcol)};
 }
 
 bool EditorView::handle_key(const KeyEvent& e) {
@@ -367,9 +309,9 @@ bool EditorView::handle_key(const KeyEvent& e) {
             case 'd': cursors.select_word(buf); handled = true; break;
             case 'l': cursors.select_line(buf); handled = true; break;
             case 'z':
-                if (shift) buf.redo(); else buf.undo();
+                if (shift) editor_->redo(); else editor_->undo();
                 handled = true; break;
-            case 'y': buf.redo(); handled = true; break;
+            case 'y': editor_->redo(); handled = true; break;
             case '/': editor_->toggle_comment(); handled = true; break;
             default: break;
         }
@@ -393,61 +335,29 @@ bool EditorView::handle_mouse(const MouseEvent& e) {
     if (!editor_) return false;
     if (!bounds_.contains(e.x, e.y) && !mouse_selecting_) return false;
 
-    float gw = cached_gutter_w_;
-    Rect text_rect = {bounds_.x + gw, bounds_.y, bounds_.w - gw, bounds_.h};
-
-    // Scroll
     if (e.scroll_y != 0.0f) {
+        float max_scroll = static_cast<float>(editor_->buffer().line_count() - 1) * cached_line_h_;
         float new_scroll = editor_->scroll_y() - e.scroll_y * cached_line_h_ * 3.0f;
-        new_scroll = std::max(0.0f, new_scroll);
-        editor_->set_scroll(editor_->scroll_x(), new_scroll);
+        editor_->set_scroll(editor_->scroll_x(), std::clamp(new_scroll, 0.0f, max_scroll));
         return true;
     }
+    if (e.button != 1) return false;
 
-    if (e.button == 1) { // Left button
-        if (e.pressed) {
-            // Reset blink
-            cursor_blink_timer_ = 0;
-            cursor_visible_ = true;
-
-            // We need font metrics — use defaults if not available
-            // In a real render path, we'd cache the font reference
-            // For now, approximate char width/line height
-            Position pos = {0, 0};
-
-            float line_h = cached_line_h_;
-            float char_w = cached_char_w_;
-            float scroll_y = editor_->scroll_y();
-            float scroll_x = editor_->scroll_x();
-
-            float rel_y = e.y - text_rect.y + scroll_y;
-            float rel_x = e.x - text_rect.x - 4.0f + scroll_x;
-
-            size_t line = 0;
-            if (rel_y > 0) line = static_cast<size_t>(rel_y / line_h);
-            line = std::min(line, editor_->buffer().line_count() - 1);
-
-            size_t col = 0;
-            if (rel_x > 0) col = static_cast<size_t>((rel_x + char_w * 0.5f) / char_w);
-            col = std::min(col, editor_->buffer().line_length(line));
-
-            pos = {line, col};
-
-            if (e.double_click) {
-                editor_->cursors().set_primary(pos);
-                editor_->cursors().select_word(editor_->buffer());
-            } else {
-                editor_->cursors().set_primary(pos);
-                mouse_selecting_ = true;
-            }
-            return true;
-        } else {
-            mouse_selecting_ = false;
-            return true;
-        }
+    cursor_blink_timer_ = 0;
+    cursor_visible_ = true;
+    if (e.motion) {
+        if (mouse_selecting_) editor_->cursors().extend_primary(position_at(e.x, e.y));
+        return true;
     }
-
-    return false;
+    if (!e.pressed) {
+        mouse_selecting_ = false;
+        return true;
+    }
+    Position pos = position_at(e.x, e.y);
+    editor_->cursors().set_primary(pos);
+    if (e.double_click) editor_->cursors().select_word(editor_->buffer());
+    else mouse_selecting_ = true;
+    return true;
 }
 
 bool EditorView::handle_text(const std::string& text) {

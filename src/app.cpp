@@ -1,10 +1,19 @@
 #include "app.h"
 #include <SDL3/SDL.h>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
 
 namespace oh {
+
+void request_redraw() {
+    if (!SDL_HasEvent(SDL_EVENT_USER)) {
+        SDL_Event wake{};
+        wake.type = SDL_EVENT_USER;
+        SDL_PushEvent(&wake);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Construction / destruction
@@ -13,6 +22,7 @@ namespace oh {
 App::App() = default;
 
 App::~App() {
+    if (vk_.device()) vkDeviceWaitIdle(vk_.device());
     plugins_.shutdown();
 
     if (lsp_.is_running()) lsp_.stop();
@@ -20,8 +30,7 @@ App::~App() {
     terminal_.kill();
 
     font_.cleanup(vk_);
-    text_renderer_.cleanup(vk_);
-    ui_renderer_.cleanup(vk_);
+    renderer_.cleanup(vk_);
     vk_.cleanup();
 
     if (window_) {
@@ -38,6 +47,7 @@ App::~App() {
 bool App::init(int argc, char** argv) {
     // ---- Parse arguments ----
     std::vector<fs::path> file_args;
+    fs::path script_path;
     project_root_ = fs::current_path();
 
     for (int i = 1; i < argc; ++i) {
@@ -46,6 +56,10 @@ bool App::init(int argc, char** argv) {
             project_root_ = fs::absolute(arg.substr(10));
         } else if (arg == "--project" && i + 1 < argc) {
             project_root_ = fs::absolute(argv[++i]);
+        } else if (arg == "--script" && i + 1 < argc) {
+            script_path = argv[++i];
+        } else if (arg == "--debug-hit") {
+            debug_hit_ = true;
         } else if (arg[0] != '-') {
             file_args.push_back(fs::absolute(arg));
         }
@@ -72,42 +86,26 @@ bool App::init(int argc, char** argv) {
     }
 
     // ---- Font ----
-    // Try several common font paths
-    const char* font_paths[] = {
+    // Primary is the first that exists; the rest form the glyph fallback chain.
+    const char* font_candidates[] = {
+        "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
         "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
-        "/usr/share/fonts/TTF/NotoSansMono-Regular.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
-        "/usr/share/fonts/google-noto/NotoSansMono-Regular.ttf",
-        "/usr/share/fonts/noto-cjk/NotoSansMono-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-        nullptr
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
     };
-
-    bool font_loaded = false;
-    for (const char** fp = font_paths; *fp; ++fp) {
-        if (fs::exists(*fp)) {
-            if (font_.init(vk_, *fp, 15.0f)) {
-                font_loaded = true;
-                break;
-            }
-        }
-    }
-
-    if (!font_loaded) {
-        // Last resort: try fontconfig
-        // (In production we'd use fc-match, but for now just fail gracefully)
-        std::fprintf(stderr, "Could not find a monospace font\n");
+    std::vector<std::string> font_chain;
+    for (const char* fp : font_candidates)
+        if (fs::exists(fp)) font_chain.push_back(fp);
+    if (!font_.init(vk_, font_chain, 15.0f)) {
+        std::fprintf(stderr, "Could not load any font\n");
         return false;
     }
 
     // ---- Renderers ----
-    if (!text_renderer_.init(vk_, font_)) {
-        std::fprintf(stderr, "TextRenderer::init failed\n");
-        return false;
-    }
-    if (!ui_renderer_.init(vk_)) {
-        std::fprintf(stderr, "UIRenderer::init failed\n");
+    if (!renderer_.init(vk_, font_)) {
+        std::fprintf(stderr, "Renderer2D::init failed\n");
         return false;
     }
 
@@ -155,11 +153,15 @@ bool App::init(int argc, char** argv) {
     // ---- Scan project files for command palette ----
     scan_project_files();
     command_palette_.set_commands(commands_);
+    command_palette_.set_root(project_root_);
     command_palette_.set_file_list(all_files_);
     command_palette_.set_on_file_open([this](const fs::path& p) { open_file(p); });
 
     // ---- Text input ----
     SDL_StartTextInput(window_);
+
+    if (!script_path.empty() && !script_.load(script_path, window_))
+        return false;
 
     running_ = true;
     return true;
@@ -171,19 +173,95 @@ bool App::init(int argc, char** argv) {
 
 void App::run() {
     auto last_time = Clock::now();
+    constexpr float FRAME_BUDGET_MS = 1000.0f / 60.0f;
 
     while (running_) {
+        // Event-driven: sleep until input, terminal output (SDL_EVENT_USER), the next
+        // cursor blink, or the next scripted step.
+        int timeout = 500;
+        if (script_.active()) timeout = std::min(timeout, script_.ms_until_next(Clock::now()));
         SDL_Event e;
-        while (SDL_PollEvent(&e)) {
+        if (pending_probes_.empty() && SDL_WaitEventTimeout(&e, timeout))
             handle_event(e);
-        }
+        while (SDL_PollEvent(&e))
+            handle_event(e);
+        if (!running_) break;
 
-        auto now = Clock::now();
-        float dt = std::chrono::duration<float>(now - last_time).count();
-        last_time = now;
+        auto frame_start = Clock::now();
+        float dt = std::chrono::duration<float>(frame_start - last_time).count();
+        last_time = frame_start;
 
         update(dt);
+        auto probe_start = Clock::now();
+        for (auto& label : pending_probes_) {
+            emit_probe(label);
+            // Screenshot probes block until the driver acks on stdin, so the capture
+            // shows exactly this state (the frame for it was presented last iteration).
+            if (label.rfind("shot:", 0) == 0) {
+                char ack[16];
+                if (!std::fgets(ack, sizeof(ack), stdin)) {}
+            }
+        }
+        pending_probes_.clear();
+        frame_start += Clock::now() - probe_start;  // test-harness waits are not frame time
+        for (auto& label : script_.step(Clock::now())) pending_probes_.push_back(label);
+
         render();
+        frame_count_++;
+
+        float frame_ms = std::chrono::duration<float, std::milli>(Clock::now() - frame_start).count();
+        frame_times_ms_.push_back(frame_ms);
+        if (!first_paint_done_) {
+            first_paint_done_ = true;
+            std::fprintf(stderr, "first paint time: %.1f ms\n",
+                         std::chrono::duration<float, std::milli>(Clock::now() - start_time_).count());
+        } else if (frame_ms > FRAME_BUDGET_MS) {
+            std::fprintf(stderr, "frame time exceeded 60hz: %.2f ms (%zu quads)\n",
+                         frame_ms, renderer_.quad_count());
+        }
+    }
+    print_frame_stats();
+}
+
+void App::print_frame_stats() const {
+    if (frame_times_ms_.size() < 2) return;
+    std::vector<float> t(frame_times_ms_.begin() + 1, frame_times_ms_.end());  // skip first paint
+    std::sort(t.begin(), t.end());
+    double sum = 0;
+    for (float v : t) sum += v;
+    std::fprintf(stderr, "frame stats: %zu frames, avg %.2f ms, p50 %.2f, p95 %.2f, max %.2f ms\n",
+                 t.size(), sum / t.size(), t[t.size() / 2], t[t.size() * 95 / 100], t.back());
+}
+
+void App::emit_probe(const std::string& label) {
+    Layout l = compute_layout();
+    int w, h, pw, ph;
+    SDL_GetWindowSize(window_, &w, &h);
+    SDL_GetWindowSizeInPixels(window_, &pw, &ph);
+    VkExtent2D ext = vk_.extent();
+    std::fprintf(stderr, "PROBE %s: window=%dx%d pixels=%dx%d swapchain=%ux%u\n",
+                 label.c_str(), w, h, pw, ph, ext.width, ext.height);
+    std::fprintf(stderr, "  editor=(%.0f,%.0f %.0fx%.0f) terminal=(%.0f,%.0f %.0fx%.0f) gutter=%.0f "
+                 "char=%.1fx%.1f last_click=(%.0f,%.0f)\n",
+                 l.editor.x, l.editor.y, l.editor.w, l.editor.h,
+                 l.terminal.x, l.terminal.y, l.terminal.w, l.terminal.h,
+                 editor_view_.last_gutter_width(), font_.char_width(), font_.line_height(),
+                 last_click_x_, last_click_y_);
+    const char* focus = terminal_.focused() ? "terminal"
+                      : file_tree_.focused() ? "tree"
+                      : editor_view_.focused() ? "editor" : "none";
+    if (Editor* ed = current_editor()) {
+        auto& sel = ed->cursors().selections();
+        Position p = ed->cursors().primary_pos();
+        std::fprintf(stderr, "  file=%s cursor=%zu:%zu (0-based) cursors=%zu scroll=(%.0f,%.0f) "
+                     "focus=%s palette=%d modified=%d\n",
+                     ed->buffer().file_path().filename().c_str(), p.line, p.col, sel.size(),
+                     ed->scroll_x(), ed->scroll_y(), focus, command_palette_.is_visible(),
+                     ed->is_modified());
+        auto& s0 = sel.front();
+        std::fprintf(stderr, "  selection=%zu:%zu-%zu:%zu line=\"%s\"\n", s0.anchor.line,
+                     s0.anchor.col, s0.head.line, s0.head.col,
+                     ed->buffer().line_text(p.line).substr(0, 80).c_str());
     }
 }
 
@@ -267,6 +345,8 @@ void App::handle_event(const SDL_Event& e) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN: {
         float mx = e.button.x;
         float my = e.button.y;
+        last_click_x_ = mx;
+        last_click_y_ = my;
         Layout layout = compute_layout();
 
         MouseEvent me{mx, my, static_cast<int>(e.button.button), true,
@@ -304,8 +384,8 @@ void App::handle_event(const SDL_Event& e) {
     }
 
     case SDL_EVENT_MOUSE_WHEEL: {
-        float mx, my;
-        SDL_GetMouseState(&mx, &my);
+        float mx = e.wheel.mouse_x;
+        float my = e.wheel.mouse_y;
         Layout layout = compute_layout();
 
         MouseEvent me{mx, my, 0, false, false, e.wheel.x, e.wheel.y};
@@ -322,7 +402,7 @@ void App::handle_event(const SDL_Event& e) {
 
     case SDL_EVENT_MOUSE_MOTION: {
         if (e.motion.state & SDL_BUTTON_LMASK) {
-            MouseEvent me{e.motion.x, e.motion.y, 1, true, false, 0, 0};
+            MouseEvent me{e.motion.x, e.motion.y, 1, true, false, 0, 0, true};
             editor_view_.handle_mouse(me);
         }
         break;
@@ -363,9 +443,9 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "toggle_sidebar") {
         sidebar_visible_ = !sidebar_visible_;
     } else if (cmd == "undo") {
-        if (Editor* ed = current_editor()) ed->buffer().undo();
+        if (Editor* ed = current_editor()) ed->undo();
     } else if (cmd == "redo") {
-        if (Editor* ed = current_editor()) ed->buffer().redo();
+        if (Editor* ed = current_editor()) ed->redo();
     } else if (cmd == "select_word") {
         if (Editor* ed = current_editor()) ed->cursors().select_word(ed->buffer());
     } else if (cmd == "select_line") {
@@ -423,7 +503,7 @@ App::Layout App::compute_layout() const {
     float content_h = fh - status_h;
 
     // Sidebar: left side
-    float sb_w = sidebar_visible_ ? sidebar_width_ : 0.0f;
+    float sb_w = sidebar_visible_ ? std::min(sidebar_width_, std::floor(fw * 0.25f)) : 0.0f;
     l.sidebar = {0, 0, sb_w, content_h};
 
     float right_x = sb_w;
@@ -434,7 +514,8 @@ App::Layout App::compute_layout() const {
     l.tab_bar = {right_x, 0, right_w, tab_h};
 
     // Terminal: at bottom of right region (above status bar)
-    float term_h = terminal_visible_ ? terminal_height_ : 0.0f;
+    float term_h = terminal_visible_
+        ? std::min(terminal_height_, std::floor((content_h - tab_h) * 0.4f)) : 0.0f;
     l.terminal = {right_x, content_h - term_h, right_w, term_h};
 
     // Editor: remaining space
@@ -466,62 +547,64 @@ void App::update(float dt) {
 // ---------------------------------------------------------------------------
 
 void App::render() {
-    uint32_t image_index;
-    if (!vk_.begin_frame(image_index)) {
-        vk_.recreate_swapchain();
-        return;
-    }
-
-    VkCommandBuffer cmd = vk_.current_frame_data().cmd;
     VkExtent2D extent = vk_.extent();
 
     Layout layout = compute_layout();
 
     RenderContext ctx;
     ctx.vk    = &vk_;
-    ctx.text  = &text_renderer_;
-    ctx.ui    = &ui_renderer_;
+    ctx.r     = &renderer_;
     ctx.font  = &font_;
     ctx.theme = &theme_;
     ctx.dt    = 0; // already handled in update
 
-    // Begin both batches - panels will add to both
-    ui_renderer_.begin_batch();
-    text_renderer_.begin_batch();
+    // One ordered quad stream for the whole frame
+    renderer_.begin(extent);
 
     if (sidebar_visible_) {
-        ui_renderer_.add_rect(layout.sidebar, theme_.sidebar_bg);
-        ui_renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1, layout.sidebar.y, 1, layout.sidebar.h},
+        renderer_.add_rect(layout.sidebar, theme_.sidebar_bg);
+        renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1, layout.sidebar.y, 1, layout.sidebar.h},
                               theme_.border);
     }
-    ui_renderer_.add_rect(layout.tab_bar, theme_.tab_bg);
-    ui_renderer_.add_rect(layout.editor, theme_.bg);
+    renderer_.add_rect(layout.tab_bar, theme_.tab_bg);
+    renderer_.add_rect(layout.editor, theme_.bg);
     if (terminal_visible_) {
-        ui_renderer_.add_rect(layout.terminal, theme_.terminal_bg);
-        ui_renderer_.add_rect({layout.terminal.x, layout.terminal.y, layout.terminal.w, 1},
+        renderer_.add_rect(layout.terminal, theme_.terminal_bg);
+        renderer_.add_rect({layout.terminal.x, layout.terminal.y, layout.terminal.w, 1},
                               theme_.border);
     }
-    ui_renderer_.add_rect(layout.status_bar, theme_.status_bg);
+    renderer_.add_rect(layout.status_bar, theme_.status_bg);
 
     // All panels add their UI rects (selections, highlights, gutter bg)
-    if (sidebar_visible_) file_tree_.render(ctx, layout.sidebar);
-    tab_bar_.render(ctx, layout.tab_bar);
-    editor_view_.render(ctx, layout.editor);
-    if (terminal_visible_) terminal_.render(ctx, layout.terminal);
-    status_bar_.render(ctx, layout.status_bar);
-    if (command_palette_.is_visible()) {
-        float palette_w = std::min(600.0f, layout.editor.w * 0.8f);
-        float palette_h = 400.0f;
-        float palette_x = layout.editor.x + (layout.editor.w - palette_w) * 0.5f;
-        float palette_y = layout.editor.y + 50.0f;
-        command_palette_.render(ctx, {palette_x, palette_y, palette_w, palette_h});
+    auto clipped = [&](Panel& panel, Rect r) {
+        renderer_.push_clip(r);
+        panel.render(ctx, r);
+        renderer_.pop_clip();
+    };
+    if (sidebar_visible_) clipped(file_tree_, layout.sidebar);
+    clipped(tab_bar_, layout.tab_bar);
+    clipped(editor_view_, layout.editor);
+    if (terminal_visible_) clipped(terminal_, layout.terminal);
+    clipped(status_bar_, layout.status_bar);
+    if (command_palette_.is_visible())
+        clipped(command_palette_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
+
+    if (debug_hit_ && last_click_x_ >= 0) {
+        Color hit = Color::hex(0xff00ff);
+        renderer_.add_rect({last_click_x_, 0, 1, static_cast<float>(extent.height)}, hit);
+        renderer_.add_rect({0, last_click_y_, static_cast<float>(extent.width), 1}, hit);
     }
 
-    // Flush all UI rects first (backgrounds behind text)
-    ui_renderer_.flush(vk_, cmd, extent);
+    // Glyphs first seen while building this frame must reach the GPU before it draws.
+    font_.upload_pending(vk_);
 
-    // Flush all text on top
-    text_renderer_.flush(vk_, cmd, extent);
+    uint32_t image_index;
+    if (!vk_.begin_frame(image_index)) {
+        vk_.recreate_swapchain();
+        return;
+    }
+    VkCommandBuffer cmd = vk_.current_frame_data().cmd;
+    renderer_.flush(vk_, cmd);
 
     vk_.end_frame(image_index);
 }
@@ -536,6 +619,7 @@ void App::open_file(const fs::path& path) {
         auto& tab = tab_bar_.tabs()[i];
         if (tab.editor && tab.editor->buffer().file_path() == path) {
             tab_bar_.set_active(i);
+            focus_editor();
             return;
         }
     }
@@ -543,19 +627,14 @@ void App::open_file(const fs::path& path) {
     auto editor = std::make_shared<Editor>();
     editor->load_file(path);
 
-    // Detect language and set syntax highlighting
-    std::string lang = SyntaxHighlighter::detect_language(path);
-    if (!lang.empty()) {
-        editor->syntax().set_language(lang);
-        editor->syntax().update(editor->buffer());
-    }
-
     tab_bar_.add_tab(editor);
     tab_bar_.set_active(static_cast<int>(tab_bar_.tabs().size()) - 1);
     editor_view_.set_editor(editor);
     status_bar_.set_editor(editor);
+    focus_editor();
 
     setup_lsp_for_file(path);
+
 }
 
 void App::save_current() {
@@ -577,6 +656,13 @@ void App::new_file() {
     tab_bar_.set_active(static_cast<int>(tab_bar_.tabs().size()) - 1);
     editor_view_.set_editor(editor);
     status_bar_.set_editor(editor);
+    focus_editor();
+}
+
+void App::focus_editor() {
+    editor_view_.set_focused(true);
+    terminal_.set_focused(false);
+    file_tree_.set_focused(false);
 }
 
 void App::close_current_tab() {
@@ -663,6 +749,7 @@ void App::scan_project_files() {
             const auto& p = entry.path();
             std::string name = p.filename().string();
 
+            if (git_.is_open() && git_.is_ignored(p)) continue;
             if (entry.is_directory(ec)) {
                 if (std::find(skip_dirs.begin(), skip_dirs.end(), name) == skip_dirs.end()
                     && name[0] != '.') {
@@ -716,6 +803,7 @@ void App::setup_lsp_for_file(const fs::path& path) {
     if (!lsp_cmd.empty()) {
         if (lsp_.start(lsp_cmd, lsp_args)) {
             lsp_.initialize(project_root_);
+
             auto ed = tab_bar_.active_editor();
             if (ed) {
                 lsp_.did_open(path, lang, ed->buffer().text());

@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include <cstdint>
 #include <vector>
 
 namespace oh {
@@ -28,6 +29,8 @@ public:
     void select_all(const TextBuffer& buf);
     void select_word(const TextBuffer& buf);
     void select_line(const TextBuffer& buf);
+    // Moves the primary head, keeping its anchor (mouse drag selection).
+    void extend_primary(Position pos);
 
     const std::vector<Selection>& selections() const { return selections_; }
     const Selection& primary() const { return selections_[0]; }
@@ -38,9 +41,10 @@ public:
 
 private:
     std::vector<Selection> selections_ = {{{0,0},{0,0}}};
-    size_t preferred_col_ = 0;
+    size_t preferred_col_ = SIZE_MAX;  // display column; SIZE_MAX = derive from head
 
     void update_preferred_col();
+    size_t vertical_target_col(const TextBuffer& buf, size_t line);
     void merge_overlapping();
 };
 

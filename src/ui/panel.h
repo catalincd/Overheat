@@ -4,14 +4,12 @@
 namespace oh {
 
 class VulkanContext;
-class TextRenderer;
-class UIRenderer;
+class Renderer2D;
 class FontAtlas;
 
 struct RenderContext {
     VulkanContext* vk;
-    TextRenderer* text;
-    UIRenderer* ui;
+    Renderer2D* r;
     FontAtlas* font;
     Theme* theme;
     float dt;

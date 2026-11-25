@@ -37,54 +37,40 @@ struct Rect {
 };
 
 struct Theme {
-    Color bg            = Color::hex(0x1e1e2e);
-    Color fg            = Color::hex(0xcdd6f4);
-    Color sidebar_bg    = Color::hex(0x181825);
-    Color tab_bg        = Color::hex(0x1e1e2e);
-    Color tab_active_bg = Color::hex(0x313244);
-    Color status_bg     = Color::hex(0x11111b);
-    Color selection     = Color::hex(0x585b70, 0.5f);
-    Color cursor_color  = Color::hex(0xf5e0dc);
-    Color line_number   = Color::hex(0x6c7086);
-    Color comment       = Color::hex(0x6c7086);
-    Color keyword       = Color::hex(0xcba6f7);
-    Color string_color  = Color::hex(0xa6e3a1);
-    Color number        = Color::hex(0xfab387);
-    Color function_name = Color::hex(0x89b4fa);
-    Color type_color    = Color::hex(0xf9e2af);
-    Color operator_color= Color::hex(0x89dceb);
-    Color error         = Color::hex(0xf38ba8);
-    Color warning       = Color::hex(0xf9e2af);
-    Color git_added     = Color::hex(0xa6e3a1);
-    Color git_modified  = Color::hex(0x89b4fa);
-    Color git_deleted   = Color::hex(0xf38ba8);
-    Color border        = Color::hex(0x313244);
-    Color scrollbar     = Color::hex(0x585b70, 0.4f);
-    Color terminal_bg   = Color::hex(0x11111b);
+    // High-contrast debug palette: every region and token class is unmistakable,
+    // so layout and hit-testing bugs are easy to spot in screenshots.
+    Color bg            = Color::hex(0x000000);
+    Color fg            = Color::hex(0xffffff);
+    Color sidebar_bg    = Color::hex(0x002266);
+    Color tab_bg        = Color::hex(0x550000);
+    Color tab_active_bg = Color::hex(0xcc0000);
+    Color status_bg     = Color::hex(0x006600);
+    Color selection     = Color::hex(0x0066ff, 0.65f);
+    Color current_line  = Color::hex(0x262626);
+    Color cursor_color  = Color::hex(0xffff00);
+    Color line_number   = Color::hex(0x00ffff);
+    Color comment       = Color::hex(0x999999);
+    Color keyword       = Color::hex(0xff00ff);
+    Color string_color  = Color::hex(0x00ff00);
+    Color number        = Color::hex(0xff8800);
+    Color function_name = Color::hex(0x00bbff);
+    Color type_color    = Color::hex(0xffff00);
+    Color operator_color= Color::hex(0xff4444);
+    Color error         = Color::hex(0xff0000);
+    Color warning       = Color::hex(0xffaa00);
+    Color git_added     = Color::hex(0x00ff00);
+    Color git_modified  = Color::hex(0x00bbff);
+    Color git_deleted   = Color::hex(0xff0000);
+    Color border        = Color::hex(0xffffff);
+    Color scrollbar     = Color::hex(0xffffff, 0.5f);
+    Color terminal_bg   = Color::hex(0x333300);
 };
 
 struct GlyphInfo {
-    float u0, v0, u1, v1;
+    float atlas_x, atlas_y;  // top-left texel in the atlas
     float width, height;
     float bearing_x, bearing_y;
     float advance;
-};
-
-struct TextInstance {
-    glm::vec2 pos;
-    glm::vec2 size;
-    glm::vec2 uv_min;
-    glm::vec2 uv_max;
-    glm::vec4 color;
-};
-
-struct RectInstance {
-    glm::vec2 pos;
-    glm::vec2 size;
-    glm::vec4 color;
-    float corner_radius;
-    float border_width;
-    glm::vec4 border_color;
 };
 
 struct Position {
@@ -155,9 +141,13 @@ struct MouseEvent {
     bool pressed;
     bool double_click;
     float scroll_x, scroll_y;
+    bool motion = false;
 };
 
 using CommandFn = std::function<void()>;
+
+// Thread-safe: wakes the event-driven main loop so the next frame is drawn.
+void request_redraw();
 
 struct Command {
     std::string name;

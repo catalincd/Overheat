@@ -47,6 +47,9 @@ public:
     Image create_image(uint32_t w, uint32_t h, VkFormat format, VkImageUsageFlags usage);
     void destroy_image(Image& img);
     void upload_image(Image& img, const void* data, uint32_t w, uint32_t h, VkFormat format);
+    // Copies a sub-rectangle of an R8 pixel array into an image already in SHADER_READ layout.
+    void update_image_region(Image& img, const uint8_t* pixels, uint32_t row_pitch,
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 
     VkSampler create_sampler(VkFilter filter = VK_FILTER_LINEAR);
     VkShaderModule load_shader(const std::string& path);
@@ -90,6 +93,7 @@ private:
     std::vector<VkImage> swapchain_images_;
     std::vector<VkImageView> swapchain_views_;
     std::vector<VkFramebuffer> framebuffers_;
+    std::vector<VkSemaphore> present_sems_;
 
     VkRenderPass render_pass_ = VK_NULL_HANDLE;
     VkCommandPool command_pool_ = VK_NULL_HANDLE;

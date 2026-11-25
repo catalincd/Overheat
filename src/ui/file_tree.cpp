@@ -1,7 +1,6 @@
 #include "ui/file_tree.h"
 #include "renderer/font_atlas.h"
-#include "renderer/text_renderer.h"
-#include "renderer/ui_renderer.h"
+#include "renderer/renderer2d.h"
 #include <SDL3/SDL_keycode.h>
 #include <algorithm>
 #include <cmath>
@@ -89,10 +88,10 @@ void FileTree::render(RenderContext& ctx, Rect bounds) {
     float char_w = ctx.font->char_width();
 
     // Background
-    ctx.ui->add_rect(bounds, ctx.theme->sidebar_bg);
+    ctx.r->add_rect(bounds, ctx.theme->sidebar_bg);
 
     // Right border
-    ctx.ui->add_rect({bounds.x + bounds.w - 1.0f, bounds.y, 1.0f, bounds.h},
+    ctx.r->add_rect({bounds.x + bounds.w - 1.0f, bounds.y, 1.0f, bounds.h},
                      ctx.theme->border);
 
     size_t first_entry = static_cast<size_t>(scroll_y_ / line_h);
@@ -109,7 +108,7 @@ void FileTree::render(RenderContext& ctx, Rect bounds) {
 
         // Selection highlight
         if (static_cast<int>(idx) == selected_index_) {
-            ctx.ui->add_rect({bounds.x, y, bounds.w, line_h}, ctx.theme->tab_active_bg);
+            ctx.r->add_rect({bounds.x, y, bounds.w, line_h}, ctx.theme->tab_active_bg);
         }
 
         // Indent
@@ -119,7 +118,7 @@ void FileTree::render(RenderContext& ctx, Rect bounds) {
         // Directory indicator or file icon space
         if (entry->is_dir) {
             const char* indicator = entry->expanded ? "v " : "> ";
-            ctx.text->add_text(text_x, y + ctx.font->ascender(),
+            ctx.r->add_text(text_x, y + ctx.font->ascender(),
                                indicator, ctx.theme->fg, *ctx.font);
             text_x += char_w * 2.0f;
         } else {
@@ -137,7 +136,7 @@ void FileTree::render(RenderContext& ctx, Rect bounds) {
             default: break;
         }
 
-        ctx.text->add_text(text_x, y + ctx.font->ascender(),
+        ctx.r->add_text(text_x, y + ctx.font->ascender(),
                            entry->name, name_color, *ctx.font);
     }
 }

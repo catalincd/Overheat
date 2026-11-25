@@ -27,6 +27,8 @@ public:
     bool open(const fs::path& path);
     void close();
     bool is_open() const { return repo_ != nullptr; }
+    // True if .gitignore rules (and info/exclude) exclude this path.
+    bool is_ignored(const fs::path& path) const;
 
     std::string branch_name() const;
     std::vector<GitStatus> status() const;

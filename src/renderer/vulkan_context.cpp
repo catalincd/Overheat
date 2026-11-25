@@ -130,7 +130,7 @@ void VulkanContext::end_frame(uint32_t image_index) {
     submit.pWaitDstStageMask  = wait_stages;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers    = &frame.cmd;
-    VkSemaphore signal_sems[] = {frame.render_finished};
+    VkSemaphore signal_sems[] = {present_sems_[image_index]};
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores    = signal_sems;
     vkQueueSubmit(graphics_queue_, 1, &submit, frame.in_flight);
@@ -311,6 +311,48 @@ void VulkanContext::upload_image(Image& img, const void* data, uint32_t w, uint3
     destroy_buffer(staging);
 }
 
+void VulkanContext::update_image_region(Image& img, const uint8_t* pixels, uint32_t row_pitch,
+                                        uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    Buffer staging = create_buffer(VkDeviceSize(w) * h, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    auto* dst = static_cast<uint8_t*>(staging.mapped);
+    for (uint32_t row = 0; row < h; row++)
+        memcpy(dst + size_t(row) * w, pixels + size_t(y + row) * row_pitch + x, w);
+
+    // Frames in flight may still sample the image; this path is rare (new glyphs only).
+    vkDeviceWaitIdle(device_);
+    VkCommandBuffer cmd = begin_single_command();
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = img.image;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {int32_t(x), int32_t(y), 0};
+    region.imageExtent = {w, h, 1};
+    vkCmdCopyBufferToImage(cmd, staging.buffer, img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    end_single_command(cmd);
+    destroy_buffer(staging);
+}
+
 VkSampler VulkanContext::create_sampler(VkFilter filter) {
     VkSamplerCreateInfo ci{};
     ci.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -397,7 +439,7 @@ VkPipeline VulkanContext::create_graphics_pipeline(
                                VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     if (alpha_blend) {
         blend_att.blendEnable         = VK_TRUE;
-        blend_att.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        blend_att.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;  // premultiplied
         blend_att.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         blend_att.colorBlendOp        = VK_BLEND_OP_ADD;
         blend_att.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -742,6 +784,15 @@ bool VulkanContext::create_swapchain() {
     swapchain_images_.resize(sc_count);
     vkGetSwapchainImagesKHR(device_, swapchain_, &sc_count, swapchain_images_.data());
 
+    // One present semaphore per image: a semaphore handed to present can only be
+    // reused once that same image is re-acquired.
+    present_sems_.resize(sc_count);
+    for (auto& sem : present_sems_) {
+        VkSemaphoreCreateInfo sci{};
+        sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        vkCreateSemaphore(device_, &sci, nullptr, &sem);
+    }
+
     swapchain_views_.resize(sc_count);
     for (uint32_t i = 0; i < sc_count; i++) {
         VkImageViewCreateInfo vci{};
@@ -847,13 +898,14 @@ bool VulkanContext::create_descriptor_pool() {
     VkDescriptorPoolSize pool_sizes[] = {
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1000},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         1000},
     };
 
     VkDescriptorPoolCreateInfo ci{};
     ci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     ci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     ci.maxSets       = 1000;
-    ci.poolSizeCount = 2;
+    ci.poolSizeCount = 3;
     ci.pPoolSizes    = pool_sizes;
     if (vkCreateDescriptorPool(device_, &ci, nullptr, &descriptor_pool_) != VK_SUCCESS) {
         fprintf(stderr, "Failed to create descriptor pool\n");
@@ -881,6 +933,8 @@ bool VulkanContext::create_sync_objects() {
 }
 
 void VulkanContext::cleanup_swapchain() {
+    for (auto sem : present_sems_) vkDestroySemaphore(device_, sem, nullptr);
+    present_sems_.clear();
     for (auto fb : framebuffers_) vkDestroyFramebuffer(device_, fb, nullptr);
     framebuffers_.clear();
     for (auto iv : swapchain_views_) vkDestroyImageView(device_, iv, nullptr);

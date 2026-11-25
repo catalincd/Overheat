@@ -2,8 +2,7 @@
 #include "types.h"
 #include "renderer/vulkan_context.h"
 #include "renderer/font_atlas.h"
-#include "renderer/text_renderer.h"
-#include "renderer/ui_renderer.h"
+#include "renderer/renderer2d.h"
 #include "ui/tab_bar.h"
 #include "ui/file_tree.h"
 #include "ui/terminal.h"
@@ -15,6 +14,7 @@
 #include "lsp/client.h"
 #include "plugin/api.h"
 #include "keys.h"
+#include "script.h"
 #include <SDL3/SDL.h>
 
 namespace oh {
@@ -42,8 +42,7 @@ private:
     SDL_Window* window_ = nullptr;
     VulkanContext vk_;
     FontAtlas font_;
-    TextRenderer text_renderer_;
-    UIRenderer ui_renderer_;
+    Renderer2D renderer_;
 
     Theme theme_;
     KeyMap keymap_;
@@ -59,6 +58,15 @@ private:
     SSHSession ssh_;
     LSPClient lsp_;
     PluginManager plugins_;
+
+    ScriptRunner script_;
+    std::vector<std::string> pending_probes_;
+    bool debug_hit_ = false;
+    float last_click_x_ = -1, last_click_y_ = -1;
+    TimePoint start_time_ = Clock::now();
+    bool first_paint_done_ = false;
+    uint64_t frame_count_ = 0;
+    std::vector<float> frame_times_ms_;
 
     bool running_ = false;
     bool sidebar_visible_ = true;
@@ -89,6 +97,9 @@ private:
     void scan_project_files();
     void setup_lsp_for_file(const fs::path& path);
     KeyMod sdl_mods(SDL_Keymod m) const;
+    void emit_probe(const std::string& label);
+    void focus_editor();
+    void print_frame_stats() const;
 };
 
 } // namespace oh

@@ -1,0 +1,25 @@
+wait 900
+probe shot:start
+click 385 142
+type // héllo ωορλδ → ✓
+probe typed
+probe shot:typed
+drag 295 62 520 102
+probe dragged
+probe shot:drag
+scroll {W-120} 200 -5
+probe scrolled
+probe shot:scrolled
+key ctrl+p
+type edit
+probe shot:palette
+key Escape
+click 60 92
+wait 200
+probe shot:tree
+click {W-200} {H-100}
+type echo "utf8: ✓ λ →  "
+key Return
+wait 300
+probe shot:terminal
+quit

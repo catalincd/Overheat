@@ -62,6 +62,9 @@ private:
 
     void process_output(const char* data, size_t len);
     void process_char(char c);
+    void put_codepoint(uint32_t cp);
+    uint32_t utf8_cp_ = 0;
+    int utf8_remaining_ = 0;
     void process_csi(char final_char);
     void process_sgr(const std::vector<int>& params);
     void scroll_up();

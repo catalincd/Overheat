@@ -47,6 +47,17 @@ void GitRepository::close() {
     }
 }
 
+bool GitRepository::is_ignored(const fs::path& path) const {
+    if (!repo_) return false;
+    const char* workdir = git_repository_workdir(repo_);
+    if (!workdir) return false;
+    std::string rel = path.lexically_relative(workdir).generic_string();
+    if (rel.empty() || rel.rfind("..", 0) == 0) return false;
+    int ignored = 0;
+    if (git_ignore_path_is_ignored(&ignored, repo_, rel.c_str()) != 0) return false;
+    return ignored != 0;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

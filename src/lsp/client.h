@@ -73,6 +73,13 @@ private:
     pid_t child_pid_ = -1;
     std::atomic<bool> running_{false};
     std::thread reader_thread_;
+    // Writes go through a queue so a large didOpen never blocks the UI thread on
+    // the server draining its stdin pipe.
+    std::thread writer_thread_;
+    std::mutex outbox_mutex_;
+    std::condition_variable outbox_cv_;
+    std::vector<std::string> outbox_;
+    void writer_loop();
 
     int next_id_ = 1;
     std::mutex pending_mutex_;

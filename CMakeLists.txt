@@ -14,6 +14,8 @@ pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
 pkg_check_modules(LIBSSH2 REQUIRED IMPORTED_TARGET libssh2)
 pkg_check_modules(TREESITTER REQUIRED IMPORTED_TARGET tree-sitter)
 pkg_check_modules(TREESITTER_C REQUIRED IMPORTED_TARGET tree-sitter-c)
+# AUR tree-sitter-cpp ships only the shared library (no .pc, no header).
+find_library(TREESITTER_CPP_LIB tree-sitter-cpp REQUIRED)
 
 find_program(GLSLC glslc REQUIRED)
 
@@ -29,7 +31,7 @@ foreach(SHADER ${SHADER_SOURCES})
     add_custom_command(
         OUTPUT ${SPIRV_FILE}
         COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} -O ${SHADER} -o ${SPIRV_FILE}
-        DEPENDS ${SHADER}
+        DEPENDS ${SHADER} ${CMAKE_SOURCE_DIR}/shaders/quad_common.glsl.inc
         COMMENT "Compiling ${SHADER_FULL} -> ${SPIRV_NAME}"
     )
     list(APPEND SPIRV_FILES ${SPIRV_FILE})
@@ -42,8 +44,7 @@ set(OVERHEAT_SOURCES
     src/app.cpp
     src/renderer/vulkan_context.cpp
     src/renderer/font_atlas.cpp
-    src/renderer/text_renderer.cpp
-    src/renderer/ui_renderer.cpp
+    src/renderer/renderer2d.cpp
     src/editor/buffer.cpp
     src/editor/editor.cpp
     src/editor/cursor.cpp
@@ -60,6 +61,7 @@ set(OVERHEAT_SOURCES
     src/lsp/client.cpp
     src/plugin/api.cpp
     src/keys.cpp
+    src/script.cpp
 )
 
 add_executable(overheat ${OVERHEAT_SOURCES})
@@ -79,6 +81,7 @@ target_link_libraries(overheat PRIVATE
     PkgConfig::LIBSSH2
     PkgConfig::TREESITTER
     PkgConfig::TREESITTER_C
+    ${TREESITTER_CPP_LIB}
     pthread
     util
 )
@@ -97,3 +100,13 @@ else()
     target_compile_options(overheat PRIVATE -O3 -march=native -flto)
     target_link_options(overheat PRIVATE -flto)
 endif()
+
+enable_testing()
+add_executable(buffer_fuzz tests/buffer_fuzz.cpp src/editor/buffer.cpp)
+target_include_directories(buffer_fuzz PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(buffer_fuzz PRIVATE PkgConfig::FREETYPE)
+target_compile_options(buffer_fuzz PRIVATE -fsanitize=address,undefined)
+target_link_options(buffer_fuzz PRIVATE -fsanitize=address,undefined)
+foreach(seed 1 2 3)
+    add_test(NAME buffer_fuzz_${seed} COMMAND buffer_fuzz ${seed})
+endforeach()

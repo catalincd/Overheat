@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""drive.py W H SCRIPT OUTDIR [overheat args...]
+Requires Hyprland (Lua dispatch API) and grim. {expr} in SCRIPT is evaluated with W, H.
+Launches Overheat floating at WxH, runs SCRIPT, screenshots the window on every
+'PROBE shot:<name>' line, and writes the full log to OUTDIR/log.txt."""
+import json, os, subprocess, sys, time
+
+W, H, script, outdir = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
+extra = sys.argv[5:]
+os.makedirs(outdir, exist_ok=True)
+root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+binary = os.environ.get("OVERHEAT_BIN", f"{root}/build/overheat")
+
+def hypr(*a):
+    return subprocess.run(["hyprctl", *a], capture_output=True, text=True).stdout
+
+def find_window(pid):
+    for c in json.loads(hypr("clients", "-j")):
+        if c.get("pid") == pid:
+            return c
+    return None
+
+import re
+src = open(script).read()
+src = re.sub(r"\{([^}]+)\}", lambda m: str(int(eval(m.group(1), {"W": W, "H": H}))), src)
+script = os.path.join(outdir, "script.txt")
+open(script, "w").write(src)
+proc = subprocess.Popen([binary, "--script", script, *extra], cwd=root,
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+win = None
+for _ in range(100):
+    win = find_window(proc.pid)
+    if win: break
+    time.sleep(0.05)
+if not win:
+    print("window never appeared"); proc.kill(); sys.exit(1)
+addr = "address:" + win["address"]
+hypr("dispatch", f"hl.dsp.window.float({{ action = 'enable', window = '{addr}' }})")
+hypr("dispatch", f"hl.dsp.window.resize({{ x = {W}, y = {H}, window = '{addr}' }})")
+hypr("dispatch", f"hl.dsp.window.move({{ x = 2580, y = 60, window = '{addr}' }})")
+
+log = open(os.path.join(outdir, "log.txt"), "w")
+for line in proc.stdout:
+    log.write(line); log.flush()
+    if line.startswith("PROBE") or line.startswith("  ") or "exceeded" in line or "first paint" in line or "rror" in line:
+        sys.stdout.write(line)
+    if line.startswith("PROBE shot:"):
+        name = line.split("shot:", 1)[1].split(":", 1)[0].strip()
+        time.sleep(0.12)  # let the presented frame reach the compositor
+        c = find_window(proc.pid)
+        if not c:
+            print("[shot] window not found; skipping", name)
+        if c:
+            x, y = c["at"]; w, h = c["size"]
+            path = os.path.join(outdir, f"{name}.png")
+            subprocess.run(["grim", "-g", f"{x},{y} {w}x{h}", path])
+            print(f"[shot] {path} ({w}x{h})")
+        proc.stdin.write("\n"); proc.stdin.flush()
+proc.wait(timeout=10)
+print("exit", proc.returncode)
