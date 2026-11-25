@@ -33,6 +33,8 @@ App::~App() {
     renderer_.cleanup(vk_);
     vk_.cleanup();
 
+    for (SDL_Cursor* c : {cursor_default_, cursor_ew_, cursor_ns_})
+        if (c) SDL_DestroyCursor(c);
     if (window_) {
         SDL_StopTextInput(window_);
         SDL_DestroyWindow(window_);
@@ -107,6 +109,8 @@ bool App::init(int argc, char** argv) {
     };
     for (const char* fp : font_candidates)
         if (fs::exists(fp)) font_chain_.push_back(fp);
+    if (std::string v = themes_.setting("sidebar_width"); !v.empty()) sidebar_width_ = std::strtof(v.c_str(), nullptr);
+    if (std::string v = themes_.setting("terminal_height"); !v.empty()) terminal_height_ = std::strtof(v.c_str(), nullptr);
     if (std::string fs_setting = themes_.setting("font_size"); !fs_setting.empty())
         font_size_ = std::clamp(std::strtof(fs_setting.c_str(), nullptr), 8.0f, 40.0f);
     if (!font_.init(vk_, font_chain_, font_size_)) {
@@ -437,6 +441,10 @@ void App::handle_event(const SDL_Event& e) {
                       (e.button.clicks >= 2), 0, 0};
 
         // Determine which panel was clicked and set focus
+        if (!command_palette_.is_visible() && e.button.button == SDL_BUTTON_LEFT &&
+            (splitter_drag_ = splitter_at(mx, my)) != Splitter::None) {
+            break;
+        }
         if (command_palette_.is_visible()) {
             command_palette_.handle_mouse(me);
         } else if (layout.activity_bar.contains(mx, my)) {
@@ -462,6 +470,14 @@ void App::handle_event(const SDL_Event& e) {
     }
 
     case SDL_EVENT_MOUSE_BUTTON_UP: {
+        if (splitter_drag_ != Splitter::None) {
+            themes_.set_setting(splitter_drag_ == Splitter::Sidebar ? "sidebar_width" : "terminal_height",
+                                std::to_string(static_cast<int>(splitter_drag_ == Splitter::Sidebar
+                                                                    ? sidebar_width_ : terminal_height_)));
+            splitter_drag_ = Splitter::None;
+            update_cursor_shape(splitter_at(e.button.x, e.button.y));
+            break;
+        }
         MouseEvent me{e.button.x, e.button.y, static_cast<int>(e.button.button),
                       false, false, 0, 0};
         editor_view_.handle_mouse(me);
@@ -476,6 +492,10 @@ void App::handle_event(const SDL_Event& e) {
 
         MouseEvent me{mx, my, 0, false, false, e.wheel.x, e.wheel.y};
 
+        if ((SDL_GetModState() & SDL_KMOD_CTRL) && layout.editor.contains(mx, my)) {
+            set_font_size(font_size_ + (e.wheel.y > 0 ? 1.0f : -1.0f));
+            break;
+        }
         if (sidebar_visible_ && layout.sidebar.contains(mx, my)) {
             sidebar_panel().handle_mouse(me);
         } else if (terminal_visible_ && layout.terminal.contains(mx, my)) {
@@ -487,6 +507,23 @@ void App::handle_event(const SDL_Event& e) {
     }
 
     case SDL_EVENT_MOUSE_MOTION: {
+        if (splitter_drag_ != Splitter::None) {
+            Layout l = compute_layout();
+            if (splitter_drag_ == Splitter::Sidebar)
+                sidebar_width_ = std::clamp(e.motion.x - l.sidebar.x, 140.0f, l.sidebar.w + l.editor.w - 200.0f);
+            else
+                terminal_height_ = std::clamp(l.terminal.y + l.terminal.h - e.motion.y, 60.0f,
+                                              l.terminal.h + l.editor.h - 80.0f);
+            request_redraw();
+            break;
+        }
+        if (!(e.motion.state & SDL_BUTTON_LMASK) && !command_palette_.is_visible()) {
+            Splitter s = splitter_at(e.motion.x, e.motion.y);
+            if (s != splitter_hover_) {
+                update_cursor_shape(s);
+                request_redraw();  // hover highlight changed
+            }
+        }
         if (e.motion.state & SDL_BUTTON_LMASK) {
             MouseEvent me{e.motion.x, e.motion.y, 1, true, false, 0, 0, true};
             if (terminal_.focused()) terminal_.handle_mouse(me);
@@ -658,7 +695,7 @@ App::Layout App::compute_layout() const {
     // Activity bar (always visible), then the sidebar view.
     float ab_w = ACTIVITY_BAR_W;
     l.activity_bar = {0, 0, ab_w, content_h};
-    float sb_w = sidebar_visible_ ? std::min(sidebar_width_, std::floor((fw - ab_w) * 0.28f)) : 0.0f;
+    float sb_w = sidebar_visible_ ? std::floor(std::min(sidebar_width_, (fw - ab_w) * 0.5f)) : 0.0f;
     l.sidebar = {ab_w, 0, sb_w, content_h};
 
     float right_x = ab_w + sb_w;
@@ -670,7 +707,7 @@ App::Layout App::compute_layout() const {
 
     // Terminal: at bottom of right region (above status bar)
     float term_h = terminal_visible_
-        ? std::min(terminal_height_, std::floor((content_h - tab_h) * 0.4f)) : 0.0f;
+        ? std::floor(std::min(terminal_height_, (content_h - tab_h) * 0.8f)) : 0.0f;
     l.terminal = {right_x, content_h - term_h, right_w, term_h};
 
     // Editor: remaining space
@@ -868,6 +905,13 @@ void App::render() {
     clipped(editor_view_, layout.editor);
     if (terminal_visible_) clipped(terminal_, layout.terminal);
     clipped(status_bar_, layout.status_bar);
+    if (Splitter sp = splitter_drag_ != Splitter::None ? splitter_drag_ : splitter_hover_; sp != Splitter::None) {
+        Color c = theme_.accent;
+        if (sp == Splitter::Sidebar)
+            renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1.0f, 0, 2.0f, layout.status_bar.y}, c);
+        else
+            renderer_.add_rect({layout.terminal.x, layout.terminal.y - 1.0f, layout.terminal.w, 2.0f}, c);
+    }
     if (command_palette_.is_visible())
         clipped(command_palette_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
 
@@ -980,6 +1024,26 @@ void App::new_file() {
 }
 
 void App::focus_editor() { focus(&editor_view_); }
+
+App::Splitter App::splitter_at(float x, float y) const {
+    Layout l = compute_layout();
+    constexpr float GRAB = 4.0f;
+    if (sidebar_visible_ && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y < l.status_bar.y)
+        return Splitter::Sidebar;
+    if (terminal_visible_ && std::abs(y - l.terminal.y) <= GRAB && x >= l.terminal.x)
+        return Splitter::Terminal;
+    return Splitter::None;
+}
+
+void App::update_cursor_shape(Splitter s) {
+    splitter_hover_ = s;
+    if (!cursor_default_) {
+        cursor_default_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+        cursor_ew_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
+        cursor_ns_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
+    }
+    SDL_SetCursor(s == Splitter::Sidebar ? cursor_ew_ : s == Splitter::Terminal ? cursor_ns_ : cursor_default_);
+}
 
 void App::set_font_size(float size) {
     size = std::clamp(size, 8.0f, 40.0f);

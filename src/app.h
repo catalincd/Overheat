@@ -177,6 +177,15 @@ private:
     void emit_probe(const std::string& label);
     void focus_editor();
     void set_font_size(float size);
+
+    // Draggable splitters between sidebar/editor and editor/terminal.
+    enum class Splitter { None, Sidebar, Terminal };
+    Splitter splitter_hover_ = Splitter::None, splitter_drag_ = Splitter::None;
+    Splitter splitter_at(float x, float y) const;
+    void update_cursor_shape(Splitter s);
+    SDL_Cursor* cursor_ew_ = nullptr;
+    SDL_Cursor* cursor_ns_ = nullptr;
+    SDL_Cursor* cursor_default_ = nullptr;
     void select_theme();
     void print_frame_stats() const;
 };
