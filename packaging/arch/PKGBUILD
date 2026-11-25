@@ -1,0 +1,34 @@
+# Maintainer: Overheat developers
+# Built from a source tarball of this repository; see packaging/arch/build.sh.
+pkgname=overheat
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Fast GPU-accelerated code editor (Vulkan, tree-sitter, LSP, Git, Remote-SSH)"
+arch=('x86_64')
+url="https://localhost/overheat"
+license=('custom')
+depends=('sdl3' 'freetype2' 'harfbuzz' 'fontconfig' 'libgit2' 'libssh2' 'vulkan-icd-loader'
+         'gcc-libs' 'glibc')
+makedepends=('cmake' 'ninja' 'shaderc' 'glm' 'vulkan-headers' 'pkgconf')
+optdepends=('clang: C/C++ language server (clangd)'
+            'git: command-line git alongside the built-in integration'
+            'openssh: ssh client for Remote-SSH terminals'
+            'ttf-jetbrains-mono-nerd: system-wide copy of the default font')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cmake -S "$pkgname-$pkgver" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DOVERHEAT_MARCH=x86-64-v2
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 "$pkgname-$pkgver/assets/fonts/JetBrainsMono-OFL.txt" \
+        "$pkgdir/usr/share/licenses/$pkgname/JetBrainsMono-OFL.txt"
+    install -Dm644 "$pkgname-$pkgver/third_party/tree-sitter/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/tree-sitter-LICENSE"
+}

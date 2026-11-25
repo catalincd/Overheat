@@ -135,6 +135,15 @@ target_link_libraries(overheat PRIVATE
     tree_sitter
     ts_grammars
 )
+# Self-contained Linux packages (tarball/AppImage/.deb): static C++ runtime and an
+# rpath to the bundled libraries. DT_RPATH (not RUNPATH) so it also covers the
+# bundled libraries' own dependencies.
+option(OVERHEAT_PORTABLE "Linux: static libstdc++ + \$ORIGIN/../lib/overheat rpath" OFF)
+if(OVERHEAT_PORTABLE AND NOT WIN32)
+    target_link_options(overheat PRIVATE -static-libstdc++ -static-libgcc
+                        "-Wl,-rpath,\$ORIGIN/../lib/overheat" -Wl,--disable-new-dtags)
+endif()
+
 if(WIN32)
     # GUI subsystem; C++ runtime linked statically so only library DLLs ship.
     target_link_libraries(overheat PRIVATE ws2_32 ole32 shell32 uuid)
