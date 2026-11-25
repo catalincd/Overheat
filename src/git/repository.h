@@ -19,6 +19,7 @@ struct GutterMark {
     enum Kind : uint8_t { Added, Modified, Deleted } kind;
     size_t line;   // 0-based first line (for Deleted: the line below the removed text)
     size_t count;  // lines covered (0 for Deleted)
+    size_t old_count = 0;  // lines this replaced in the base
 };
 
 struct GitBlame {
@@ -27,6 +28,7 @@ struct GitBlame {
     std::string date;
     std::string oid_short;
     std::string summary;
+    int64_t time = 0;  // commit time, seconds since epoch
 };
 
 class GitRepository {
@@ -61,6 +63,10 @@ public:
     std::vector<GitBlame> blame(const fs::path& path) const;
     std::vector<std::string> branches() const;
     bool checkout(const std::string& branch);
+    bool create_branch(const std::string& name);  // from HEAD, then checks it out
+    // Blame of the committed file, one entry per line (1-based line numbers),
+    // using a private repository handle so it can run on a worker thread.
+    static std::vector<GitBlame> blame_in(const fs::path& workdir, const fs::path& path);
     bool commit(const std::string& message);
     bool stage(const fs::path& path);
     bool unstage(const fs::path& path);

@@ -5,6 +5,7 @@
 #include <SDL3/SDL_keycode.h>
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <cstdio>
 #include <cstring>
 
@@ -51,6 +52,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     ctx.r->push_clip(text_rect);
     render_selections(ctx, text_rect);
     render_text(ctx, text_rect);
+    render_blame(ctx, text_rect);
     render_cursors(ctx, text_rect);
     ctx.r->pop_clip();
 }
@@ -216,6 +218,37 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
                             ctx.theme->selection);
         }
     }
+}
+
+static std::string relative_time(int64_t when) {
+    int64_t d = static_cast<int64_t>(std::time(nullptr)) - when;
+    auto fmt = [](int64_t n, const char* unit) {
+        return std::to_string(n) + " " + unit + (n == 1 ? "" : "s") + " ago";
+    };
+    if (d < 60) return "just now";
+    if (d < 3600) return fmt(d / 60, "minute");
+    if (d < 86400) return fmt(d / 3600, "hour");
+    if (d < 86400 * 30) return fmt(d / 86400, "day");
+    if (d < 86400 * 365) return fmt(d / (86400 * 30), "month");
+    return fmt(d / (86400 * 365), "year");
+}
+
+void EditorView::render_blame(RenderContext& ctx, Rect text_rect) {
+    if (!show_blame_ || editor_->cursors().selections().size() != 1) return;
+    size_t line = editor_->cursors().primary_pos().line;
+    auto [first, end] = visible_lines(text_rect);
+    if (line < first || line >= end) return;
+    bool uncommitted = false;
+    const GitBlame* b = editor_->blame_for_line(line, uncommitted);
+    std::string text;
+    if (uncommitted) text = "You \u00b7 Uncommitted changes";
+    else if (b) text = b->author + ", " + relative_time(b->time) + " \u00b7 " + b->summary;
+    else return;
+    std::string line_text = editor_->buffer().line_text(line);
+    float x = col_x(line_text, line_text.size(), text_rect) + cached_char_w_ * 4.0f;
+    Color c = ctx.theme->fg_muted;
+    c.a *= 0.75f;
+    ctx.r->add_text(x, row_y(line, text_rect) + ctx.font->ascender(), text, c, *ctx.font);
 }
 
 void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {

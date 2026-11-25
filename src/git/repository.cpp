@@ -116,11 +116,12 @@ std::vector<GutterMark> GitRepository::diff_marks(const std::string& base, const
     auto hunk_cb = [](const git_diff_delta*, const git_diff_hunk* h, void* payload) -> int {
         auto& out = *static_cast<std::vector<GutterMark>*>(payload);
         if (h->old_lines == 0)
-            out.push_back({GutterMark::Added, static_cast<size_t>(h->new_start - 1), static_cast<size_t>(h->new_lines)});
+            out.push_back({GutterMark::Added, static_cast<size_t>(h->new_start - 1), static_cast<size_t>(h->new_lines), 0});
         else if (h->new_lines == 0)
-            out.push_back({GutterMark::Deleted, static_cast<size_t>(h->new_start), 0});
+            out.push_back({GutterMark::Deleted, static_cast<size_t>(h->new_start), 0, static_cast<size_t>(h->old_lines)});
         else
-            out.push_back({GutterMark::Modified, static_cast<size_t>(h->new_start - 1), static_cast<size_t>(h->new_lines)});
+            out.push_back({GutterMark::Modified, static_cast<size_t>(h->new_start - 1), static_cast<size_t>(h->new_lines),
+                           static_cast<size_t>(h->old_lines)});
         return 0;
     };
     git_diff_buffers(base.data(), base.size(), nullptr, current.data(), current.size(), nullptr,
@@ -414,6 +415,7 @@ std::vector<GitBlame> GitRepository::blame(const fs::path& path) const {
             gb.date      = date_str;
             gb.oid_short = oid_buf;
             gb.summary   = summary;
+            gb.time      = hunk->final_signature ? hunk->final_signature->when.time : 0;
             result.push_back(std::move(gb));
         }
     }
@@ -451,6 +453,24 @@ std::vector<std::string> GitRepository::branches() const {
 // checkout
 // ---------------------------------------------------------------------------
 
+bool GitRepository::create_branch(const std::string& name) {
+    if (!repo_) return false;
+    git_object* head = nullptr;
+    git_reference* ref = nullptr;
+    bool ok = git_revparse_single(&head, repo_, "HEAD") == 0 &&
+              git_branch_create(&ref, repo_, name.c_str(), reinterpret_cast<git_commit*>(head), 0) == 0;
+    if (!ok) set_error("create branch");
+    git_reference_free(ref);
+    git_object_free(head);
+    return ok && checkout(name);
+}
+
+std::vector<GitBlame> GitRepository::blame_in(const fs::path& workdir, const fs::path& path) {
+    GitRepository r;
+    if (!r.open(workdir)) return {};
+    return r.blame(path);
+}
+
 bool GitRepository::checkout(const std::string& branch) {
     if (!repo_) return false;
 
@@ -458,18 +478,22 @@ bool GitRepository::checkout(const std::string& branch) {
     std::string ref_name = "refs/heads/" + branch;
 
     git_object* target = nullptr;
-    if (git_revparse_single(&target, repo_, ref_name.c_str()) != 0)
+    if (git_revparse_single(&target, repo_, ref_name.c_str()) != 0) {
+        set_error("checkout");
         return false;
+    }
 
     git_checkout_options opts = GIT_CHECKOUT_OPTIONS_INIT;
-    opts.checkout_strategy = GIT_CHECKOUT_SAFE;
+    opts.checkout_strategy = GIT_CHECKOUT_SAFE;  // never overwrite local changes
 
     if (git_checkout_tree(repo_, target, &opts) != 0) {
+        set_error("checkout");
         git_object_free(target);
         return false;
     }
 
     if (git_repository_set_head(repo_, ref_name.c_str()) != 0) {
+        set_error("checkout");
         git_object_free(target);
         return false;
     }

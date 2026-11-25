@@ -538,6 +538,10 @@ void App::handle_command(const std::string& cmd) {
         // TODO: adjust font size and reinit font atlas
     } else if (cmd == "zoom_out") {
         // TODO: adjust font size and reinit font atlas
+    } else if (cmd == "git_checkout") {
+        git_checkout();
+    } else if (cmd == "toggle_blame") {
+        editor_view_.toggle_blame();
     } else if (cmd == "select_theme") {
         select_theme();
     } else if (cmd == "quit") {
@@ -620,6 +624,67 @@ void App::poll_git_refresh() {
         git_refresh_pending_ = false;
         request_git_refresh();
     }
+}
+
+void App::attach_git(Editor& ed) {
+    if (!git_.is_open() || ed.buffer().file_path().empty()) return;
+    const fs::path path = ed.buffer().file_path();
+    ed.set_git_base(git_.head_content(path));
+    if (!ed.has_git_base()) return;
+    ed.set_blame_job(std::async(std::launch::async, [wd = git_.workdir(), path] {
+        auto b = GitRepository::blame_in(wd, path);
+        request_redraw();
+        return b;
+    }));
+}
+
+void App::after_head_change() {
+    for (auto& tab : tab_bar_.tabs()) {
+        if (!tab.editor || tab.editor->buffer().file_path().empty()) continue;
+        if (!tab.editor->is_modified()) tab.editor->reload();
+        attach_git(*tab.editor);
+    }
+    file_tree_.refresh();
+    status_bar_.set_git_branch(git_.branch_name());
+    request_git_refresh();
+}
+
+void App::git_checkout() {
+    if (!git_.is_open()) {
+        set_status_message("Not a git repository");
+        return;
+    }
+    std::string current = git_.branch_name();
+    std::vector<std::string> branches = git_.branches();
+    std::vector<std::string> items;
+    int initial = 0;
+    for (auto& b : branches) {
+        if (b == current) initial = static_cast<int>(items.size());
+        items.push_back(b == current ? b + "  (current)" : b);
+    }
+    CommandPalette::PickOptions opts;
+    opts.placeholder = "Select a branch, or type a new name to create it";
+    opts.items = items;
+    opts.initial = initial;
+    opts.allow_free_text = true;
+    opts.on_pick = [this, branches](int i, const std::string& query) {
+        bool ok;
+        std::string name;
+        if (i >= 0) {
+            name = branches[static_cast<size_t>(i)];
+            ok = git_.checkout(name);
+        } else {
+            name = query;
+            ok = !name.empty() && git_.create_branch(name);
+        }
+        if (!ok) {
+            set_status_message(git_.last_error().empty() ? "Checkout failed" : git_.last_error(), 6.0f);
+            return;
+        }
+        set_status_message((i >= 0 ? "Switched to " : "Created and switched to ") + name);
+        after_head_change();
+    };
+    command_palette_.pick(std::move(opts));
 }
 
 void App::select_theme() {
@@ -741,7 +806,7 @@ void App::open_file(const fs::path& path) {
 
     auto editor = std::make_shared<Editor>();
     editor->load_file(path);
-    if (git_.is_open()) editor->set_git_base(git_.head_content(path));
+    attach_git(*editor);
 
     tab_bar_.add_tab(editor);
     tab_bar_.set_active(static_cast<int>(tab_bar_.tabs().size()) - 1);
@@ -799,8 +864,8 @@ void App::close_current_tab() {
     }
 }
 
-void App::set_status_message(const std::string& msg) {
-    status_bar_.set_message(msg);
+void App::set_status_message(const std::string& msg, float seconds) {
+    status_bar_.set_message(msg, seconds);
 }
 
 Editor* App::current_editor() {
@@ -846,6 +911,8 @@ void App::register_commands() {
     add("toggle_fullscreen",       "Toggle Fullscreen",         "F11");
     add("zoom_in",                 "Zoom In",                   "Ctrl++");
     add("zoom_out",                "Zoom Out",                  "Ctrl+-");
+    add("git_checkout",            "Git: Checkout to...",       "");
+    add("toggle_blame",            "Git: Toggle Inline Blame",  "");
     add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");
     add("quit",                    "Quit",                      "Ctrl+Q");
 }

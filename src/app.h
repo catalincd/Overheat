@@ -36,7 +36,7 @@ public:
     void save_current();
     void new_file();
     void close_current_tab();
-    void set_status_message(const std::string& msg);
+    void set_status_message(const std::string& msg, float seconds = 3.0f);
     Editor* current_editor();
 
     Theme& theme() { return theme_; }
@@ -67,6 +67,9 @@ private:
     bool git_refresh_pending_ = false;
     void request_git_refresh();
     void poll_git_refresh();
+    void attach_git(Editor& ed);
+    void git_checkout();
+    void after_head_change();
     SSHSession ssh_;
     LSPClient lsp_;
     PluginManager plugins_;

@@ -802,6 +802,45 @@ const std::vector<GutterMark>& Editor::git_marks() {
     return git_marks_;
 }
 
+const GitBlame* Editor::blame_for_line(size_t line, bool& uncommitted) {
+    uncommitted = false;
+    if (blame_job_.valid() && blame_job_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        auto raw = blame_job_.get();
+        blame_.clear();
+        for (auto& b : raw) {
+            if (b.line == 0) continue;
+            if (blame_.size() < b.line) blame_.resize(b.line);
+            blame_[b.line - 1] = std::move(b);
+        }
+    }
+    // Map the current line back to its line at HEAD through the diff hunks.
+    long delta = 0;
+    for (const GutterMark& m : git_marks()) {
+        if (m.kind != GutterMark::Deleted && line >= m.line && line < m.line + m.count) {
+            uncommitted = true;
+            return nullptr;
+        }
+        bool before = m.kind == GutterMark::Deleted ? m.line <= line : m.line + m.count <= line;
+        if (before) delta += static_cast<long>(m.count) - static_cast<long>(m.old_count);
+    }
+    long head_line = static_cast<long>(line) - delta;
+    if (!git_base_) { uncommitted = true; return nullptr; }
+    if (head_line < 0 || head_line >= static_cast<long>(blame_.size())) return nullptr;
+    const GitBlame& b = blame_[static_cast<size_t>(head_line)];
+    return b.line ? &b : nullptr;
+}
+
+void Editor::reload() {
+    Position cur = cursors_.primary_pos();
+    float sx = scroll_x_, sy = scroll_y_;
+    fs::path path = buffer_.file_path();
+    load_file(path);
+    size_t line = std::min(cur.line, buffer_.line_count() - 1);
+    cursors_.set_primary({line, std::min(cur.col, buffer_.line_length(line))});
+    scroll_x_ = sx;
+    scroll_y_ = sy;
+}
+
 void Editor::sync_syntax() {
     if (!syntax_.poll()) return;  // background parse running; edits stay queued
     syntax_.apply_changes(buffer_, buffer_.take_changes());

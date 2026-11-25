@@ -14,6 +14,7 @@ public:
 
     void render(RenderContext& ctx, Rect bounds) override;
     void update(float dt);
+    void toggle_blame() { show_blame_ = !show_blame_; }
     void reveal_cursor() {
         if (editor_) editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h, cached_char_w_, cached_line_h_);
     }
@@ -30,12 +31,14 @@ private:
     float cursor_blink_timer_ = 0;
     bool cursor_visible_ = true;
     bool mouse_selecting_ = false;
+    bool show_blame_ = true;
     float cached_line_h_ = 20.0f;
     float cached_char_w_ = 9.0f;
     float cached_gutter_w_ = 40.0f;
 
     void render_gutter(RenderContext& ctx, Rect gutter_rect);
     void render_git_marks(RenderContext& ctx, Rect gutter_rect);
+    void render_blame(RenderContext& ctx, Rect text_rect);
     void render_text(RenderContext& ctx, Rect text_rect);
     void render_cursors(RenderContext& ctx, Rect text_rect);
     void render_selections(RenderContext& ctx, Rect text_rect);

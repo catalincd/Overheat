@@ -4,6 +4,7 @@
 #include "editor/cursor.h"
 #include "editor/syntax.h"
 #include "git/repository.h"
+#include <future>
 #include <memory>
 #include <string>
 
@@ -69,6 +70,15 @@ public:
     // Recomputed lazily when the buffer changed since the last call.
     const std::vector<GutterMark>& git_marks();
 
+    // Blame of the committed file (computed off-thread by the caller).
+    void set_blame_job(std::future<std::vector<GitBlame>> job) { blame_job_ = std::move(job); blame_.clear(); }
+    // Blame for a current-buffer line; nullptr if unknown. `uncommitted` is set
+    // when the line differs from HEAD.
+    const GitBlame* blame_for_line(size_t line, bool& uncommitted);
+
+    // Re-reads the file from disk keeping cursor and scroll (e.g. after checkout).
+    void reload();
+
     // State
     bool is_modified() const { return buffer_.is_modified(); }
     std::string title() const;
@@ -81,6 +91,8 @@ private:
     std::optional<std::string> git_base_;
     std::vector<GutterMark> git_marks_;
     uint64_t git_marks_version_ = UINT64_MAX;
+    std::future<std::vector<GitBlame>> blame_job_;
+    std::vector<GitBlame> blame_;  // index = HEAD line - 1
 
     void on_text_changed();
 };
