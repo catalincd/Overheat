@@ -90,6 +90,8 @@ private:
     void focus(Panel* p);
     void show_sidebar_view(SidebarView v);
     void render_activity_bar(RenderContext& ctx, Rect r);
+    void render_breadcrumbs(RenderContext& ctx, Rect r);
+    bool show_breadcrumbs_ = true;
     void setup_scm();
 
     GitRepository git_;
@@ -162,6 +164,7 @@ private:
         Rect activity_bar;
         Rect sidebar;
         Rect tab_bar;
+        Rect breadcrumbs;
         Rect editor;
         Rect terminal;
         Rect status_bar;

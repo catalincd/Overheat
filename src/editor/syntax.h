@@ -29,6 +29,13 @@ public:
     std::vector<Token> tokens_for_line(size_t line, size_t line_start_byte, size_t line_length) const;
     std::string language_id() const { return lang_id_; }
 
+    // Enclosing named scopes at a byte offset, outermost first (for breadcrumbs).
+    struct Scope {
+        enum Kind { Namespace, Class, Function } kind;
+        std::string name;
+    };
+    std::vector<Scope> scope_at(const TextBuffer& buffer, size_t offset) const;
+
     static std::string detect_language(const fs::path& path);
 
 private:

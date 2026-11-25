@@ -57,7 +57,9 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     float gw = gutter_width(*ctx.font);
     cached_gutter_w_ = gw;
     Rect gutter_rect = {bounds.x, bounds.y, gw, bounds.h};
-    Rect text_rect = {bounds.x + gw, bounds.y, bounds.w - gw, bounds.h};
+    float mm_w = minimap_width();
+    Rect text_rect = {bounds.x + gw, bounds.y, bounds.w - gw - mm_w, bounds.h};
+    minimap_rect_ = {bounds.x + bounds.w - mm_w, bounds.y, mm_w, bounds.h};
 
     // Editor background
     ctx.r->add_rect(bounds, ctx.theme->bg);
@@ -97,7 +99,8 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     render_blame(ctx, text_rect);
     render_cursors(ctx, text_rect);
     ctx.r->pop_clip();
-    render_scrollbar(ctx, text_rect);
+    render_minimap(ctx, minimap_rect_);
+    render_scrollbar(ctx, {text_rect.x, text_rect.y, text_rect.w + minimap_width(), text_rect.h});
     find_.render(ctx, bounds);
     if (completion_.visible()) {
         const Position& a = completion_.anchor();
@@ -492,10 +495,75 @@ void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {
     }
 }
 
-void EditorView::render_minimap(RenderContext& /*ctx*/, Rect /*minimap_rect*/) {}
+float EditorView::minimap_width() const {
+    return show_minimap_ && bounds_.w > 500.0f ? MINIMAP_W : 0.0f;
+}
+
+// First document line shown at the top of the minimap: the minimap window moves
+// proportionally with the editor viewport when the file is taller than it.
+size_t EditorView::minimap_first_line(Rect r) const {
+    size_t total = editor_->buffer().line_count();
+    size_t fits = static_cast<size_t>(r.h / MINIMAP_LINE_H);
+    if (total <= fits) return 0;
+    size_t vis = static_cast<size_t>(r.h / cached_line_h_);
+    float top = view_y_ / cached_line_h_;
+    float denom = static_cast<float>(total > vis ? total - vis : 1);
+    return static_cast<size_t>(std::clamp(top / denom, 0.0f, 1.0f) * static_cast<float>(total - fits));
+}
+
+void EditorView::render_minimap(RenderContext& ctx, Rect r) {
+    if (r.w <= 0) return;
+    auto& buf = editor_->buffer();
+    auto& syntax = editor_->syntax();
+    const Theme& th = *ctx.theme;
+    ctx.r->add_rect(r, th.bg);
+    size_t first = minimap_first_line(r);
+    size_t count = static_cast<size_t>(r.h / MINIMAP_LINE_H) + 1;
+    float cell = 1.2f;  // horizontal pixels per character
+    for (size_t line = first; line < first + count && line < buf.line_count(); line++) {
+        std::string text = buf.line_text(line);
+        if (text.empty()) continue;
+        float y = r.y + static_cast<float>(line - first) * MINIMAP_LINE_H;
+        auto tokens = syntax.tokens_for_line(line, buf.line_start(line), text.size());
+        auto color_of = [&](TokenType t) {
+            switch (t) {
+                case TokenType::Keyword: return th.keyword;
+                case TokenType::String: return th.string_color;
+                case TokenType::Number: return th.number;
+                case TokenType::Comment: return th.comment;
+                case TokenType::Function: return th.function_name;
+                case TokenType::Type: return th.type_color;
+                case TokenType::Preprocessor: return th.preprocessor;
+                default: return th.fg;
+            }
+        };
+        size_t lead = text.find_first_not_of(" \t");
+        if (lead == std::string::npos) continue;
+        if (tokens.empty()) {
+            Color c = th.fg;
+            c.a = 0.35f;
+            ctx.r->add_rect({r.x + 6.0f + lead * cell, y, std::min(r.w - 10.0f, (text.size() - lead) * cell), MINIMAP_LINE_H - 0.5f}, c);
+            continue;
+        }
+        for (auto& tok : tokens) {
+            if (text.find_first_not_of(" \t", tok.start) >= tok.start + tok.length) continue;  // whitespace
+            float x = r.x + 6.0f + static_cast<float>(tok.start) * cell;
+            if (x > r.x + r.w - 4.0f) break;
+            Color c = color_of(tok.type);
+            c.a = 0.55f;
+            ctx.r->add_rect({x, y, std::max(1.0f, tok.length * cell), MINIMAP_LINE_H - 0.5f}, c);
+        }
+    }
+    // Viewport indicator
+    float vy = r.y + (view_y_ / cached_line_h_ - static_cast<float>(first)) * MINIMAP_LINE_H;
+    float vh = r.h / cached_line_h_ * MINIMAP_LINE_H;
+    Color vc = th.fg;
+    vc.a = minimap_drag_ ? 0.14f : 0.07f;
+    ctx.r->add_rect({r.x, vy, r.w, vh}, vc);
+}
 
 Position EditorView::position_at(float x, float y) const {
-    Rect text_rect = {bounds_.x + cached_gutter_w_, bounds_.y, bounds_.w - cached_gutter_w_, bounds_.h};
+    Rect text_rect = {bounds_.x + cached_gutter_w_, bounds_.y, bounds_.w - cached_gutter_w_ - minimap_width(), bounds_.h};
     auto& buf = editor_->buffer();
     float rel_y = y - text_rect.y + view_y_;
     float rel_x = x - text_rect.x - TEXT_PAD + view_x_;
@@ -633,6 +701,19 @@ bool EditorView::handle_key(const KeyEvent& e) {
 bool EditorView::handle_mouse(const MouseEvent& e) {
     if (!editor_) return false;
     if (completion_.handle_mouse(*editor_, e)) return true;
+    // Minimap: click or drag to centre the viewport on that spot.
+    if (e.button == 1 && (minimap_drag_ || (e.pressed && !e.motion && minimap_rect_.contains(e.x, e.y) &&
+                                            !ruler_.contains(e.x, e.y)))) {
+        if (!e.pressed) {
+            minimap_drag_ = false;
+            return true;
+        }
+        minimap_drag_ = true;
+        float line = static_cast<float>(minimap_first_line(minimap_rect_)) + (e.y - minimap_rect_.y) / MINIMAP_LINE_H;
+        float target = line * cached_line_h_ - bounds_.h * 0.5f;
+        editor_->set_scroll(editor_->scroll_x(), std::clamp(target, 0.0f, max_scroll()));
+        return true;
+    }
     if (e.button == 1 && (dragging_thumb_ || (e.pressed && !e.motion && ruler_.contains(e.x, e.y)))) {
         float content = max_scroll() + ruler_.h;
         float thumb_h = std::max(24.0f, ruler_.h * ruler_.h / std::max(content, 1.0f));

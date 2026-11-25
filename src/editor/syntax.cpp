@@ -258,6 +258,51 @@ void SyntaxHighlighter::apply_changes(const TextBuffer& buffer,
     tree_ = next;
 }
 
+static std::string node_text(const TextBuffer& buf, TSNode n) {
+    std::string out;
+    size_t a = ts_node_start_byte(n), b = std::min<size_t>(ts_node_end_byte(n), a + 200);
+    while (a < b) {
+        std::string_view chunk = buf.chunk_at(a);
+        if (chunk.empty()) break;
+        size_t take = std::min(chunk.size(), b - a);
+        out.append(chunk.data(), take);
+        a += take;
+    }
+    return out;
+}
+
+std::vector<SyntaxHighlighter::Scope> SyntaxHighlighter::scope_at(const TextBuffer& buf, size_t offset) const {
+    std::vector<Scope> out;
+    if (!tree_) return out;
+    uint32_t off = static_cast<uint32_t>(offset);
+    TSNode n = ts_node_descendant_for_byte_range(ts_tree_root_node(tree_), off, off);
+    for (; !ts_node_is_null(n); n = ts_node_parent(n)) {
+        const char* type = ts_node_type(n);
+        if (std::strcmp(type, "function_definition") == 0) {
+            // Unwrap pointer/reference declarators down to the function's name.
+            TSNode d = ts_node_child_by_field_name(n, "declarator", 10);
+            while (!ts_node_is_null(d) && std::strcmp(ts_node_type(d), "function_declarator") != 0) {
+                TSNode inner = ts_node_child_by_field_name(d, "declarator", 10);
+                if (ts_node_is_null(inner)) break;
+                d = inner;
+            }
+            if (!ts_node_is_null(d) && std::strcmp(ts_node_type(d), "function_declarator") == 0) {
+                TSNode name = ts_node_child_by_field_name(d, "declarator", 10);
+                if (!ts_node_is_null(name)) out.push_back({Scope::Function, node_text(buf, name)});
+            }
+        } else if (std::strcmp(type, "class_specifier") == 0 || std::strcmp(type, "struct_specifier") == 0 ||
+                   std::strcmp(type, "union_specifier") == 0 || std::strcmp(type, "enum_specifier") == 0) {
+            TSNode name = ts_node_child_by_field_name(n, "name", 4);
+            if (!ts_node_is_null(name)) out.push_back({Scope::Class, node_text(buf, name)});
+        } else if (std::strcmp(type, "namespace_definition") == 0) {
+            TSNode name = ts_node_child_by_field_name(n, "name", 4);
+            out.push_back({Scope::Namespace, ts_node_is_null(name) ? "(anonymous)" : node_text(buf, name)});
+        }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
 TokenType SyntaxHighlighter::classify_node(TSNode node) const {
     const char* type = ts_node_type(node);
 

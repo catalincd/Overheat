@@ -20,6 +20,8 @@ public:
     void render(RenderContext& ctx, Rect bounds) override;
     void update(float dt);
     void toggle_blame() { show_blame_ = !show_blame_; }
+    void set_minimap(bool on) { show_minimap_ = on; }
+    bool minimap() const { return show_minimap_; }
     void open_find(bool replace) { if (editor_) find_.open(*editor_, replace); reveal_cursor(); }
     bool find_has_focus() const { return find_.has_input_focus(); }
     void set_diagnostics(const std::vector<LSPDiagnostic>* d) { diagnostics_ = d; }
@@ -61,6 +63,13 @@ private:
     float drag_offset_ = 0;
     float max_scroll() const;
     static constexpr float RULER_W = 14.0f;
+    static constexpr float MINIMAP_W = 96.0f;
+    static constexpr float MINIMAP_LINE_H = 2.0f;
+    bool show_minimap_ = true;
+    bool minimap_drag_ = false;
+    Rect minimap_rect_{};
+    float minimap_width() const;
+    size_t minimap_first_line(Rect r) const;
     bool line_has_diagnostic(size_t line) const;
     void render_find_matches(RenderContext& ctx, Rect text_rect);
     float cached_line_h_ = 20.0f;

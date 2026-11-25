@@ -105,6 +105,8 @@ bool App::init(int argc, char** argv) {
         font_size_ = std::clamp(std::strtof(v.c_str(), nullptr), 8.0f, 40.0f);
     font_family_ = themes_.setting("font_family");
     anim::enabled = themes_.setting("animations") != "false";
+    show_breadcrumbs_ = themes_.setting("breadcrumbs") != "false";
+    editor_view_.set_minimap(themes_.setting("minimap") != "false");
     sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
     terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
     font_.set_ligatures(themes_.setting("ligatures") != "false");
@@ -721,6 +723,12 @@ void App::handle_command(const std::string& cmd) {
         git_checkout();
     } else if (cmd == "toggle_blame") {
         editor_view_.toggle_blame();
+    } else if (cmd == "toggle_minimap") {
+        editor_view_.set_minimap(!editor_view_.minimap());
+        themes_.set_setting("minimap", editor_view_.minimap() ? "true" : "false");
+    } else if (cmd == "toggle_breadcrumbs") {
+        show_breadcrumbs_ = !show_breadcrumbs_;
+        themes_.set_setting("breadcrumbs", show_breadcrumbs_ ? "true" : "false");
     } else if (cmd == "toggle_animations") {
         anim::enabled = !anim::enabled;
         themes_.set_setting("animations", anim::enabled ? "true" : "false");
@@ -765,9 +773,12 @@ App::Layout App::compute_layout() const {
     float right_x = ab_w + sb_w;
     float right_w = fw - right_x;
 
-    // Tab bar: 32px tall at top of right region
+    // Tab bar at the top of the right region, breadcrumbs under it
     float tab_h = 36.0f;
     l.tab_bar = {right_x, 0, right_w, tab_h};
+    float crumbs_h = show_breadcrumbs_ ? 24.0f : 0.0f;
+    l.breadcrumbs = {right_x, tab_h, right_w, crumbs_h};
+    tab_h += crumbs_h;
 
     // Terminal: at bottom of right region (above status bar)
     float term_h = std::floor(std::min(terminal_height_, (content_h - tab_h) * 0.8f) * terminal_open_.value);
@@ -969,6 +980,9 @@ void App::render() {
     render_activity_bar(ctx, layout.activity_bar);
     if (sidebar_visible_) clipped(sidebar_panel(), layout.sidebar);
     clipped(tab_bar_, layout.tab_bar);
+    renderer_.push_clip(layout.breadcrumbs);
+    render_breadcrumbs(ctx, layout.breadcrumbs);
+    renderer_.pop_clip();
     clipped(editor_view_, layout.editor);
     if (terminal_visible_) clipped(terminal_, layout.terminal);
     clipped(status_bar_, layout.status_bar);
@@ -1194,6 +1208,44 @@ void App::show_sidebar_view(SidebarView v) {
     sidebar_view_ = v;
     sidebar_visible_ = true;
     focus(&sidebar_panel());
+}
+
+void App::render_breadcrumbs(RenderContext& ctx, Rect r) {
+    if (r.h <= 0) return;
+    ctx.r->add_rect(r, theme_.bg);
+    Editor* ed = current_editor();
+    if (!ed) return;
+    float cw = font_.char_width();
+    float base = r.y + (r.h - font_.line_height()) * 0.5f + font_.ascender();
+    float x = r.x + 14.0f;
+    auto sep = [&] {
+        ctx.r->add_char(x + 2.0f, base, 0xEAB6, theme_.line_number, font_);
+        x += cw + 8.0f;
+    };
+    const fs::path& p = ed->buffer().file_path();
+    if (p.empty()) {
+        ctx.r->add_text(x, base, "Untitled", theme_.fg_muted, font_);
+        return;
+    }
+    fs::path rel = p.lexically_relative(project_root_);
+    if (rel.empty() || rel.native().rfind("..", 0) == 0) rel = p.filename();
+    bool first = true;
+    for (auto& part : rel) {
+        if (!first) sep();
+        first = false;
+        bool file = part == rel.filename();
+        x = ctx.r->add_text(x, base, part.string(), file ? theme_.fg : theme_.fg_muted, font_) + 4.0f;
+    }
+    Position cur = ed->cursors().primary_pos();
+    auto scopes = ed->syntax().scope_at(ed->buffer(), ed->buffer().offset_of(cur.line, cur.col));
+    for (auto& s : scopes) {
+        sep();
+        uint32_t icon = s.kind == SyntaxHighlighter::Scope::Function ? 0xEA8C
+                      : s.kind == SyntaxHighlighter::Scope::Class ? 0xEB5B : 0xEA8B;
+        Color ic = s.kind == SyntaxHighlighter::Scope::Function ? theme_.function_name : theme_.type_color;
+        ctx.r->add_char(x, base, icon, ic, font_);
+        x = ctx.r->add_text(x + 2.0f * cw, base, s.name, theme_.fg_muted, font_) + 4.0f;
+    }
 }
 
 void App::render_activity_bar(RenderContext& ctx, Rect r) {
@@ -1426,6 +1478,8 @@ void App::register_commands() {
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
     add("toggle_blame",            "Git: Toggle Inline Blame",  "");
+    add("toggle_minimap",          "View: Toggle Minimap",      "");
+    add("toggle_breadcrumbs",      "View: Toggle Breadcrumbs",  "");
     add("toggle_animations",       "Preferences: Toggle Animations", "");
     add("select_font",             "Preferences: Font Family",  "");
     add("toggle_ligatures",        "Preferences: Toggle Font Ligatures", "");
