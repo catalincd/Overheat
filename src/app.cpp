@@ -178,6 +178,7 @@ bool App::init(int argc, char** argv) {
 
     if (!script_path.empty() && !script_.load(script_path, window_))
         return false;
+    scripted_ = !script_path.empty();
 
     running_ = true;
     return true;
@@ -308,7 +309,7 @@ void App::handle_event(const SDL_Event& e) {
     switch (e.type) {
 
     case SDL_EVENT_QUIT:
-        if (script_.active()) quit();  // test runs never block on prompts
+        if (scripted_) quit();  // test runs never block on prompts
         else confirm_discard("Quit", [this] { quit(); });
         break;
 
@@ -431,6 +432,7 @@ void App::handle_event(const SDL_Event& e) {
         MouseEvent me{e.button.x, e.button.y, static_cast<int>(e.button.button),
                       false, false, 0, 0};
         editor_view_.handle_mouse(me);
+        terminal_.handle_mouse(me);
         break;
     }
 
@@ -454,7 +456,8 @@ void App::handle_event(const SDL_Event& e) {
     case SDL_EVENT_MOUSE_MOTION: {
         if (e.motion.state & SDL_BUTTON_LMASK) {
             MouseEvent me{e.motion.x, e.motion.y, 1, true, false, 0, 0, true};
-            editor_view_.handle_mouse(me);
+            if (terminal_.focused()) terminal_.handle_mouse(me);
+            else editor_view_.handle_mouse(me);
         }
         break;
     }
@@ -493,7 +496,14 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "toggle_sidebar") {
         sidebar_visible_ = !sidebar_visible_;
     } else if (cmd == "copy" || cmd == "cut") {
-        if (terminal_.focused() && terminal_visible_) return;  // terminal selection: TODO
+        if (terminal_.focused() && terminal_visible_) {
+            if (terminal_.has_selection()) {
+                own_clipboard_ = terminal_.selection_text();
+                SDL_SetClipboardText(own_clipboard_.c_str());
+                clipboard_line_text_.clear();
+            }
+            return;
+        }
         if (Editor* ed = current_editor()) {
             bool line_mode = false;
             std::string text = cmd == "cut" ? ed->cut_text(line_mode) : ed->copy_text(line_mode);

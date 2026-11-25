@@ -5,6 +5,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <deque>
 
 namespace oh {
 
@@ -39,6 +40,9 @@ public:
     bool is_alive() const { return alive_; }
 
     void write(const std::string& data);
+    bool handle_mouse(const MouseEvent& e) override;
+    bool has_selection() const { return has_selection_; }
+    std::string selection_text();
     void paste(const std::string& text);
 
     void render(RenderContext& ctx, Rect bounds) override;
@@ -62,8 +66,20 @@ private:
     int cursor_x_ = 0, cursor_y_ = 0;
     float scroll_y_ = 0;
 
-    // Scrollback
-    std::vector<std::vector<TermCell>> scrollback_;
+    // Scrollback (oldest first). dropped_ counts lines trimmed from the front, so
+    // "absolute" line numbers (dropped_ + index in scrollback+screen) stay stable.
+    std::deque<std::vector<TermCell>> scrollback_;
+    uint64_t dropped_ = 0;
+
+    // Mouse selection in absolute line / column coordinates.
+    struct CellPos { int64_t line = 0; int col = 0; };
+    CellPos sel_anchor_, sel_head_;
+    bool has_selection_ = false, selecting_ = false;
+    Rect inner_{};
+    float cell_w_ = 9.0f, cell_h_ = 20.0f;
+    CellPos cell_at(float x, float y) const;
+    const std::vector<TermCell>* row_at(int64_t abs_line) const;
+    bool selected(int64_t line, int col) const;
     static constexpr int MAX_SCROLLBACK = 10000;
 
     // VT100 parsing state

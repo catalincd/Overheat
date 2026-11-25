@@ -229,8 +229,10 @@ void Terminal::scroll_up() {
     // Top line goes to scrollback
     scrollback_.push_back(std::move(screen_[0]));
     if (static_cast<int>(scrollback_.size()) > MAX_SCROLLBACK) {
-        scrollback_.erase(scrollback_.begin());
+        scrollback_.pop_front();
+        dropped_++;
     }
+    if (scroll_y_ > 0) scroll_y_ += 1;  // keep a scrolled-back view anchored on its content
     // Shift everything up
     for (int i = 0; i < rows_ - 1; ++i) {
         screen_[i] = std::move(screen_[i + 1]);
@@ -675,6 +677,9 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
 
     // Background
     ctx.r->add_rect(bounds, ctx.theme->terminal_bg);
+    inner_ = bounds;
+    cell_w_ = cw;
+    cell_h_ = lh;
 
     // Clamp scroll offset
     int max_scroll = static_cast<int>(scrollback_.size());
@@ -699,6 +704,11 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
 
         float py = bounds.y + vy * lh;
         int row_cols = static_cast<int>(row->size());
+        if (has_selection_) {
+            int64_t abs = static_cast<int64_t>(dropped_ + scrollback_.size()) + src_line;
+            for (int x = 0; x < std::min(cols_, row_cols); ++x)
+                if (selected(abs, x)) ctx.r->add_rect({bounds.x + x * cw, py, cw, lh}, ctx.theme->selection);
+        }
 
         for (int x = 0; x < std::min(cols_, row_cols); ++x) {
             const auto& cell = (*row)[x];
@@ -817,9 +827,100 @@ bool Terminal::handle_key(const KeyEvent& e) {
     return false;
 }
 
+Terminal::CellPos Terminal::cell_at(float x, float y) const {
+    int scroll_lines = std::clamp(static_cast<int>(scroll_y_), 0, static_cast<int>(scrollback_.size()));
+    int vy = std::clamp(static_cast<int>((y - inner_.y) / cell_h_), 0, rows_ - 1);
+    int col = std::clamp(static_cast<int>((x - inner_.x) / cell_w_ + 0.5f), 0, cols_);
+    return {static_cast<int64_t>(dropped_ + scrollback_.size()) + vy - scroll_lines, col};
+}
+
+const std::vector<TermCell>* Terminal::row_at(int64_t abs_line) const {
+    int64_t idx = abs_line - static_cast<int64_t>(dropped_);
+    if (idx < 0) return nullptr;
+    if (idx < static_cast<int64_t>(scrollback_.size())) return &scrollback_[static_cast<size_t>(idx)];
+    idx -= static_cast<int64_t>(scrollback_.size());
+    return idx < rows_ ? &screen_[static_cast<size_t>(idx)] : nullptr;
+}
+
+bool Terminal::selected(int64_t line, int col) const {
+    CellPos a = sel_anchor_, b = sel_head_;
+    if (b.line < a.line || (b.line == a.line && b.col < a.col)) std::swap(a, b);
+    if (line < a.line || line > b.line) return false;
+    if (line == a.line && col < a.col) return false;
+    if (line == b.line && col >= b.col) return false;
+    return true;
+}
+
+bool Terminal::handle_mouse(const MouseEvent& e) {
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    if (e.scroll_y != 0.0f) {
+        scroll_y_ = std::clamp(scroll_y_ + e.scroll_y * 3.0f, 0.0f, static_cast<float>(scrollback_.size()));
+        return true;
+    }
+    if (e.button != 1) return false;
+    if (e.motion) {
+        if (selecting_) {
+            sel_head_ = cell_at(e.x, e.y);
+            has_selection_ = sel_head_.line != sel_anchor_.line || sel_head_.col != sel_anchor_.col;
+        }
+        return true;
+    }
+    if (!e.pressed) {
+        selecting_ = false;
+        return true;
+    }
+    CellPos p = cell_at(e.x, e.y);
+    if (e.double_click) {  // select the word under the pointer
+        const auto* row = row_at(p.line);
+        if (!row) return true;
+        auto word = [&](int c) { return c >= 0 && c < static_cast<int>(row->size()) && (*row)[static_cast<size_t>(c)].ch > ' '; };
+        int a = std::min(p.col, static_cast<int>(row->size()) - 1), b = a;
+        while (word(a - 1)) a--;
+        while (word(b)) b++;
+        sel_anchor_ = {p.line, a};
+        sel_head_ = {p.line, b};
+        has_selection_ = b > a;
+        selecting_ = false;
+        return true;
+    }
+    sel_anchor_ = sel_head_ = p;
+    has_selection_ = false;
+    selecting_ = true;
+    return true;
+}
+
+std::string Terminal::selection_text() {
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    if (!has_selection_) return {};
+    CellPos a = sel_anchor_, b = sel_head_;
+    if (b.line < a.line || (b.line == a.line && b.col < a.col)) std::swap(a, b);
+    std::string out;
+    auto put = [&](uint32_t cp) {
+        if (cp < 0x80) out += static_cast<char>(cp);
+        else if (cp < 0x800) { out += static_cast<char>(0xC0 | (cp >> 6)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) { out += static_cast<char>(0xE0 | (cp >> 12)); out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+        else { out += static_cast<char>(0xF0 | (cp >> 18)); out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F)); out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+    };
+    for (int64_t line = a.line; line <= b.line; line++) {
+        const auto* row = row_at(line);
+        if (!row) continue;
+        int c0 = line == a.line ? a.col : 0;
+        int c1 = line == b.line ? b.col : static_cast<int>(row->size());
+        std::string piece;
+        std::swap(piece, out);
+        for (int c = c0; c < c1 && c < static_cast<int>(row->size()); c++) put((*row)[static_cast<size_t>(c)].ch);
+        std::swap(piece, out);
+        while (!piece.empty() && piece.back() == ' ') piece.pop_back();  // trailing cell padding
+        out += piece;
+        if (line != b.line) out += '\n';
+    }
+    return out;
+}
+
 bool Terminal::handle_text(const std::string& text) {
     if (!alive_) return false;
     scroll_y_ = 0;
+    has_selection_ = false;
     write(text);
     return true;
 }
