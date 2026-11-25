@@ -9,6 +9,7 @@
 namespace oh {
 
 void CommandPalette::show(Mode mode) {
+    if (!visible_) appear_.snap(0.0f);
     visible_ = true;
     mode_ = mode;
     query_.clear();
@@ -18,6 +19,7 @@ void CommandPalette::show(Mode mode) {
 
 void CommandPalette::pick(PickOptions opts) {
     pick_ = std::move(opts);
+    if (!visible_) appear_.snap(0.0f);
     visible_ = true;
     mode_ = Mode::Pick;
     query_.clear();
@@ -157,9 +159,11 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
     float row_h = line_h + 8.0f;
     float pad = 8.0f;
 
+    float t = appear_.follow(1.0f, anim::FAST, 0.01f);
+    ctx.r->set_alpha(t);
     float palette_w = std::min(640.0f, bounds.w - 32.0f);
     float palette_x = std::floor(bounds.x + (bounds.w - palette_w) * 0.5f);
-    float palette_y = bounds.y + std::min(48.0f, bounds.h * 0.08f);
+    float palette_y = bounds.y + std::min(48.0f, bounds.h * 0.08f) - std::round((1.0f - t) * 10.0f);
     float input_h = line_h + 16.0f;
     int max_visible = std::max(1, std::min(12, static_cast<int>((bounds.h - palette_y - input_h - 3 * pad) / row_h)));
     int count = static_cast<int>(filtered_.size());
@@ -230,6 +234,7 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
                         msg, th.fg_muted, *ctx.font);
     }
     ctx.r->pop_clip();
+    ctx.r->set_alpha(1.0f);
 }
 
 bool CommandPalette::handle_key(const KeyEvent& e) {

@@ -128,6 +128,9 @@ void FileTree::render(RenderContext& ctx, Rect bounds) {
 
         if (static_cast<int>(idx) == selected_index_) {
             ctx.r->add_rect({bounds.x + 4.0f, y, bounds.w - 8.0f, row_h_}, th.tree_selection, 4.0f);
+        } else if (ctx.mouse_y >= y && ctx.mouse_y < y + row_h_ && ctx.mouse_x >= bounds.x &&
+                   ctx.mouse_x < bounds.x + bounds.w && ctx.mouse_y >= list.y) {
+            ctx.r->add_rect({bounds.x + 4.0f, y, bounds.w - 8.0f, row_h_}, th.surface_hover, 4.0f);
         }
 
         float x = bounds.x + 10.0f + static_cast<float>(entry->depth) * 14.0f;

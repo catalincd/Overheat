@@ -104,6 +104,9 @@ bool App::init(int argc, char** argv) {
     if (std::string v = themes_.setting("font_size"); !v.empty())
         font_size_ = std::clamp(std::strtof(v.c_str(), nullptr), 8.0f, 40.0f);
     font_family_ = themes_.setting("font_family");
+    anim::enabled = themes_.setting("animations") != "false";
+    sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
+    terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
     font_.set_ligatures(themes_.setting("ligatures") != "false");
     font_chain_ = build_font_chain(font_family_);
     if (!font_.init(vk_, font_chain_, font_size_)) {
@@ -199,8 +202,17 @@ void App::run() {
     TimePoint last_render{};
     // Plain pointer motion and key releases change nothing on screen; skipping them
     // keeps a 1000 Hz mouse from forcing 1000 redraws per second.
-    auto affects_frame = [](const SDL_Event& ev) {
-        if (ev.type == SDL_EVENT_MOUSE_MOTION) return (ev.motion.state & SDL_BUTTON_LMASK) != 0;
+    auto affects_frame = [this](const SDL_Event& ev) {
+        if (ev.type == SDL_EVENT_MOUSE_MOTION) {
+            if (ev.motion.state & SDL_BUTTON_LMASK) return true;
+            // Hover highlights live in the chrome (activity bar, sidebar, tab strip).
+            Layout l = compute_layout();
+            float x = ev.motion.x, y = ev.motion.y;
+            bool in_chrome = l.activity_bar.contains(x, y) || l.sidebar.contains(x, y) || l.tab_bar.contains(x, y);
+            bool changed = in_chrome || hover_was_chrome_;  // one more frame to clear the highlight
+            hover_was_chrome_ = in_chrome;
+            return changed;
+        }
         return ev.type != SDL_EVENT_KEY_UP;
     };
 
@@ -233,6 +245,8 @@ void App::run() {
         float dt = std::chrono::duration<float>(frame_start - last_time).count();
         last_time = frame_start;
 
+        anim::dt = std::min(dt, 0.1f);  // a long idle gap must not make animations jump
+        anim::active = false;
         update(dt);
         auto probe_start = Clock::now();
         for (auto& label : pending_probes_) {
@@ -256,6 +270,7 @@ void App::run() {
 
         render();
         frame_count_++;
+        if (anim::active) dirty = true;  // keep drawing until animations settle
 
         float frame_ms = std::chrono::duration<float, std::milli>(Clock::now() - frame_start).count();
         frame_times_ms_.push_back(frame_ms);
@@ -660,6 +675,10 @@ void App::handle_command(const std::string& cmd) {
         git_checkout();
     } else if (cmd == "toggle_blame") {
         editor_view_.toggle_blame();
+    } else if (cmd == "toggle_animations") {
+        anim::enabled = !anim::enabled;
+        themes_.set_setting("animations", anim::enabled ? "true" : "false");
+        set_status_message(std::string("Animations ") + (anim::enabled ? "on" : "off"));
     } else if (cmd == "select_font") {
         select_font();
     } else if (cmd == "toggle_ligatures") {
@@ -694,7 +713,7 @@ App::Layout App::compute_layout() const {
     // Activity bar (always visible), then the sidebar view.
     float ab_w = ACTIVITY_BAR_W;
     l.activity_bar = {0, 0, ab_w, content_h};
-    float sb_w = sidebar_visible_ ? std::floor(std::min(sidebar_width_, (fw - ab_w) * 0.5f)) : 0.0f;
+    float sb_w = std::floor(std::min(sidebar_width_, (fw - ab_w) * 0.5f) * sidebar_open_.value);
     l.sidebar = {ab_w, 0, sb_w, content_h};
 
     float right_x = ab_w + sb_w;
@@ -705,8 +724,7 @@ App::Layout App::compute_layout() const {
     l.tab_bar = {right_x, 0, right_w, tab_h};
 
     // Terminal: at bottom of right region (above status bar)
-    float term_h = terminal_visible_
-        ? std::floor(std::min(terminal_height_, (content_h - tab_h) * 0.8f)) : 0.0f;
+    float term_h = std::floor(std::min(terminal_height_, (content_h - tab_h) * 0.8f) * terminal_open_.value);
     l.terminal = {right_x, content_h - term_h, right_w, term_h};
 
     // Editor: remaining space
@@ -836,6 +854,9 @@ void App::select_theme() {
 }
 
 void App::update(float dt) {
+    // Panels slide open/closed instead of popping.
+    sidebar_open_.follow(sidebar_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
+    terminal_open_.follow(terminal_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     lsp_update();
     poll_remote_connect();
     search_.tick(dt);
@@ -882,7 +903,8 @@ void App::render() {
     ctx.r     = &renderer_;
     ctx.font  = &font_;
     ctx.theme = &theme_;
-    ctx.dt    = 0; // already handled in update
+    ctx.dt    = anim::dt;
+    SDL_GetMouseState(&ctx.mouse_x, &ctx.mouse_y);
 
     // One ordered quad stream for the whole frame
     renderer_.begin(extent);
@@ -1135,10 +1157,11 @@ void App::render_activity_bar(RenderContext& ctx, Rect r) {
     for (int i = 0; i < 3; i++) {
         Rect slot{r.x, r.y + i * ACTIVITY_BAR_W, ACTIVITY_BAR_W, ACTIVITY_BAR_W};
         bool active = sidebar_visible_ && static_cast<int>(sidebar_view_) == i;
+        bool hover = slot.contains(ctx.mouse_x, ctx.mouse_y);
         if (active) ctx.r->add_rect({slot.x, slot.y + 10.0f, 2.0f, slot.h - 20.0f}, theme_.accent, 1.0f);
         float bx = slot.x + (slot.w - cw) * 0.5f;
         float by = slot.y + (slot.h - font_.line_height()) * 0.5f + font_.ascender();
-        ctx.r->add_char(bx, by, icons[i], active ? theme_.fg : theme_.fg_muted, font_);
+        ctx.r->add_char(bx, by, icons[i], active || hover ? theme_.fg : theme_.fg_muted, font_);
         if (i == 2 && scm_.change_count() > 0) {
             std::string n = std::to_string(std::min<size_t>(scm_.change_count(), 99));
             float bw = std::max(16.0f, static_cast<float>(n.size()) * cw + 8.0f);
@@ -1354,6 +1377,7 @@ void App::register_commands() {
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
     add("toggle_blame",            "Git: Toggle Inline Blame",  "");
+    add("toggle_animations",       "Preferences: Toggle Animations", "");
     add("select_font",             "Preferences: Font Family",  "");
     add("toggle_ligatures",        "Preferences: Toggle Font Ligatures", "");
     add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");

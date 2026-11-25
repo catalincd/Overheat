@@ -76,15 +76,21 @@ void TabBar::render(RenderContext& ctx, Rect bounds) {
 
     float baseline = bounds.y + (bounds.h - ctx.font->line_height()) * 0.5f + ctx.font->ascender();
     float x = bounds.x - scroll_x_;
+    float ul_target_x = -1, ul_target_w = 0;
     for (size_t i = 0; i < tabs_.size(); i++) {
         const Tab& tab = tabs_[i];
         float w = tab_width(tab);
         bool active = static_cast<int>(i) == active_;
+        bool hover = !active && ctx.mouse_x >= x && ctx.mouse_x < x + w && ctx.mouse_y >= bounds.y &&
+                     ctx.mouse_y < bounds.y + bounds.h;
         if (active) {
             ctx.r->add_rect({x, bounds.y, w, bounds.h}, th.tab_active_bg);
-            ctx.r->add_rect({x, bounds.y + bounds.h - 2.0f, w, 2.0f}, th.accent);
+            ul_target_x = x;
+            ul_target_w = w;
+        } else if (hover) {
+            ctx.r->add_rect({x, bounds.y, w, bounds.h}, th.surface_hover);
         }
-        ctx.r->add_text(x + PAD, baseline, tab_title(tab), active ? th.fg : th.tab_inactive_fg, *ctx.font);
+        ctx.r->add_text(x + PAD, baseline, tab_title(tab), active || hover ? th.fg : th.tab_inactive_fg, *ctx.font);
 
         // Close glyph; an unsaved tab shows a dot in its place.
         float cx = x + w - PAD - CLOSE_W + 4.0f;
@@ -93,6 +99,10 @@ void TabBar::render(RenderContext& ctx, Rect bounds) {
         else
             ctx.r->add_char(cx, baseline, 0xEA76, active ? th.fg_muted : th.line_number, *ctx.font);
         x += w;
+    }
+    if (ul_target_x >= 0) {  // active-tab underline slides between tabs
+        float ux = ul_x_.follow(ul_target_x, anim::NORMAL), uw = ul_w_.follow(ul_target_w, anim::NORMAL);
+        ctx.r->add_rect({ux, bounds.y + bounds.h - 2.0f, uw, 2.0f}, th.accent);
     }
 }
 

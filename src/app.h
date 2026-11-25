@@ -19,6 +19,7 @@
 #include "keys.h"
 #include "script.h"
 #include "theme.h"
+#include "anim.h"
 #include "vfs.h"
 #include <future>
 #include <SDL3/SDL.h>
@@ -146,6 +147,8 @@ private:
     bool sidebar_visible_ = true;
     bool terminal_visible_ = true;
     float sidebar_width_ = 260.0f;
+    anim::Smooth sidebar_open_, terminal_open_;  // 0..1 slide fractions
+    bool hover_was_chrome_ = false;
     static constexpr float ACTIVITY_BAR_W = 48.0f;
     float terminal_height_ = 200.0f;
 

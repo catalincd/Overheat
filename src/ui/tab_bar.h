@@ -1,5 +1,6 @@
 #pragma once
 #include "ui/panel.h"
+#include "anim.h"
 #include <vector>
 #include <functional>
 
@@ -39,6 +40,7 @@ private:
     static constexpr float PAD = 14.0f;
     static constexpr float CLOSE_W = 16.0f;
     float char_w_ = 9.0f;
+    anim::Smooth ul_x_, ul_w_;
     std::string tab_title(const Tab& tab) const;
     float tab_width(const Tab& tab) const;
 

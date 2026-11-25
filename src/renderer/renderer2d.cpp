@@ -137,6 +137,7 @@ void Renderer2D::begin(VkExtent2D extent) {
     quads_.clear();
     clip_stack_.clear();
     fade_start_ = fade_end_ = 0;
+    alpha_ = 1.0f;
 }
 
 glm::vec4 Renderer2D::current_clip() const {
@@ -164,6 +165,15 @@ void Renderer2D::push(const GpuQuad& q) {
     }
     // Cull on the CPU too: most of a long file or scrollback is off-panel.
     glm::vec4 c = q.clip;
+    if (alpha_ < 1.0f) {
+        GpuQuad faded = q;
+        faded.color.a *= alpha_;
+        faded.color2.a *= alpha_;
+        float w = q.rect.z + 1.0f;
+        if (q.rect.x >= c.z || q.rect.y >= c.w || q.rect.x + w <= c.x || q.rect.y + q.rect.w <= c.y) return;
+        quads_.push_back(faded);
+        return;
+    }
     float w = q.rect.z + 1.0f;
     if (q.rect.x >= c.z || q.rect.y >= c.w || q.rect.x + w <= c.x || q.rect.y + q.rect.w <= c.y)
         return;

@@ -24,6 +24,8 @@ public:
 
     // Horizontal alpha fade for subsequent quads; pass start >= end to disable.
     void set_fade(float start_x, float end_x) { fade_start_ = start_x; fade_end_ = end_x; }
+    // Opacity multiplier for subsequent quads (fade-in animations).
+    void set_alpha(float a) { alpha_ = a; }
 
     void add_rect(Rect rect, Color color, float corner_radius = 0.0f,
                   float border_width = 0.0f, Color border_color = {0, 0, 0, 0});
@@ -63,6 +65,7 @@ private:
     std::vector<glm::vec4> clip_stack_;
     VkExtent2D extent_{};
     float fade_start_ = 0, fade_end_ = 0;
+    float alpha_ = 1.0f;
     bool overflow_warned_ = false;
 };
 

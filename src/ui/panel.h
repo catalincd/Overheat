@@ -13,6 +13,7 @@ struct RenderContext {
     FontAtlas* font;
     Theme* theme;
     float dt;
+    float mouse_x = -1, mouse_y = -1;  // pointer, for hover highlights
 };
 
 class Panel {

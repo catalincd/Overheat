@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/panel.h"
 #include <functional>
+#include "anim.h"
 
 namespace oh {
 
@@ -58,6 +59,7 @@ private:
     };
     std::vector<MatchResult> filtered_;
     PickOptions pick_;
+    anim::Smooth appear_;
     int first_visible_ = 0;
     int last_previewed_ = -1;
     void select(int index);

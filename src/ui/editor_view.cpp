@@ -35,6 +35,15 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
 
     cached_line_h_ = ctx.font->line_height();
     cached_char_w_ = ctx.font->char_width();
+    // Smooth scrolling: the view eases toward the editor's scroll target; switching
+    // files or jumping far snaps instead of sweeping through the whole document.
+    if (editor_.get() != anim_editor_ || std::abs(editor_->scroll_y() - smooth_y_.value) > bounds.h * 3.0f) {
+        smooth_y_.snap(editor_->scroll_y());
+        smooth_x_.snap(editor_->scroll_x());
+        anim_editor_ = editor_.get();
+    }
+    view_y_ = smooth_y_.follow(editor_->scroll_y(), anim::NORMAL, 0.5f);
+    view_x_ = smooth_x_.follow(editor_->scroll_x(), anim::NORMAL, 0.5f);
     if (shape_font_ != ctx.font || shape_font_size_ != cached_line_h_ ||
         shape_ligatures_ != ctx.font->ligatures() || ctx.font->generation() != shape_generation_) {
         shape_cache_.clear();
@@ -85,7 +94,7 @@ void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
     auto& buf = editor_->buffer();
     float line_h = ctx.font->line_height();
     float char_w = ctx.font->char_width();
-    float scroll_y = editor_->scroll_y();
+    float scroll_y = view_y_;
 
     // Gutter background
     ctx.r->add_rect(gutter_rect, ctx.theme->gutter_bg);
@@ -125,16 +134,16 @@ void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
 }
 
 float EditorView::row_y(size_t line, Rect text_rect) const {
-    return text_rect.y + static_cast<float>(line) * cached_line_h_ - editor_->scroll_y();
+    return text_rect.y + static_cast<float>(line) * cached_line_h_ - view_y_;
 }
 
 float EditorView::col_x(const std::string& line_text, size_t byte_col, Rect text_rect) const {
-    return text_rect.x + TEXT_PAD - editor_->scroll_x() +
+    return text_rect.x + TEXT_PAD - view_x_ +
            static_cast<float>(utf8::display_col(line_text, byte_col)) * cached_char_w_;
 }
 
 std::pair<size_t, size_t> EditorView::visible_lines(Rect text_rect) const {
-    size_t first = static_cast<size_t>(std::max(0.0f, editor_->scroll_y()) / cached_line_h_);
+    size_t first = static_cast<size_t>(std::max(0.0f, view_y_) / cached_line_h_);
     size_t count = static_cast<size_t>(text_rect.h / cached_line_h_) + 2;
     size_t end = std::min(first + count, editor_->buffer().line_count());
     return {first, end};
@@ -193,7 +202,7 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
                 byte_colors[j] = c;
         }
 
-        float x_base = text_rect.x + TEXT_PAD - editor_->scroll_x();
+        float x_base = text_rect.x + TEXT_PAD - view_x_;
         float baseline = y + ctx.font->ascender();
 
         // Shape the line (cached by its text) so ligatures and contextual
@@ -309,7 +318,7 @@ void EditorView::render_scrollbar(RenderContext& ctx, Rect text_rect) {
     float content = max_scroll() + text_rect.h;
     if (content <= text_rect.h + 1.0f) return;
     float h = std::max(24.0f, ruler_.h * text_rect.h / content);
-    float y = ruler_.y + (ruler_.h - h) * (editor_->scroll_y() / std::max(1.0f, max_scroll()));
+    float y = ruler_.y + (ruler_.h - h) * (view_y_ / std::max(1.0f, max_scroll()));
     Color tc = th.scrollbar;
     if (dragging_thumb_) tc.a = std::min(1.0f, tc.a * 2.0f);
     ctx.r->add_rect({ruler_.x + 2.0f, y, RULER_W - 4.0f, h}, tc, 3.0f);
@@ -423,7 +432,18 @@ void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {
         Position pos = sel.head;
         if (pos.line < first || pos.line >= end) continue;
         float x = col_x(buf.line_text(pos.line), pos.col, text_rect);
-        ctx.r->add_rect({x, row_y(pos.line, text_rect), 2.0f, cached_line_h_}, ctx.theme->cursor_color);
+        float y = row_y(pos.line, text_rect);
+        if (&sel == &editor_->cursors().selections().front()) {
+            // Glide in document space so scrolling doesn't make the caret lag behind the text.
+            float doc_x = x + view_x_, doc_y = y + view_y_;
+            if (std::abs(doc_y - caret_y_.target) > cached_line_h_ * 8.0f) {
+                caret_x_.snap(doc_x);
+                caret_y_.snap(doc_y);
+            }
+            x = caret_x_.follow(doc_x, anim::FAST, 0.3f) - view_x_;
+            y = caret_y_.follow(doc_y, anim::FAST, 0.3f) - view_y_;
+        }
+        ctx.r->add_rect({x, y, 2.0f, cached_line_h_}, ctx.theme->cursor_color);
     }
 }
 
@@ -432,8 +452,8 @@ void EditorView::render_minimap(RenderContext& /*ctx*/, Rect /*minimap_rect*/) {
 Position EditorView::position_at(float x, float y) const {
     Rect text_rect = {bounds_.x + cached_gutter_w_, bounds_.y, bounds_.w - cached_gutter_w_, bounds_.h};
     auto& buf = editor_->buffer();
-    float rel_y = y - text_rect.y + editor_->scroll_y();
-    float rel_x = x - text_rect.x - TEXT_PAD + editor_->scroll_x();
+    float rel_y = y - text_rect.y + view_y_;
+    float rel_x = x - text_rect.x - TEXT_PAD + view_x_;
     size_t line = rel_y > 0 ? static_cast<size_t>(rel_y / cached_line_h_) : 0;
     line = std::min(line, buf.line_count() - 1);
     // Round to the nearest cell edge; byte_col_at snaps to a character boundary.

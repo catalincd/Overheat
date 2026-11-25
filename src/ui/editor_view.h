@@ -4,6 +4,7 @@
 #include "ui/find_bar.h"
 #include "ui/completion_popup.h"
 #include "renderer/font_atlas.h"
+#include "anim.h"
 #include <unordered_map>
 #include <memory>
 
@@ -40,6 +41,9 @@ private:
     bool cursor_visible_ = true;
     bool mouse_selecting_ = false;
     bool show_blame_ = true;
+    anim::Smooth smooth_x_, smooth_y_, caret_x_, caret_y_;
+    float view_x_ = 0, view_y_ = 0;  // rendered (animated) scroll
+    const Editor* anim_editor_ = nullptr;
     FindBar find_;
     // Shaped glyph runs per line text (ligatures); cleared when the font changes.
     std::unordered_map<std::string, std::vector<FontAtlas::Shaped>> shape_cache_;
