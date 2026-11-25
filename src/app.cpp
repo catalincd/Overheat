@@ -2,6 +2,8 @@
 #include "fonts.h"
 #include <SDL3/SDL.h>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -164,7 +166,7 @@ bool App::init(int argc, char** argv) {
         for (auto& fp : file_args) {
             open_file(fp);
         }
-    } else {
+    } else if (!restore_session()) {
         new_file();
     }
 
@@ -285,6 +287,7 @@ void App::run() {
                          frame_ms, renderer_.quad_count());
         }
     }
+    save_session();
     print_frame_stats();
 }
 
@@ -1208,6 +1211,76 @@ void App::show_sidebar_view(SidebarView v) {
     sidebar_view_ = v;
     sidebar_visible_ = true;
     focus(&sidebar_panel());
+}
+
+fs::path App::session_file() const {
+    // One session per project folder, keyed by a hash of its path.
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : project_root_.string()) h = (h ^ c) * 1099511628211ull;
+    char name[32];
+    std::snprintf(name, sizeof name, "%016llx.session", static_cast<unsigned long long>(h));
+    return config_dir_ / "sessions" / name;
+}
+
+void App::save_session() {
+    if (remote_active_) return;  // remote sessions are not restored (yet)
+    std::error_code ec;
+    fs::create_directories(session_file().parent_path(), ec);
+    std::ofstream out(session_file());
+    out << "root\t" << project_root_.string() << "\n";
+    out << "layout\t" << sidebar_visible_ << "\t" << terminal_visible_ << "\t"
+        << static_cast<int>(sidebar_view_) << "\n";
+    int active = tab_bar_.active_index();
+    for (size_t i = 0; i < tab_bar_.tabs().size(); i++) {
+        auto& ed = tab_bar_.tabs()[i].editor;
+        if (!ed || ed->buffer().file_path().empty()) continue;
+        Position p = ed->cursors().primary_pos();
+        out << "tab\t" << (static_cast<int>(i) == active) << "\t" << p.line << "\t" << p.col << "\t"
+            << ed->scroll_y() << "\t" << ed->buffer().file_path().string() << "\n";
+    }
+}
+
+bool App::restore_session() {
+    std::ifstream in(session_file());
+    if (!in) return false;
+    std::shared_ptr<Editor> active_ed;
+    bool any = false;
+    for (std::string line; std::getline(in, line);) {
+        std::istringstream ss(line);
+        std::string kind;
+        std::getline(ss, kind, '\t');
+        if (kind == "layout") {
+            int sv = 1, tv = 1, view = 0;
+            ss >> sv >> tv >> view;
+            sidebar_visible_ = sv != 0;
+            terminal_visible_ = tv != 0;
+            sidebar_view_ = static_cast<SidebarView>(std::clamp(view, 0, 2));
+            sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
+            terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
+        } else if (kind == "tab") {
+            int active = 0;
+            size_t l = 0, c = 0;
+            float sy = 0;
+            ss >> active >> l >> c >> sy;
+            ss.ignore(1);
+            std::string path;
+            std::getline(ss, path);
+            std::error_code ec;
+            if (!fs::exists(path, ec)) continue;
+            open_file(path);
+            if (Editor* ed = current_editor()) {
+                l = std::min(l, ed->buffer().line_count() - 1);
+                ed->cursors().set_primary({l, std::min(c, ed->buffer().line_length(l))});
+                ed->set_scroll(0, sy);
+                any = true;
+                if (active) active_ed = tab_bar_.active_editor();
+            }
+        }
+    }
+    if (active_ed)
+        for (size_t i = 0; i < tab_bar_.tabs().size(); i++)
+            if (tab_bar_.tabs()[i].editor == active_ed) tab_bar_.set_active(static_cast<int>(i));
+    return any;
 }
 
 void App::render_breadcrumbs(RenderContext& ctx, Rect r) {

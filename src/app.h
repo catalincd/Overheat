@@ -92,6 +92,9 @@ private:
     void render_activity_bar(RenderContext& ctx, Rect r);
     void render_breadcrumbs(RenderContext& ctx, Rect r);
     bool show_breadcrumbs_ = true;
+    fs::path session_file() const;
+    void save_session();
+    bool restore_session();
     void setup_scm();
 
     GitRepository git_;
