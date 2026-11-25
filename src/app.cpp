@@ -212,7 +212,8 @@ void App::run() {
             // Hover highlights live in the chrome (activity bar, sidebar, tab strip).
             Layout l = compute_layout();
             float x = ev.motion.x, y = ev.motion.y;
-            bool in_chrome = l.activity_bar.contains(x, y) || l.sidebar.contains(x, y) || l.tab_bar.contains(x, y);
+            bool in_chrome = l.activity_bar.contains(x, y) || l.sidebar.contains(x, y) || l.tab_bar.contains(x, y) ||
+                             l.terminal_header.contains(x, y);
             bool changed = in_chrome || hover_was_chrome_;  // one more frame to clear the highlight
             hover_was_chrome_ = in_chrome;
             return changed;
@@ -509,6 +510,10 @@ void App::handle_event(const SDL_Event& e) {
         } else if (sidebar_visible_ && layout.sidebar.contains(mx, my)) {
             focus(&sidebar_panel());
             sidebar_panel().handle_mouse(me);
+        } else if (layout.terminal_header.contains(mx, my)) {
+            if (term_close_btn_.contains(mx, my)) terminal_visible_ = false;
+            else if (term_restart_btn_.contains(mx, my)) restart_terminal();
+            else focus(&terminal_);
         } else if (terminal_visible_ && layout.terminal.contains(mx, my)) {
             focus(&terminal_);
             terminal_.handle_mouse(me);
@@ -581,7 +586,7 @@ void App::handle_event(const SDL_Event& e) {
                 sidebar_width_ = std::clamp(e.motion.x - l.sidebar.x, 140.0f, l.sidebar.w + l.editor.w - 200.0f);
             else
                 terminal_height_ = std::clamp(l.terminal.y + l.terminal.h - e.motion.y, 60.0f,
-                                              l.terminal.h + l.editor.h - 80.0f);
+                                              l.terminal.h + l.terminal_header.h + l.editor.h - 80.0f);
             request_redraw();
             break;
         }
@@ -869,7 +874,10 @@ App::Layout App::compute_layout() const {
 
     // Terminal: at bottom of right region (above status bar)
     float term_h = std::floor(std::min(terminal_height_, (content_h - tab_h) * 0.8f) * terminal_open_.value);
-    l.terminal = {right_x, content_h - term_h, right_w, term_h};
+    // A header strip sits on top of the terminal.
+    float header_h = std::min(term_h, 28.0f);
+    l.terminal_header = {right_x, content_h - term_h, right_w, header_h};
+    l.terminal = {right_x, content_h - term_h + header_h, right_w, term_h - header_h};
 
     // Editor: remaining space
     float editor_y = tab_h;
@@ -1105,7 +1113,12 @@ void App::render() {
         Color div = theme_.border;
         renderer_.add_rect({layout.group_split_x, 0, 1.0f, layout.editor.y + layout.editor.h}, div);
     }
-    if (terminal_visible_) clipped(terminal_, layout.terminal);
+    if (layout.terminal_header.h > 0) {
+        renderer_.push_clip(layout.terminal_header);
+        render_terminal_header(ctx, layout.terminal_header);
+        renderer_.pop_clip();
+    }
+    if (layout.terminal.h > 0) clipped(terminal_, layout.terminal);
     clipped(status_bar_, layout.status_bar);
     if (Splitter sp = splitter_drag_ != Splitter::None ? splitter_drag_ : splitter_hover_; sp != Splitter::None) {
         Color c = theme_.accent;
@@ -1114,7 +1127,7 @@ void App::render() {
         else if (sp == Splitter::Sidebar)
             renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1.0f, 0, 2.0f, layout.status_bar.y}, c);
         else
-            renderer_.add_rect({layout.terminal.x, layout.terminal.y - 1.0f, layout.terminal.w, 2.0f}, c);
+            renderer_.add_rect({layout.terminal_header.x, layout.terminal_header.y - 1.0f, layout.terminal.w, 2.0f}, c);
     }
     if (settings_page_.visible())
         clipped(settings_page_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
@@ -1239,7 +1252,7 @@ App::Splitter App::splitter_at(float x, float y) const {
     constexpr float GRAB = 4.0f;
     if (sidebar_visible_ && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y < l.status_bar.y)
         return Splitter::Sidebar;
-    if (terminal_visible_ && std::abs(y - l.terminal.y) <= GRAB && x >= l.terminal.x)
+    if (terminal_visible_ && std::abs(y - l.terminal_header.y) <= GRAB && x >= l.terminal.x)
         return Splitter::Terminal;
     if (split_ && std::abs(x - l.group_split_x) <= GRAB && y < l.editor.y + l.editor.h)
         return Splitter::Groups;
@@ -1549,6 +1562,32 @@ void App::watch_open_files() {
     }
 }
 
+void App::render_terminal_header(RenderContext& ctx, Rect r) {
+    ctx.r->add_rect(r, theme_.terminal_bg);
+    ctx.r->add_rect({r.x, r.y, r.w, 1.0f}, theme_.border);
+    float cw = font_.char_width();
+    float base = r.y + (r.h - font_.line_height()) * 0.5f + font_.ascender();
+    float x = ctx.r->add_text(r.x + 14.0f, base, "TERMINAL", terminal_.focused() ? theme_.fg : theme_.fg_muted, font_);
+    std::string label = remote_active_ ? "ssh: " + remote_target_.alias : "bash";
+    if (const char* sh = std::getenv("SHELL"); sh && !remote_active_) label = fs::path(sh).filename().string();
+    ctx.r->add_text(x + 2.0f * cw, base, label, theme_.fg_muted, font_);
+    // Underline the active "tab", like the editor tabs.
+    ctx.r->add_rect({r.x + 10.0f, r.y + r.h - 2.0f, x - r.x - 6.0f, 2.0f}, theme_.accent);
+    term_close_btn_ = {r.x + r.w - 32.0f, r.y + 2.0f, 24.0f, r.h - 4.0f};
+    term_restart_btn_ = {r.x + r.w - 60.0f, r.y + 2.0f, 24.0f, r.h - 4.0f};
+    for (auto [btn, icon] : {std::pair{term_restart_btn_, 0xEB37u}, std::pair{term_close_btn_, 0xEA76u}}) {
+        bool hover = btn.contains(ctx.mouse_x, ctx.mouse_y);
+        if (hover) ctx.r->add_rect(btn, theme_.surface_hover, 4.0f);
+        ctx.r->add_char(btn.x + (btn.w - cw) * 0.5f, base, icon, hover ? theme_.fg : theme_.fg_muted, font_);
+    }
+}
+
+void App::restart_terminal() {
+    if (terminal_argv_.empty()) terminal_.spawn({}, project_root_);
+    else terminal_.spawn(terminal_argv_);
+    focus(&terminal_);
+}
+
 void App::render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed) {
     if (r.h <= 0) return;
     ctx.r->add_rect(r, theme_.bg);
@@ -1595,9 +1634,13 @@ void App::render_activity_bar(RenderContext& ctx, Rect r) {
         bool active = sidebar_visible_ && static_cast<int>(sidebar_view_) == i;
         bool hover = slot.contains(ctx.mouse_x, ctx.mouse_y);
         if (active) ctx.r->add_rect({slot.x, slot.y + 10.0f, 2.0f, slot.h - 20.0f}, theme_.accent, 1.0f);
-        float bx = slot.x + (slot.w - cw) * 0.5f;
-        float by = slot.y + (slot.h - font_.line_height()) * 0.5f + font_.ascender();
-        ctx.r->add_char(bx, by, icons[i], active || hover ? theme_.fg : theme_.fg_muted, font_);
+        // Icons at a fixed, larger size than the text, centred in the slot.
+        const GlyphInfo* gi = font_.glyph_sized(icons[i], 22);
+        if (gi) {
+            float bx = std::round(slot.x + (slot.w - gi->width) * 0.5f - gi->bearing_x);
+            float by = std::round(slot.y + (slot.h - gi->height) * 0.5f + gi->bearing_y);
+            ctx.r->add_glyph(bx, by, gi, active || hover ? theme_.fg : theme_.fg_muted);
+        }
         if (i == 2 && scm_.change_count() > 0) {
             std::string n = std::to_string(std::min<size_t>(scm_.change_count(), 99));
             float bw = std::max(16.0f, static_cast<float>(n.size()) * cw + 8.0f);

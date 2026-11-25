@@ -160,6 +160,7 @@ void App::open_remote_folder(const fs::path& path) {
     else argv.insert(argv.end(), {"-p", std::to_string(remote_target_.port),
                                   remote_target_.user + "@" + remote_target_.hostname});
     argv.push_back("cd " + shell_quote(path.string()) + " && exec \"$SHELL\" -l");
+    terminal_argv_ = argv;
     terminal_.spawn(argv);
     set_status_message("Opened " + path.string() + " on " + remote_target_.display());
 }
@@ -178,6 +179,7 @@ void App::remote_disconnect() {
     command_palette_.set_root(project_root_);
     command_palette_.set_file_list(all_files_);
     search_.set_root(project_root_);
+    terminal_argv_.clear();
     terminal_.spawn({}, project_root_);
     new_file();
     if (git_.is_open()) {

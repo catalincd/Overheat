@@ -102,6 +102,10 @@ private:
     void show_sidebar_view(SidebarView v);
     void render_activity_bar(RenderContext& ctx, Rect r);
     void render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed);
+    void render_terminal_header(RenderContext& ctx, Rect r);
+    void restart_terminal();
+    std::vector<std::string> terminal_argv_;  // empty = local login shell
+    Rect term_restart_btn_{}, term_close_btn_{};
 
     // Split editors: tab_bar_/editor_view_ are always the *active* group; the
     // other group lives in tab_bar2_/editor_view2_ and the two are swapped on focus.
@@ -203,6 +207,7 @@ private:
         // The other editor group when split (empty otherwise).
         Rect tab_bar2, breadcrumbs2, editor2;
         float group_split_x = -1;  // x of the divider between groups
+        Rect terminal_header;
         Rect terminal;
         Rect status_bar;
     };

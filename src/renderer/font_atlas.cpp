@@ -13,6 +13,8 @@ bool FontAtlas::init(VulkanContext& vk, const std::vector<std::string>& font_pat
     generation_++;
     glyphs_.clear();
     by_gid_.clear();
+    sized_.clear();
+    font_size_ = font_size;
     pen_x_ = pen_y_ = 1;
     shelf_h_ = 0;
     full_warned_ = false;
@@ -148,6 +150,21 @@ const GlyphInfo* FontAtlas::rasterize_glyph(FT_Face face, uint32_t index, GlyphI
         return &scratch_;
     }
     return &(by_gid_[index] = info);
+}
+
+const GlyphInfo* FontAtlas::glyph_sized(uint32_t codepoint, uint32_t px) const {
+    uint64_t key = (static_cast<uint64_t>(px) << 32) | codepoint;
+    if (auto it = sized_.find(key); it != sized_.end()) return &it->second;
+    for (FT_Face f : faces_) {
+        FT_UInt index = FT_Get_Char_Index(f, codepoint);
+        if (!index) continue;
+        FT_Set_Pixel_Sizes(f, 0, px);
+        const GlyphInfo* gi = rasterize_glyph(f, index, GlyphInfo{}, false);
+        FT_Set_Pixel_Sizes(f, 0, static_cast<FT_UInt>(font_size_));  // restore the text size
+        if (!gi) return nullptr;
+        return &(sized_[key] = *gi);
+    }
+    return glyph(codepoint);
 }
 
 const GlyphInfo* FontAtlas::glyph_by_index(uint32_t gid) const {

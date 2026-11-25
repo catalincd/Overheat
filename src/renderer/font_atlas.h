@@ -33,6 +33,8 @@ public:
     };
     void shape(std::string_view text, std::vector<Shaped>& out) const;
     const GlyphInfo* glyph_by_index(uint32_t gid) const;  // primary face
+    // A codepoint at an explicit pixel size (UI icons), cached separately.
+    const GlyphInfo* glyph_sized(uint32_t codepoint, uint32_t px) const;
     void set_ligatures(bool on) { ligatures_ = on; }
     bool ligatures() const { return ligatures_; }
     // Bumped on every init(): glyph ids from a previous font are invalid.
@@ -59,6 +61,8 @@ private:
 
     mutable std::unordered_map<uint32_t, GlyphInfo> glyphs_;
     mutable std::unordered_map<uint32_t, GlyphInfo> by_gid_;
+    mutable std::unordered_map<uint64_t, GlyphInfo> sized_;
+    float font_size_ = 15.0f;
     hb_font_t* hb_font_ = nullptr;
     hb_buffer_t* hb_buf_ = nullptr;
     bool ligatures_ = true;
