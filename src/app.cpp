@@ -109,6 +109,7 @@ bool App::init(int argc, char** argv) {
     anim::enabled = themes_.setting("animations") != "false";
     show_breadcrumbs_ = themes_.setting("breadcrumbs") != "false";
     editor_view_.set_minimap(themes_.setting("minimap") != "false");
+    Editor::auto_close_pairs = themes_.setting("auto_close_brackets") != "false";
     sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
     terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
     font_.set_ligatures(themes_.setting("ligatures") != "false");
@@ -134,15 +135,12 @@ bool App::init(int argc, char** argv) {
     // ---- Key bindings ----
     keymap_.init_defaults();
 
-    // Try to load user key bindings (override defaults)
-    fs::path user_keys = fs::path(std::getenv("HOME") ? std::getenv("HOME") : "~")
-                         / ".config" / "overheat" / "keybindings.json";
-    if (fs::exists(user_keys)) {
-        keymap_.load(user_keys);
-    }
+    // User key bindings overlay the defaults.
+    if (fs::path user_keys = config_dir_ / "keybindings.json"; fs::exists(user_keys)) keymap_.load(user_keys);
 
     // ---- Commands ----
     register_commands();
+    refresh_command_keys();
 
     // ---- Git ----
     git_.open(project_root_);
@@ -375,12 +373,34 @@ void App::handle_event(const SDL_Event& e) {
         SDL_Keycode kc = e.key.key;
         KeyMod mods = sdl_mods(e.key.mod);
 
+        // Keybinding editor capture: the next real chord becomes the binding.
+        if (!capture_command_.empty() && !command_palette_.is_visible()) {
+            bool modifier_only = kc == SDLK_LCTRL || kc == SDLK_RCTRL || kc == SDLK_LSHIFT || kc == SDLK_RSHIFT ||
+                                 kc == SDLK_LALT || kc == SDLK_RALT || kc == SDLK_LGUI || kc == SDLK_RGUI;
+            if (modifier_only) break;
+            if (kc == SDLK_ESCAPE) {
+                set_status_message("Shortcut unchanged");
+            } else {
+                keymap_.rebind(capture_command_, kc, mods);
+                keymap_.save(config_dir_ / "keybindings.json");
+                refresh_command_keys();
+                set_status_message(KeyMap::chord_to_string(kc, mods) + " now runs " + capture_command_);
+            }
+            capture_command_.clear();
+            break;
+        }
         // Command palette intercepts keys when visible
         if (command_palette_.is_visible()) {
             KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
             if (command_palette_.handle_key(ke)) break;
         }
 
+        // The settings card is modal.
+        if (settings_page_.visible()) {
+            KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
+            settings_page_.handle_key(ke);
+            break;
+        }
         // Sidebar text inputs (commit message, search) take typing keys before global bindings.
         if (sidebar_visible_ && !command_palette_.is_visible()) {
             KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
@@ -472,6 +492,8 @@ void App::handle_event(const SDL_Event& e) {
         }
         if (command_palette_.is_visible()) {
             command_palette_.handle_mouse(me);
+        } else if (settings_page_.visible()) {
+            settings_page_.handle_mouse(me);
         } else if (layout.activity_bar.contains(mx, my)) {
             int slot = static_cast<int>((my - layout.activity_bar.y) / ACTIVITY_BAR_W);
             SidebarView v = static_cast<SidebarView>(std::clamp(slot, 0, 2));
@@ -525,6 +547,10 @@ void App::handle_event(const SDL_Event& e) {
 
         MouseEvent me{mx, my, 0, false, false, e.wheel.x, e.wheel.y};
 
+        if (settings_page_.visible()) {
+            settings_page_.handle_mouse(me);
+            break;
+        }
         if ((SDL_GetModState() & SDL_KMOD_CTRL) && layout.editor.contains(mx, my)) {
             set_font_size(font_size_ + (e.wheel.y > 0 ? 1.0f : -1.0f));
             break;
@@ -740,6 +766,10 @@ void App::handle_command(const std::string& cmd) {
         git_checkout();
     } else if (cmd == "toggle_blame") {
         editor_view_.toggle_blame();
+    } else if (cmd == "open_settings") {
+        open_settings();
+    } else if (cmd == "keybindings") {
+        open_keybindings();
     } else if (cmd == "split_editor") {
         split_editor();
     } else if (cmd == "focus_group_1" || cmd == "focus_group_2") {
@@ -944,6 +974,11 @@ void App::select_theme() {
 }
 
 void App::update(float dt) {
+    watch_timer_ += dt;
+    if (watch_timer_ > 1.0f) {
+        watch_timer_ = 0;
+        watch_open_files();
+    }
     // Panels slide open/closed instead of popping.
     sidebar_open_.follow(sidebar_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     terminal_open_.follow(terminal_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
@@ -1056,6 +1091,8 @@ void App::render() {
         else
             renderer_.add_rect({layout.terminal.x, layout.terminal.y - 1.0f, layout.terminal.w, 2.0f}, c);
     }
+    if (settings_page_.visible())
+        clipped(settings_page_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (command_palette_.is_visible())
         clipped(command_palette_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
 
@@ -1130,6 +1167,9 @@ void App::save_current() {
             return;
         }
         ed->buffer().set_unmodified();
+        std::error_code ec;
+        if (auto t = fs::last_write_time(ed->buffer().file_path(), ec); !ec)
+            disk_mtimes_[ed->buffer().file_path().string()] = t;  // our own write is not an external change
         set_status_message("Saved " + ed->buffer().file_path().filename().string());
         request_git_refresh();
 
@@ -1393,6 +1433,95 @@ void App::unsplit_if_empty() {
     auto ed = tab_bar_.active_editor();
     editor_view_.set_editor(ed);
     status_bar_.set_editor(ed);
+}
+
+void App::refresh_command_keys() {
+    for (auto& c : commands_)
+        if (std::string k = keymap_.binding_for(c.name); !k.empty()) c.keybinding = k;
+    command_palette_.set_commands(commands_);
+}
+
+void App::open_settings() {
+    using Row = SettingsPage::Row;
+    auto toggle = [this](std::string label, std::string desc, std::function<bool()> on, std::string cmd) {
+        return Row{Row::Toggle, std::move(label), std::move(desc), nullptr, std::move(on),
+                   [this, cmd](int) { handle_command(cmd); }};
+    };
+    std::vector<Row> rows;
+    rows.push_back({Row::Choice, "Color theme", "Built-in and ~/.config/overheat/themes/*.toml",
+                    [this] { return themes_.current(); }, nullptr, [this](int) { select_theme(); }});
+    rows.push_back({Row::Choice, "Font family", "Any installed monospace font; icons fall back to Nerd Fonts",
+                    [this] { return font_family_.empty() ? std::string("JetBrainsMono Nerd Font Mono") : font_family_; },
+                    nullptr, [this](int) { select_font(); }});
+    rows.push_back({Row::Stepper, "Font size", "Also Ctrl+= / Ctrl+- / Ctrl+wheel",
+                    [this] { return std::to_string(static_cast<int>(font_size_)); }, nullptr,
+                    [this](int d) { if (d) set_font_size(font_size_ + static_cast<float>(d)); }});
+    rows.push_back(toggle("Font ligatures", "Render => != -> as joined glyphs when the font has them",
+                          [this] { return font_.ligatures(); }, "toggle_ligatures"));
+    rows.push_back(toggle("Animations", "Smooth scrolling, caret glide, panel and popup motion",
+                          [] { return anim::enabled; }, "toggle_animations"));
+    rows.push_back(toggle("Minimap", "Code overview at the editor's right edge",
+                          [this] { return editor_view_.minimap(); }, "toggle_minimap"));
+    rows.push_back(toggle("Breadcrumbs", "Path and enclosing symbols above the editor",
+                          [this] { return show_breadcrumbs_; }, "toggle_breadcrumbs"));
+    rows.push_back(toggle("Inline git blame", "Author and commit at the end of the cursor line",
+                          [this] { return editor_view_.blame(); }, "toggle_blame"));
+    rows.push_back({Row::Toggle, "Auto-close brackets and quotes", "Typing ( [ { \" ' ` inserts the pair",
+                    nullptr, [] { return Editor::auto_close_pairs; }, [this](int) {
+                        Editor::auto_close_pairs = !Editor::auto_close_pairs;
+                        themes_.set_setting("auto_close_brackets", Editor::auto_close_pairs ? "true" : "false");
+                    }});
+    rows.push_back({Row::Button, "Keyboard shortcuts", "Search commands and assign new key chords",
+                    [] { return std::string("Edit"); }, nullptr, [this](int) { settings_page_.close(); open_keybindings(); }});
+    rows.push_back({Row::Button, "Settings file", (config_dir_ / "settings.toml").string(),
+                    [] { return std::string("Open"); }, nullptr, [this](int) {
+                        settings_page_.close();
+                        fs::path p = config_dir_ / "settings.toml";
+                        if (!fs::exists(p)) themes_.set_setting("theme", "\"" + themes_.current() + "\"");
+                        open_file(p);
+                    }});
+    settings_page_.open(std::move(rows));
+}
+
+void App::open_keybindings() {
+    std::vector<std::string> items;
+    std::vector<std::string> names;
+    for (auto& c : commands_) {
+        std::string k = keymap_.binding_for(c.name);
+        items.push_back(c.label + (k.empty() ? "" : "   [" + k + "]"));
+        names.push_back(c.name);
+    }
+    CommandPalette::PickOptions opts;
+    opts.placeholder = "Keyboard shortcuts: pick a command, then press its new key chord";
+    opts.items = items;
+    opts.on_pick = [this, names](int i, const std::string&) {
+        if (i < 0) return;
+        capture_command_ = names[static_cast<size_t>(i)];
+        set_status_message("Press the new shortcut (Esc cancels)...", 30.0f);
+    };
+    command_palette_.pick(std::move(opts));
+}
+
+void App::watch_open_files() {
+    if (vfs_->is_remote()) return;
+    for (auto& tab : tab_bar_.tabs()) {
+        if (!tab.editor) continue;
+        const fs::path& p = tab.editor->buffer().file_path();
+        if (p.empty()) continue;
+        std::error_code ec;
+        auto t = fs::last_write_time(p, ec);
+        if (ec) continue;
+        auto [it, inserted] = disk_mtimes_.try_emplace(p.string(), t);
+        if (inserted || it->second == t) continue;
+        it->second = t;
+        if (!tab.editor->is_modified()) {
+            tab.editor->reload();
+            attach_git(*tab.editor);
+            set_status_message("Reloaded " + p.filename().string() + " (changed on disk)");
+        } else {
+            set_status_message(p.filename().string() + " changed on disk; you have unsaved edits", 8.0f);
+        }
+    }
 }
 
 void App::render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed) {
@@ -1666,6 +1795,8 @@ void App::register_commands() {
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
     add("toggle_blame",            "Git: Toggle Inline Blame",  "");
+    add("open_settings",           "Preferences: Open Settings", "Ctrl+,");
+    add("keybindings",             "Preferences: Keyboard Shortcuts", "");
     add("split_editor",            "View: Split Editor",        "Ctrl+\\");
     add("focus_group_1",           "View: Focus Left Editor Group", "Ctrl+1");
     add("focus_group_2",           "View: Focus Right Editor Group", "Ctrl+2");

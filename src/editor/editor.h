@@ -44,6 +44,7 @@ public:
     void add_cursor_vertical(int dir);   // Ctrl+Alt+Up/Down
     // Typing with auto-closing brackets/quotes, skip-over and selection wrapping.
     void type_text(const std::string& text);
+    static inline bool auto_close_pairs = true;  // setting: auto_close_brackets
     // Matching bracket for the bracket at/before the primary cursor.
     bool find_bracket_pair(Position& a, Position& b) const;
 

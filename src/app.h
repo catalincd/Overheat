@@ -11,6 +11,7 @@
 #include "ui/editor_view.h"
 #include "ui/scm_panel.h"
 #include "ui/search_panel.h"
+#include "ui/settings_page.h"
 #include "git/repository.h"
 #include "ssh/session.h"
 #include "ssh/ssh_config.h"
@@ -105,6 +106,14 @@ private:
     void focus_group(bool right);
     void unsplit_if_empty();
     bool show_breadcrumbs_ = true;
+    SettingsPage settings_page_;
+    void open_settings();
+    void open_keybindings();
+    std::string capture_command_;  // keybinding editor: waiting for a chord
+    std::unordered_map<std::string, fs::file_time_type> disk_mtimes_;
+    float watch_timer_ = 0;
+    void watch_open_files();
+    void refresh_command_keys();
     fs::path session_file() const;
     void save_session();
     bool restore_session();

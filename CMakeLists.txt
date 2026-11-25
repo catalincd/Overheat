@@ -61,6 +61,7 @@ set(OVERHEAT_SOURCES
     src/ui/find_bar.cpp
     src/ui/search_panel.cpp
     src/ui/completion_popup.cpp
+    src/ui/settings_page.cpp
     src/search.cpp
     src/git/repository.cpp
     src/ssh/session.cpp

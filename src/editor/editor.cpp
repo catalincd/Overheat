@@ -886,7 +886,7 @@ void Editor::type_text(const std::string& text) {
         cursors_.move_right(buffer_, false);
         return;
     }
-    char close = closer_for(c);
+    char close = auto_close_pairs ? closer_for(c) : 0;
     if (!close) {
         insert_text(text);
         return;

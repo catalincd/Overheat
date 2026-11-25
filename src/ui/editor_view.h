@@ -20,6 +20,7 @@ public:
     void render(RenderContext& ctx, Rect bounds) override;
     void update(float dt);
     void toggle_blame() { show_blame_ = !show_blame_; }
+    bool blame() const { return show_blame_; }
     void set_minimap(bool on) { show_minimap_ = on; }
     bool minimap() const { return show_minimap_; }
     void open_find(bool replace) { if (editor_) find_.open(*editor_, replace); reveal_cursor(); }

@@ -26,6 +26,7 @@ void KeyMap::init_defaults() {
     // Panels
     bind(SDLK_GRAVE, KeyMod::Ctrl,                      "toggle_terminal");
     bind(SDLK_B,     KeyMod::Ctrl,                      "toggle_sidebar");
+    bind(SDLK_COMMA, KeyMod::Ctrl,                      "open_settings");
     bind(SDLK_BACKSLASH, KeyMod::Ctrl,                  "split_editor");
     bind(SDLK_1,     KeyMod::Ctrl,                      "focus_group_1");
     bind(SDLK_2,     KeyMod::Ctrl,                      "focus_group_2");
@@ -128,7 +129,7 @@ bool KeyMap::load(const fs::path& path) {
     std::ifstream f(path);
     if (!f.is_open()) return false;
 
-    bindings_.clear();
+    std::vector<std::pair<KeyCombo, std::string>> entries;
     std::string line;
     while (std::getline(f, line)) {
         // Skip empty lines and comments
@@ -167,12 +168,36 @@ bool KeyMap::load(const fs::path& path) {
         }
 
         SDL_Keycode kc = string_to_keycode(key_name);
-        if (kc != SDLK_UNKNOWN) {
-            bind(kc, mods, cmd_part);
-        }
+        if (kc != SDLK_UNKNOWN) entries.push_back({{kc, mods}, cmd_part});
     }
-
+    for (auto& [combo, cmd] : entries) {
+        if (std::find(user_commands_.begin(), user_commands_.end(), cmd) != user_commands_.end()) continue;
+        user_commands_.push_back(cmd);
+        std::erase_if(bindings_, [&](const auto& kv) { return kv.second == cmd; });
+    }
+    for (auto& [combo, cmd] : entries) bindings_[combo] = cmd;
     return true;
+}
+
+void KeyMap::rebind(const std::string& command, SDL_Keycode key, KeyMod mods) {
+    std::erase_if(bindings_, [&](const auto& kv) { return kv.second == command; });
+    bindings_[{key, mods}] = command;  // also steals the chord from any other command
+    if (std::find(user_commands_.begin(), user_commands_.end(), command) == user_commands_.end())
+        user_commands_.push_back(command);
+}
+
+std::string KeyMap::chord_to_string(SDL_Keycode key, KeyMod mods) {
+    return mods_to_string(mods) + keycode_to_string(key);
+}
+
+std::string KeyMap::binding_for(const std::string& command) const {
+    std::string best;
+    for (auto& [combo, cmd] : bindings_) {
+        if (cmd != command) continue;
+        std::string s = chord_to_string(combo.key, combo.mods);
+        if (best.empty() || s.size() < best.size()) best = s;
+    }
+    return best;
 }
 
 bool KeyMap::save(const fs::path& path) {
@@ -182,6 +207,7 @@ bool KeyMap::save(const fs::path& path) {
     f << "{\n";
     bool first = true;
     for (auto& [combo, cmd] : bindings_) {
+        if (std::find(user_commands_.begin(), user_commands_.end(), cmd) == user_commands_.end()) continue;
         if (!first) f << ",\n";
         first = false;
 
