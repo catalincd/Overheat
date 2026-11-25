@@ -198,17 +198,39 @@ void App::run() {
     auto last_time = Clock::now();
     constexpr float FRAME_BUDGET_MS = 1000.0f / 60.0f;
 
+    bool dirty = true;
+    TimePoint last_render{};
+    // Plain pointer motion and key releases change nothing on screen; skipping them
+    // keeps a 1000 Hz mouse from forcing 1000 redraws per second.
+    auto affects_frame = [](const SDL_Event& ev) {
+        if (ev.type == SDL_EVENT_MOUSE_MOTION) return (ev.motion.state & SDL_BUTTON_LMASK) != 0;
+        return ev.type != SDL_EVENT_KEY_UP;
+    };
+
     while (running_) {
         // Event-driven: sleep until input, terminal output (SDL_EVENT_USER), the next
-        // cursor blink, or the next scripted step.
+        // cursor blink, or the next scripted step. At most one frame per display refresh.
+        auto now = Clock::now();
+        auto frame_interval = std::chrono::microseconds(static_cast<int64_t>(1e6 / refresh_rate()));
         int timeout = 500;
-        if (script_.active()) timeout = std::min(timeout, script_.ms_until_next(Clock::now()));
+        if (script_.active()) timeout = std::min(timeout, script_.ms_until_next(now));
+        if (dirty) {
+            auto wait = std::chrono::duration_cast<std::chrono::milliseconds>(last_render + frame_interval - now);
+            timeout = std::max(0, static_cast<int>(wait.count()));
+        }
         SDL_Event e;
-        if (pending_probes_.empty() && SDL_WaitEventTimeout(&e, timeout))
+        if (pending_probes_.empty()) {
+            if (SDL_WaitEventTimeout(&e, timeout)) dirty |= affects_frame(e), handle_event(e);
+            else dirty = true;  // timer wake: blink, polling, scripted step
+        }
+        while (SDL_PollEvent(&e)) {
+            dirty |= affects_frame(e);
             handle_event(e);
-        while (SDL_PollEvent(&e))
-            handle_event(e);
+        }
         if (!running_) break;
+        if (pending_probes_.empty() && (!dirty || Clock::now() < last_render + frame_interval)) continue;
+        dirty = false;
+        last_render = Clock::now();
 
         auto frame_start = Clock::now();
         float dt = std::chrono::duration<float>(frame_start - last_time).count();
@@ -260,6 +282,11 @@ void App::print_frame_stats() const {
     for (float v : t) sum += v;
     std::fprintf(stderr, "frame stats: %zu frames, avg %.2f ms, p50 %.2f, p95 %.2f, max %.2f ms\n",
                  t.size(), sum / t.size(), t[t.size() / 2], t[t.size() * 95 / 100], t.back());
+}
+
+float App::refresh_rate() const {
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window_));
+    return mode && mode->refresh_rate > 1.0f ? mode->refresh_rate : 60.0f;
 }
 
 void App::emit_probe(const std::string& label) {

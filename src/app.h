@@ -165,6 +165,7 @@ private:
     Layout compute_layout() const;
 
     void handle_event(const SDL_Event& e);
+    float refresh_rate() const;
     void handle_command(const std::string& cmd);
     void update(float dt);
     void render();
