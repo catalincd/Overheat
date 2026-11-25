@@ -42,6 +42,12 @@ private:
     CompletionPopup completion_;
     const std::vector<LSPDiagnostic>* diagnostics_ = nullptr;
     void render_diagnostics(RenderContext& ctx, Rect text_rect);
+    void render_scrollbar(RenderContext& ctx, Rect text_rect);
+    Rect ruler_{};
+    bool dragging_thumb_ = false;
+    float drag_offset_ = 0;
+    float max_scroll() const;
+    static constexpr float RULER_W = 14.0f;
     bool line_has_diagnostic(size_t line) const;
     void render_find_matches(RenderContext& ctx, Rect text_rect);
     float cached_line_h_ = 20.0f;

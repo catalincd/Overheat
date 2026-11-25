@@ -64,6 +64,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     render_blame(ctx, text_rect);
     render_cursors(ctx, text_rect);
     ctx.r->pop_clip();
+    render_scrollbar(ctx, text_rect);
     find_.render(ctx, bounds);
     if (completion_.visible()) {
         const Position& a = completion_.anchor();
@@ -227,6 +228,57 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
                             ctx.theme->selection);
         }
     }
+}
+
+float EditorView::max_scroll() const {
+    return std::max(0.0f, static_cast<float>(editor_->buffer().line_count() - 1) * cached_line_h_);
+}
+
+void EditorView::render_scrollbar(RenderContext& ctx, Rect text_rect) {
+    ruler_ = {text_rect.x + text_rect.w - RULER_W, text_rect.y, RULER_W, text_rect.h};
+    const Theme& th = *ctx.theme;
+    auto& buf = editor_->buffer();
+    float lines = static_cast<float>(std::max<size_t>(1, buf.line_count()));
+    auto y_of = [&](size_t line) { return ruler_.y + ruler_.h * static_cast<float>(line) / lines; };
+    float min_h = 2.0f;
+
+    if (editor_->has_git_base()) {
+        for (const GutterMark& m : editor_->git_marks()) {
+            Color c = m.kind == GutterMark::Added ? th.git_added
+                    : m.kind == GutterMark::Modified ? th.git_modified : th.git_deleted;
+            float y0 = y_of(m.line), y1 = std::max(y_of(m.line + m.count), y0 + min_h);
+            ctx.r->add_rect({ruler_.x + 1.0f, y0, 3.0f, y1 - y0}, c);
+        }
+    }
+    if (find_.is_open()) {
+        Color c = th.warning;
+        c.a = 0.8f;
+        size_t last = SIZE_MAX;
+        for (auto& m : find_.matches()) {
+            size_t line = buf.position_of(m.start).line;
+            if (line == last) continue;
+            last = line;
+            ctx.r->add_rect({ruler_.x + 5.0f, y_of(line), 4.0f, min_h}, c);
+        }
+    }
+    if (diagnostics_) {
+        for (auto& d : *diagnostics_) {
+            Color c = d.severity == 1 ? th.error : d.severity == 2 ? th.warning : th.info;
+            ctx.r->add_rect({ruler_.x + RULER_W - 4.0f, y_of(d.start.line), 3.0f, 3.0f}, c);
+        }
+    }
+    Color cur = th.fg;
+    cur.a = 0.6f;
+    ctx.r->add_rect({ruler_.x + 1.0f, y_of(editor_->cursors().primary_pos().line), RULER_W - 2.0f, 1.0f}, cur);
+
+    // Thumb: the visible window over the scrollable range.
+    float content = max_scroll() + text_rect.h;
+    if (content <= text_rect.h + 1.0f) return;
+    float h = std::max(24.0f, ruler_.h * text_rect.h / content);
+    float y = ruler_.y + (ruler_.h - h) * (editor_->scroll_y() / std::max(1.0f, max_scroll()));
+    Color tc = th.scrollbar;
+    if (dragging_thumb_) tc.a = std::min(1.0f, tc.a * 2.0f);
+    ctx.r->add_rect({ruler_.x + 2.0f, y, RULER_W - 4.0f, h}, tc, 3.0f);
 }
 
 bool EditorView::line_has_diagnostic(size_t line) const {
@@ -482,6 +534,24 @@ bool EditorView::handle_key(const KeyEvent& e) {
 bool EditorView::handle_mouse(const MouseEvent& e) {
     if (!editor_) return false;
     if (completion_.handle_mouse(*editor_, e)) return true;
+    if (e.button == 1 && (dragging_thumb_ || (e.pressed && !e.motion && ruler_.contains(e.x, e.y)))) {
+        float content = max_scroll() + ruler_.h;
+        float thumb_h = std::max(24.0f, ruler_.h * ruler_.h / std::max(content, 1.0f));
+        float track = std::max(1.0f, ruler_.h - thumb_h);
+        if (!e.pressed) {
+            dragging_thumb_ = false;
+            return true;
+        }
+        if (!dragging_thumb_) {
+            float thumb_y = ruler_.y + track * (editor_->scroll_y() / std::max(1.0f, max_scroll()));
+            // Grab the thumb where clicked; clicking the track centres the thumb there.
+            drag_offset_ = (e.y >= thumb_y && e.y < thumb_y + thumb_h) ? e.y - thumb_y : thumb_h * 0.5f;
+            dragging_thumb_ = true;
+        }
+        float t = std::clamp((e.y - drag_offset_ - ruler_.y) / track, 0.0f, 1.0f);
+        editor_->set_scroll(editor_->scroll_x(), std::round(t * max_scroll()));
+        return true;
+    }
     if (find_.handle_mouse(*editor_, e)) {
         reveal_cursor();
         return true;
