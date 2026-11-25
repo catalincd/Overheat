@@ -784,6 +784,24 @@ void Editor::on_text_changed() {
     sync_syntax();
 }
 
+void Editor::set_git_base(std::optional<std::string> base) {
+    git_base_ = std::move(base);
+    git_marks_version_ = UINT64_MAX;
+    git_marks_.clear();
+}
+
+const std::vector<GutterMark>& Editor::git_marks() {
+    constexpr size_t MAX_DIFF_BYTES = 4u << 20;  // skip huge files; diffing is O(n) per edit
+    if (!git_base_ || buffer_.version() == git_marks_version_) return git_marks_;
+    git_marks_version_ = buffer_.version();
+    if (buffer_.length() > MAX_DIFF_BYTES) {
+        git_marks_.clear();
+        return git_marks_;
+    }
+    git_marks_ = GitRepository::diff_marks(*git_base_, buffer_.text());
+    return git_marks_;
+}
+
 void Editor::sync_syntax() {
     if (!syntax_.poll()) return;  // background parse running; edits stay queued
     syntax_.apply_changes(buffer_, buffer_.take_changes());

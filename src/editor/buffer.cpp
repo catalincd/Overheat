@@ -24,6 +24,7 @@ void TextBuffer::load_string(const std::string& text) {
     undo_stack_.clear();
     redo_stack_.clear();
     changes_.clear();
+    version_++;
     current_group_ = nullptr;
     save_point_ = 0;
     modified_ = false;
@@ -102,6 +103,7 @@ void TextBuffer::split_piece(size_t piece_idx, size_t local_offset) {
 }
 
 void TextBuffer::record_change(size_t start, const std::string& removed, const std::string& inserted) {
+    version_++;
     Position s = position_of(start);
     auto advance = [](Position p, const std::string& t) {
         for (char c : t) {

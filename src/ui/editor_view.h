@@ -35,6 +35,7 @@ private:
     float cached_gutter_w_ = 40.0f;
 
     void render_gutter(RenderContext& ctx, Rect gutter_rect);
+    void render_git_marks(RenderContext& ctx, Rect gutter_rect);
     void render_text(RenderContext& ctx, Rect text_rect);
     void render_cursors(RenderContext& ctx, Rect text_rect);
     void render_selections(RenderContext& ctx, Rect text_rect);

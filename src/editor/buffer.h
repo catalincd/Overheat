@@ -49,6 +49,8 @@ public:
         Position start_pt, old_end_pt, new_end_pt;
     };
     std::vector<Change> take_changes() { return std::exchange(changes_, {}); }
+    // Increments on every mutation; cheap change detection for derived data.
+    uint64_t version() const { return version_; }
 
     bool is_modified() const { return modified_; }
     void set_unmodified() { modified_ = false; save_point_ = undo_stack_.size(); }
@@ -88,6 +90,7 @@ private:
     fs::path file_path_;
 
     std::vector<Change> changes_;
+    uint64_t version_ = 0;
     void record_change(size_t start, const std::string& removed, const std::string& inserted);
 
     void rebuild_line_cache() const;

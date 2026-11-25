@@ -16,6 +16,8 @@
 #include "keys.h"
 #include "script.h"
 #include "theme.h"
+#include "vfs.h"
+#include <future>
 #include <SDL3/SDL.h>
 
 namespace oh {
@@ -58,6 +60,13 @@ private:
     CommandPalette command_palette_;
 
     GitRepository git_;
+    std::unique_ptr<Vfs> vfs_ = std::make_unique<LocalVfs>();
+    std::future<std::vector<GitStatus>> git_job_;
+    std::vector<GitStatus> git_statuses_;
+    float git_poll_timer_ = 0;
+    bool git_refresh_pending_ = false;
+    void request_git_refresh();
+    void poll_git_refresh();
     SSHSession ssh_;
     LSPClient lsp_;
     PluginManager plugins_;

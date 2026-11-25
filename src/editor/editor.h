@@ -3,6 +3,7 @@
 #include "editor/buffer.h"
 #include "editor/cursor.h"
 #include "editor/syntax.h"
+#include "git/repository.h"
 #include <memory>
 #include <string>
 
@@ -62,6 +63,12 @@ public:
     // Brings the syntax tree up to date with all buffer edits (including undo/redo).
     void sync_syntax();
 
+    // Git baseline (file at HEAD); nullopt for untracked files or outside a repo.
+    void set_git_base(std::optional<std::string> base);
+    bool has_git_base() const { return git_base_.has_value(); }
+    // Recomputed lazily when the buffer changed since the last call.
+    const std::vector<GutterMark>& git_marks();
+
     // State
     bool is_modified() const { return buffer_.is_modified(); }
     std::string title() const;
@@ -71,6 +78,9 @@ private:
     CursorSet cursors_;
     SyntaxHighlighter syntax_;
     float scroll_x_ = 0, scroll_y_ = 0;
+    std::optional<std::string> git_base_;
+    std::vector<GutterMark> git_marks_;
+    uint64_t git_marks_version_ = UINT64_MAX;
 
     void on_text_changed();
 };

@@ -7,59 +7,81 @@
 
 namespace oh {
 
-void FileTree::set_root(const fs::path& root) {
+void FileTree::set_root(const fs::path& root, Vfs* vfs) {
     root_ = root;
+    vfs_ = vfs;
+    root_entry_ = {};
     refresh();
 }
 
+void FileTree::collect_expanded(const FileEntry& e, std::unordered_set<std::string>& out) const {
+    for (auto& c : e.children)
+        if (c.is_dir && c.expanded) {
+            out.insert(c.path.string());
+            collect_expanded(c, out);
+        }
+}
+
+void FileTree::restore_expanded(FileEntry& e, const std::unordered_set<std::string>& open) {
+    for (auto& c : e.children)
+        if (c.is_dir && open.count(c.path.string())) {
+            c.expanded = true;
+            scan_directory(c);
+            restore_expanded(c, open);
+        }
+}
+
 void FileTree::refresh() {
+    std::unordered_set<std::string> open;
+    collect_expanded(root_entry_, open);
     root_entry_ = {};
     root_entry_.name = root_.filename().string();
     root_entry_.path = root_;
     root_entry_.is_dir = true;
     root_entry_.expanded = true;
-    root_entry_.depth = 0;
-
     scan_directory(root_entry_);
-
+    restore_expanded(root_entry_, open);
     visible_entries_.clear();
     flatten_visible(root_entry_);
+    selected_index_ = std::min(selected_index_, static_cast<int>(visible_entries_.size()) - 1);
+}
+
+void FileTree::set_git_status(const std::unordered_map<std::string, FileStatus>& status) {
+    git_status_.clear();
+    std::string root = root_.string();
+    for (auto& [path, st] : status) {
+        if (st == FileStatus::Unmodified || st == FileStatus::Ignored) continue;
+        git_status_[path] = st;
+        // Folders show the most notable change below them.
+        for (fs::path p = fs::path(path).parent_path(); p.string().size() > root.size(); p = p.parent_path()) {
+            auto& slot = git_status_[p.string()];
+            if (slot == FileStatus::Unmodified || slot == FileStatus::Untracked) slot = st;
+        }
+    }
 }
 
 void FileTree::scan_directory(FileEntry& entry) {
-    if (!entry.is_dir) return;
-
+    if (!entry.is_dir || !vfs_) return;
     entry.children.clear();
-
-    std::error_code ec;
-    for (auto& dir_entry : fs::directory_iterator(entry.path, ec)) {
+    entry.scanned = true;
+    std::vector<Vfs::DirEntry> items;
+    vfs_->list(entry.path, items);
+    for (auto& it : items) {
+        if (it.name.empty() || it.name[0] == '.') continue;  // hidden
         FileEntry child;
-        child.name = dir_entry.path().filename().string();
-        child.path = dir_entry.path();
-        child.is_dir = dir_entry.is_directory(ec);
+        child.name = it.name;
+        child.path = entry.path / it.name;
+        child.is_dir = it.is_dir;
         child.depth = entry.depth + 1;
-        child.expanded = false;
-
-        // Skip hidden files/dirs (starting with '.')
-        if (!child.name.empty() && child.name[0] == '.') continue;
-
-        if (child.is_dir) {
-            scan_directory(child);
-        }
-
         entry.children.push_back(std::move(child));
     }
-
-    // Sort: directories first, then alphabetical (case-insensitive)
-    std::sort(entry.children.begin(), entry.children.end(),
-              [](const FileEntry& a, const FileEntry& b) {
-                  if (a.is_dir != b.is_dir) return a.is_dir > b.is_dir;
-                  // Case-insensitive comparison
-                  std::string la = a.name, lb = b.name;
-                  for (auto& c : la) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                  for (auto& c : lb) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                  return la < lb;
-              });
+    std::sort(entry.children.begin(), entry.children.end(), [](const FileEntry& a, const FileEntry& b) {
+        if (a.is_dir != b.is_dir) return a.is_dir > b.is_dir;
+        std::string la = a.name, lb = b.name;
+        for (auto& c : la) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (auto& c : lb) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return la < lb;
+    });
 }
 
 void FileTree::flatten_visible(FileEntry& entry) {
@@ -75,6 +97,7 @@ void FileTree::flatten_visible(FileEntry& entry) {
 void FileTree::toggle_expand(FileEntry& entry) {
     if (!entry.is_dir) return;
     entry.expanded = !entry.expanded;
+    if (entry.expanded && !entry.scanned) scan_directory(entry);
 
     // Rebuild visible list
     visible_entries_.clear();
@@ -118,7 +141,9 @@ void FileTree::render(RenderContext& ctx, Rect bounds) {
 
         Color name_color = th.fg;
         const char* badge = nullptr;
-        switch (entry->git_status) {
+        auto st_it = git_status_.find(entry->path.string());
+        FileStatus st = st_it == git_status_.end() ? FileStatus::Unmodified : st_it->second;
+        switch (st) {
             case FileStatus::Modified:  name_color = th.git_modified;  badge = "M"; break;
             case FileStatus::Added:     name_color = th.git_added;     badge = "A"; break;
             case FileStatus::Untracked: name_color = th.git_untracked; badge = "U"; break;
@@ -128,6 +153,12 @@ void FileTree::render(RenderContext& ctx, Rect bounds) {
             default: break;
         }
         float right = bounds.x + bounds.w - 12.0f;
+        if (entry->is_dir && badge) {
+            // Folders get a dot instead of a letter.
+            ctx.r->add_rect({right - 6.0f, y + row_h_ * 0.5f - 3.0f, 6.0f, 6.0f}, name_color, 3.0f);
+            right -= 14.0f;
+            badge = nullptr;
+        }
         if (badge) {
             ctx.r->add_text(right - char_w, baseline, badge, name_color, *ctx.font);
             right -= char_w + 8.0f;

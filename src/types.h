@@ -150,7 +150,7 @@ struct FileEntry {
     bool is_dir;
     bool expanded = false;
     int depth = 0;
-    FileStatus git_status = FileStatus::Unmodified;
+    bool scanned = false;  // children listed (lazily, on first expand)
     std::vector<FileEntry> children;
 };
 

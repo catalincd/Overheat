@@ -62,6 +62,78 @@ bool GitRepository::is_ignored(const fs::path& path) const {
 // Helpers
 // ---------------------------------------------------------------------------
 
+void GitRepository::set_error(const char* what) const {
+    const git_error* e = git_error_last();
+    last_error_ = std::string(what) + ": " + (e && e->message ? e->message : "unknown error");
+}
+
+fs::path GitRepository::workdir() const {
+    const char* w = repo_ ? git_repository_workdir(repo_) : nullptr;
+    return w ? fs::path(w) : fs::path();
+}
+
+std::optional<std::string> GitRepository::head_content(const fs::path& path) const {
+    if (!repo_) return std::nullopt;
+    std::string rel = path.lexically_relative(workdir()).generic_string();
+    git_object* obj = nullptr;
+    std::string spec = "HEAD:" + rel;
+    if (git_revparse_single(&obj, repo_, spec.c_str()) != 0) return std::nullopt;
+    std::optional<std::string> out;
+    if (git_object_type(obj) == GIT_OBJECT_BLOB) {
+        auto* blob = reinterpret_cast<git_blob*>(obj);
+        out.emplace(static_cast<const char*>(git_blob_rawcontent(blob)),
+                    static_cast<size_t>(git_blob_rawsize(blob)));
+    }
+    git_object_free(obj);
+    return out;
+}
+
+bool GitRepository::ahead_behind(int& ahead, int& behind) const {
+    ahead = behind = 0;
+    if (!repo_) return false;
+    git_reference* head = nullptr;
+    git_reference* upstream = nullptr;
+    bool ok = false;
+    if (git_repository_head(&head, repo_) == 0 && git_branch_upstream(&upstream, head) == 0) {
+        size_t a = 0, b = 0;
+        const git_oid* local = git_reference_target(head);
+        const git_oid* remote = git_reference_target(upstream);
+        if (local && remote && git_graph_ahead_behind(&a, &b, repo_, local, remote) == 0) {
+            ahead = static_cast<int>(a);
+            behind = static_cast<int>(b);
+            ok = true;
+        }
+    }
+    git_reference_free(upstream);
+    git_reference_free(head);
+    return ok;
+}
+
+std::vector<GutterMark> GitRepository::diff_marks(const std::string& base, const std::string& current) {
+    std::vector<GutterMark> marks;
+    git_diff_options opts = GIT_DIFF_OPTIONS_INIT;
+    opts.context_lines = 0;
+    auto hunk_cb = [](const git_diff_delta*, const git_diff_hunk* h, void* payload) -> int {
+        auto& out = *static_cast<std::vector<GutterMark>*>(payload);
+        if (h->old_lines == 0)
+            out.push_back({GutterMark::Added, static_cast<size_t>(h->new_start - 1), static_cast<size_t>(h->new_lines)});
+        else if (h->new_lines == 0)
+            out.push_back({GutterMark::Deleted, static_cast<size_t>(h->new_start), 0});
+        else
+            out.push_back({GutterMark::Modified, static_cast<size_t>(h->new_start - 1), static_cast<size_t>(h->new_lines)});
+        return 0;
+    };
+    git_diff_buffers(base.data(), base.size(), nullptr, current.data(), current.size(), nullptr,
+                     &opts, nullptr, nullptr, hunk_cb, nullptr, &marks);
+    return marks;
+}
+
+std::vector<GitStatus> GitRepository::status_in(const fs::path& dir) {
+    GitRepository r;
+    if (!r.open(dir)) return {};
+    return r.status();
+}
+
 static FileStatus map_status_flags(unsigned int flags) {
     // Index (staged) flags take priority, then workdir flags.
     if (flags & GIT_STATUS_INDEX_NEW)        return FileStatus::Added;
@@ -129,6 +201,11 @@ std::vector<GitStatus> GitRepository::status() const {
         GitStatus gs;
         gs.path   = path;
         gs.status = map_status_flags(entry->status);
+        unsigned f = entry->status;
+        gs.index_status = map_status_flags(f & (GIT_STATUS_INDEX_NEW | GIT_STATUS_INDEX_MODIFIED |
+                                                GIT_STATUS_INDEX_DELETED | GIT_STATUS_INDEX_RENAMED));
+        gs.wt_status = map_status_flags(f & (GIT_STATUS_WT_NEW | GIT_STATUS_WT_MODIFIED |
+                                             GIT_STATUS_WT_DELETED | GIT_STATUS_WT_RENAMED));
         result.push_back(std::move(gs));
     }
 
@@ -426,12 +503,8 @@ bool GitRepository::commit(const std::string& message) {
 
     git_signature* sig = nullptr;
     if (git_signature_default(&sig, repo_) != 0) {
-        // Fallback: try a generic signature
-        if (git_signature_now(&sig, "User", "user@example.com") != 0) {
-            git_tree_free(tree);
-            git_index_free(index);
-            return false;
-        }
+        last_error_ = "No git identity: set user.name and user.email (git config)";
+        return false;
     }
 
     // Get HEAD as parent (may not exist for initial commit)
@@ -479,7 +552,11 @@ bool GitRepository::stage(const fs::path& path) {
     if (git_repository_index(&index, repo_) != 0)
         return false;
 
-    if (git_index_add_bypath(index, rel.c_str()) != 0) {
+    std::error_code ec;
+    int rc = fs::exists(path, ec) ? git_index_add_bypath(index, rel.c_str())
+                                  : git_index_remove_bypath(index, rel.c_str());
+    if (rc != 0) {
+        set_error("stage");
         git_index_free(index);
         return false;
     }

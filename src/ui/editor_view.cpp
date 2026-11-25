@@ -24,7 +24,7 @@ float EditorView::gutter_width(const FontAtlas& font) const {
     while (n >= 10) { digits++; n /= 10; }
     // At least 3 digits wide, plus padding on both sides
     digits = std::max(digits, 3);
-    return static_cast<float>(digits) * font.char_width() + 24.0f;
+    return static_cast<float>(digits) * font.char_width() + 30.0f;  // + change-marker lane
 }
 
 void EditorView::render(RenderContext& ctx, Rect bounds) {
@@ -45,6 +45,9 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
 
     // Render layers
     render_gutter(ctx, gutter_rect);
+    ctx.r->push_clip(gutter_rect);
+    render_git_marks(ctx, gutter_rect);
+    ctx.r->pop_clip();
     ctx.r->push_clip(text_rect);
     render_selections(ctx, text_rect);
     render_text(ctx, text_rect);
@@ -81,8 +84,8 @@ void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
         std::snprintf(num_buf, sizeof(num_buf), "%zu", line_num);
         int len = static_cast<int>(std::strlen(num_buf));
 
-        // Right-align within gutter (leave 8px right padding)
-        float text_x = gutter_rect.x + gutter_rect.w - 8.0f -
+        // Right-align, leaving room for the git change lane at the gutter edge.
+        float text_x = gutter_rect.x + gutter_rect.w - 16.0f -
                         static_cast<float>(len) * char_w;
 
         // Highlight current line number
@@ -109,6 +112,26 @@ std::pair<size_t, size_t> EditorView::visible_lines(Rect text_rect) const {
     size_t count = static_cast<size_t>(text_rect.h / cached_line_h_) + 2;
     size_t end = std::min(first + count, editor_->buffer().line_count());
     return {first, end};
+}
+
+void EditorView::render_git_marks(RenderContext& ctx, Rect gutter_rect) {
+    if (!editor_->has_git_base()) return;
+    Rect text_rect{gutter_rect.x + gutter_rect.w, gutter_rect.y, 0, gutter_rect.h};
+    auto [first, end] = visible_lines(text_rect);
+    float lane_x = gutter_rect.x + gutter_rect.w - 7.0f;
+    for (const GutterMark& m : editor_->git_marks()) {
+        if (m.kind == GutterMark::Deleted) {
+            if (m.line < first || m.line > end) continue;
+            float y = row_y(m.line, text_rect);
+            ctx.r->add_rect({lane_x - 1.0f, y - 2.0f, 6.0f, 4.0f}, ctx.theme->git_deleted, 2.0f);
+            continue;
+        }
+        size_t a = std::max(m.line, first), b = std::min(m.line + m.count, end);
+        if (a >= b) continue;
+        float y0 = row_y(a, text_rect), y1 = row_y(b, text_rect);
+        Color c = m.kind == GutterMark::Added ? ctx.theme->git_added : ctx.theme->git_modified;
+        ctx.r->add_rect({lane_x, y0, 3.0f, y1 - y0}, c, 1.0f);
+    }
 }
 
 void EditorView::render_text(RenderContext& ctx, Rect text_rect) {

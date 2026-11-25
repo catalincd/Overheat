@@ -138,10 +138,11 @@ bool App::init(int argc, char** argv) {
     git_.open(project_root_);
     if (git_.is_open()) {
         status_bar_.set_git_branch(git_.branch_name());
+        request_git_refresh();
     }
 
     // ---- File tree ----
-    file_tree_.set_root(project_root_);
+    file_tree_.set_root(project_root_, vfs_.get());
     file_tree_.set_on_open([this](const fs::path& p) { open_file(p); });
 
     // ---- Terminal ----
@@ -591,6 +592,36 @@ App::Layout App::compute_layout() const {
 // Update
 // ---------------------------------------------------------------------------
 
+void App::request_git_refresh() {
+    if (!git_.is_open()) return;
+    if (git_job_.valid()) {  // one at a time; run again when this one lands
+        git_refresh_pending_ = true;
+        return;
+    }
+    git_job_ = std::async(std::launch::async, [dir = git_.workdir()] {
+        auto st = GitRepository::status_in(dir);
+        request_redraw();
+        return st;
+    });
+}
+
+void App::poll_git_refresh() {
+    if (!git_job_.valid() || git_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+    git_statuses_ = git_job_.get();
+    std::unordered_map<std::string, FileStatus> by_path;
+    fs::path wd = git_.workdir();
+    for (auto& s : git_statuses_) by_path[(wd / s.path).lexically_normal().string()] = s.status;
+    file_tree_.set_git_status(by_path);
+    status_bar_.set_git_branch(git_.branch_name());
+    int ahead = 0, behind = 0;
+    git_.ahead_behind(ahead, behind);
+    status_bar_.set_git_sync(ahead, behind);
+    if (git_refresh_pending_) {
+        git_refresh_pending_ = false;
+        request_git_refresh();
+    }
+}
+
 void App::select_theme() {
     auto names = themes_.names();
     std::string original = themes_.current();
@@ -613,6 +644,12 @@ void App::select_theme() {
 }
 
 void App::update(float dt) {
+    poll_git_refresh();
+    git_poll_timer_ += dt;
+    if (git_poll_timer_ > 3.0f) {
+        git_poll_timer_ = 0;
+        request_git_refresh();
+    }
     theme_poll_timer_ += dt;
     if (theme_poll_timer_ > 1.0f) {
         theme_poll_timer_ = 0;
@@ -704,6 +741,7 @@ void App::open_file(const fs::path& path) {
 
     auto editor = std::make_shared<Editor>();
     editor->load_file(path);
+    if (git_.is_open()) editor->set_git_base(git_.head_content(path));
 
     tab_bar_.add_tab(editor);
     tab_bar_.set_active(static_cast<int>(tab_bar_.tabs().size()) - 1);
@@ -719,6 +757,7 @@ void App::save_current() {
     if (Editor* ed = current_editor()) {
         ed->save();
         set_status_message("Saved " + ed->buffer().file_path().filename().string());
+        request_git_refresh();
 
         // Notify LSP
         if (lsp_.is_running()) {

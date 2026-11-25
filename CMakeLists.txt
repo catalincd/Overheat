@@ -63,6 +63,7 @@ set(OVERHEAT_SOURCES
     src/keys.cpp
     src/script.cpp
     src/theme.cpp
+    src/vfs.cpp
 )
 
 add_executable(overheat ${OVERHEAT_SOURCES})

@@ -256,7 +256,6 @@ std::vector<FileEntry> SSHSession::list_dir(const std::string& remote_path) {
             entry.is_dir = S_ISDIR(attrs.permissions);
         }
         entry.depth = 0;
-        entry.git_status = FileStatus::Unmodified;
         entries.push_back(std::move(entry));
     }
 
