@@ -10,6 +10,7 @@ pkg_check_modules(VULKAN REQUIRED IMPORTED_TARGET vulkan)
 pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
 pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
 pkg_check_modules(LIBSSH2 REQUIRED IMPORTED_TARGET libssh2)
 pkg_check_modules(TREESITTER REQUIRED IMPORTED_TARGET tree-sitter)
@@ -70,6 +71,7 @@ set(OVERHEAT_SOURCES
     src/script.cpp
     src/theme.cpp
     src/vfs.cpp
+    src/fonts.cpp
     src/remote.cpp
     src/lsp_glue.cpp
 )
@@ -87,6 +89,7 @@ target_link_libraries(overheat PRIVATE
     PkgConfig::SDL3
     PkgConfig::FREETYPE
     PkgConfig::HARFBUZZ
+    PkgConfig::FONTCONFIG
     PkgConfig::LIBGIT2
     PkgConfig::LIBSSH2
     PkgConfig::TREESITTER

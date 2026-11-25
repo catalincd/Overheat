@@ -1,4 +1,5 @@
 #include "app.h"
+#include "fonts.h"
 #include <SDL3/SDL.h>
 #include <cmath>
 #include <cstdio>
@@ -98,21 +99,13 @@ bool App::init(int argc, char** argv) {
     }
 
     // ---- Font ----
-    // Primary is the first that exists; the rest form the glyph fallback chain.
-    const char* font_candidates[] = {
-        "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
-        "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
-        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
-        "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
-    };
-    for (const char* fp : font_candidates)
-        if (fs::exists(fp)) font_chain_.push_back(fp);
     if (std::string v = themes_.setting("sidebar_width"); !v.empty()) sidebar_width_ = std::strtof(v.c_str(), nullptr);
     if (std::string v = themes_.setting("terminal_height"); !v.empty()) terminal_height_ = std::strtof(v.c_str(), nullptr);
-    if (std::string fs_setting = themes_.setting("font_size"); !fs_setting.empty())
-        font_size_ = std::clamp(std::strtof(fs_setting.c_str(), nullptr), 8.0f, 40.0f);
+    if (std::string v = themes_.setting("font_size"); !v.empty())
+        font_size_ = std::clamp(std::strtof(v.c_str(), nullptr), 8.0f, 40.0f);
+    font_family_ = themes_.setting("font_family");
+    font_.set_ligatures(themes_.setting("ligatures") != "false");
+    font_chain_ = build_font_chain(font_family_);
     if (!font_.init(vk_, font_chain_, font_size_)) {
         std::fprintf(stderr, "Could not load any font\n");
         return false;
@@ -667,6 +660,12 @@ void App::handle_command(const std::string& cmd) {
         git_checkout();
     } else if (cmd == "toggle_blame") {
         editor_view_.toggle_blame();
+    } else if (cmd == "select_font") {
+        select_font();
+    } else if (cmd == "toggle_ligatures") {
+        font_.set_ligatures(!font_.ligatures());
+        themes_.set_setting("ligatures", font_.ligatures() ? "true" : "false");
+        set_status_message(std::string("Ligatures ") + (font_.ligatures() ? "on" : "off"));
     } else if (cmd == "select_theme") {
         select_theme();
     } else if (cmd == "quit") {
@@ -1045,18 +1044,75 @@ void App::update_cursor_shape(Splitter s) {
     SDL_SetCursor(s == Splitter::Sidebar ? cursor_ew_ : s == Splitter::Terminal ? cursor_ns_ : cursor_default_);
 }
 
-void App::set_font_size(float size) {
-    size = std::clamp(size, 8.0f, 40.0f);
-    if (size == font_size_) return;
+std::vector<std::string> App::build_font_chain(const std::string& family) const {
+    // Chosen family first; then fonts that cover icons (Nerd Font) and wide Unicode.
+    std::vector<std::string> chain;
+    if (!family.empty())
+        if (std::string f = font_file_for_family(family); !f.empty()) chain.push_back(f);
+    const char* fallbacks[] = {
+        "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
+        "/usr/share/fonts/TTF/SymbolsNerdFontMono-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
+        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
+    };
+    for (const char* fp : fallbacks)
+        if (fs::exists(fp) && std::find(chain.begin(), chain.end(), fp) == chain.end()) chain.push_back(fp);
+    return chain;
+}
+
+bool App::reload_font(const std::string& family, float size) {
     vkDeviceWaitIdle(vk_.device());  // frames in flight still sample the old atlas
     font_.cleanup(vk_);
-    if (!font_.init(vk_, font_chain_, size)) {
+    auto chain = build_font_chain(family);
+    if (!font_.init(vk_, chain, size)) {
         font_.init(vk_, font_chain_, font_size_);
         renderer_.rebind_font(vk_, font_);
-        return;
+        return false;
     }
+    font_chain_ = std::move(chain);
+    font_family_ = family;
     font_size_ = size;
     renderer_.rebind_font(vk_, font_);
+    return true;
+}
+
+void App::select_font() {
+    auto families = list_monospace_families();
+    std::vector<std::string> names;
+    int initial = 0;
+    for (auto& f : families) {
+        if (f.name == font_family_) initial = static_cast<int>(names.size());
+        names.push_back(f.name);
+    }
+    std::string current = font_family_.empty() ? "JetBrainsMono Nerd Font Mono" : font_family_;
+    for (size_t i = 0; i < names.size(); i++)
+        if (names[i] == current) initial = static_cast<int>(i);
+    std::string original = font_family_;
+    CommandPalette::PickOptions opts;
+    opts.placeholder = "Select font family (live preview)";
+    opts.items = names;
+    opts.initial = initial;
+    opts.on_preview = [this, names, current](int i) {
+        const std::string& name = names[static_cast<size_t>(i)];
+        if (name != (font_family_.empty() ? current : font_family_)) reload_font(name, font_size_);
+    };
+    opts.on_cancel = [this, original] { reload_font(original, font_size_); };
+    opts.on_pick = [this, names](int i, const std::string&) {
+        if (i < 0) return;
+        const std::string& name = names[static_cast<size_t>(i)];
+        if (name != font_family_) reload_font(name, font_size_);
+        themes_.set_setting("font_family", "\"" + name + "\"");
+        set_status_message("Font: " + name);
+    };
+    command_palette_.pick(std::move(opts));
+}
+
+void App::set_font_size(float size) {
+    size = std::clamp(size, 8.0f, 40.0f);
+    if (size == font_size_ || !reload_font(font_family_, size)) return;
     themes_.set_setting("font_size", std::to_string(static_cast<int>(size)));
     set_status_message("Font size " + std::to_string(static_cast<int>(size)));
 }
@@ -1298,6 +1354,8 @@ void App::register_commands() {
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
     add("toggle_blame",            "Git: Toggle Inline Blame",  "");
+    add("select_font",             "Preferences: Font Family",  "");
+    add("toggle_ligatures",        "Preferences: Toggle Font Ligatures", "");
     add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");
     add("quit",                    "Quit",                      "Ctrl+Q");
 }

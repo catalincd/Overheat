@@ -183,9 +183,11 @@ void Renderer2D::add_rect(Rect r, Color color, float radius, float border_w, Col
 }
 
 void Renderer2D::add_char(float x, float y, uint32_t cp, Color color, const FontAtlas& font) {
-    const GlyphInfo* gi = font.glyph(cp);
-    if (!gi || gi->width <= 0 || gi->height <= 0) return;
+    add_glyph(x, y, font.glyph(cp), color);
+}
 
+void Renderer2D::add_glyph(float x, float y, const GlyphInfo* gi, Color color) {
+    if (!gi || gi->width <= 0 || gi->height <= 0) return;
     float gx = x + gi->bearing_x;
     float px = std::floor(gx);
     float frac = gx - px;

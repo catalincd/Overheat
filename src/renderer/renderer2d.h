@@ -30,6 +30,7 @@ public:
     // y is the text baseline. Returns the pen x after the last glyph. Text is UTF-8.
     float add_text(float x, float y, std::string_view text, Color color, const FontAtlas& font);
     void add_char(float x, float y, uint32_t codepoint, Color color, const FontAtlas& font);
+    void add_glyph(float x, float y, const GlyphInfo* gi, Color color);
     void add_squiggle(Rect rect, Color color, float amplitude = 1.5f,
                       float wavelength = 6.0f, float thickness = 1.2f);
 

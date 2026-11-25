@@ -2,11 +2,14 @@
 #include "types.h"
 #include "renderer/vulkan_context.h"
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 typedef struct FT_LibraryRec_* FT_Library;
 typedef struct FT_FaceRec_* FT_Face;
+typedef struct hb_font_t hb_font_t;
+typedef struct hb_buffer_t hb_buffer_t;
 
 namespace oh {
 
@@ -20,6 +23,20 @@ public:
 
     // Logically const: a cache miss rasterizes and records a pending upload.
     const GlyphInfo* glyph(uint32_t codepoint) const;
+
+    // Shaping with the primary face (ligatures / contextual alternates). Each glyph
+    // carries the byte offset of the character it starts at. gid 0 = not in the face.
+    struct Shaped {
+        uint32_t gid;
+        uint32_t cluster;
+        float x_offset, y_offset;
+    };
+    void shape(std::string_view text, std::vector<Shaped>& out) const;
+    const GlyphInfo* glyph_by_index(uint32_t gid) const;  // primary face
+    void set_ligatures(bool on) { ligatures_ = on; }
+    bool ligatures() const { return ligatures_; }
+    // Bumped on every init(): glyph ids from a previous font are invalid.
+    uint64_t generation() const { return generation_; }
     void upload_pending(VulkanContext& vk);
 
     float line_height() const { return line_height_; }
@@ -35,15 +52,22 @@ public:
 
 private:
     const GlyphInfo* rasterize(uint32_t codepoint) const;
+    const GlyphInfo* rasterize_glyph(FT_Face face, uint32_t index, GlyphInfo info_seed, bool cache_by_index) const;
 
     FT_Library ft_ = nullptr;
     std::vector<FT_Face> faces_;
 
     mutable std::unordered_map<uint32_t, GlyphInfo> glyphs_;
+    mutable std::unordered_map<uint32_t, GlyphInfo> by_gid_;
+    hb_font_t* hb_font_ = nullptr;
+    hb_buffer_t* hb_buf_ = nullptr;
+    bool ligatures_ = true;
+    uint64_t generation_ = 0;
     mutable std::vector<uint8_t> pixels_;
     mutable uint32_t pen_x_ = 1, pen_y_ = 1, shelf_h_ = 0;
     mutable uint32_t dirty_x0_ = UINT32_MAX, dirty_y0_ = UINT32_MAX, dirty_x1_ = 0, dirty_y1_ = 0;
     mutable bool full_warned_ = false;
+    mutable GlyphInfo scratch_{};
 
     Image atlas_image_;
     VkSampler sampler_ = VK_NULL_HANDLE;

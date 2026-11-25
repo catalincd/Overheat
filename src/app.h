@@ -177,6 +177,10 @@ private:
     void emit_probe(const std::string& label);
     void focus_editor();
     void set_font_size(float size);
+    std::vector<std::string> build_font_chain(const std::string& family) const;
+    bool reload_font(const std::string& family, float size);
+    void select_font();
+    std::string font_family_;
 
     // Draggable splitters between sidebar/editor and editor/terminal.
     enum class Splitter { None, Sidebar, Terminal };

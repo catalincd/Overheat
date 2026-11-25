@@ -35,6 +35,14 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
 
     cached_line_h_ = ctx.font->line_height();
     cached_char_w_ = ctx.font->char_width();
+    if (shape_font_ != ctx.font || shape_font_size_ != cached_line_h_ ||
+        shape_ligatures_ != ctx.font->ligatures() || ctx.font->generation() != shape_generation_) {
+        shape_cache_.clear();
+        shape_font_ = ctx.font;
+        shape_font_size_ = cached_line_h_;
+        shape_ligatures_ = ctx.font->ligatures();
+        shape_generation_ = ctx.font->generation();
+    }
 
     float gw = gutter_width(*ctx.font);
     cached_gutter_w_ = gw;
@@ -187,26 +195,52 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
 
         float x_base = text_rect.x + TEXT_PAD - editor_->scroll_x();
         float baseline = y + ctx.font->ascender();
-        size_t dcol = 0;
-        for (size_t i = 0; i < line_len;) {
-            size_t start = i;
-            size_t next = utf8::next_boundary(line, i);
-            char lead = line[i];
-            size_t width = utf8::cell_width(lead, dcol);
-            float x = x_base + static_cast<float>(dcol) * char_w;
-            if (x > text_rect.x + text_rect.w) break;
-            if (lead != '\t' && lead != '\r' && x + char_w * width >= text_rect.x) {
+
+        // Shape the line (cached by its text) so ligatures and contextual
+        // alternates render; each glyph is placed at its character's cell.
+        auto it = shape_cache_.find(line);
+        if (it == shape_cache_.end()) {
+            if (shape_cache_.size() > 8192) shape_cache_.clear();
+            std::vector<FontAtlas::Shaped> run;
+            ctx.font->shape(line, run);
+            it = shape_cache_.emplace(line, std::move(run)).first;
+        }
+        // Display column for each byte offset where a character starts.
+        std::vector<uint32_t> col_of(line_len + 1, 0);
+        {
+            size_t dcol = 0;
+            for (size_t i = 0; i < line_len; i = utf8::next_boundary(line, i)) {
+                col_of[i] = static_cast<uint32_t>(dcol);
+                dcol += utf8::cell_width(line[i], dcol);
+            }
+        }
+        uint32_t prev_cluster = UINT32_MAX;
+        float in_cluster = 0;
+        float right_edge = text_rect.x + text_rect.w;
+        for (const FontAtlas::Shaped& g : it->second) {
+            if (g.cluster >= line_len) continue;
+            char lead = line[g.cluster];
+            if (lead == '\t' || lead == '\r') continue;
+            if (g.cluster != prev_cluster) { prev_cluster = g.cluster; in_cluster = 0; }
+            float x = x_base + static_cast<float>(col_of[g.cluster]) * char_w + in_cluster + g.x_offset;
+            if (x > right_edge) break;
+            if (x + char_w * 3 < text_rect.x) continue;
+            Color c = byte_colors[g.cluster];
+            if (g.gid == 0) {
+                // Not in the primary face: use the per-codepoint fallback chain.
+                size_t end = utf8::next_boundary(line, g.cluster);
                 uint32_t cp = static_cast<unsigned char>(lead);
                 if (cp >= 0x80) {
-                    int extra = next - start - 1;
-                    cp &= 0x3F >> extra;
-                    for (size_t k = start + 1; k < next; k++)
+                    cp &= 0x3F >> (end - g.cluster - 1);
+                    for (size_t k = g.cluster + 1; k < end; k++)
                         cp = (cp << 6) | (static_cast<unsigned char>(line[k]) & 0x3F);
                 }
-                ctx.r->add_char(x, baseline, cp, byte_colors[start], *ctx.font);
+                ctx.r->add_char(x, baseline - g.y_offset, cp, c, *ctx.font);
+            } else {
+                const GlyphInfo* gi = ctx.font->glyph_by_index(g.gid);
+                ctx.r->add_glyph(x, baseline - g.y_offset, gi, c);
+                if (gi) in_cluster += gi->advance;
             }
-            dcol += width;
-            i = next;
         }
     }
 }

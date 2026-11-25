@@ -3,6 +3,8 @@
 #include "editor/editor.h"
 #include "ui/find_bar.h"
 #include "ui/completion_popup.h"
+#include "renderer/font_atlas.h"
+#include <unordered_map>
 #include <memory>
 
 namespace oh {
@@ -39,6 +41,12 @@ private:
     bool mouse_selecting_ = false;
     bool show_blame_ = true;
     FindBar find_;
+    // Shaped glyph runs per line text (ligatures); cleared when the font changes.
+    std::unordered_map<std::string, std::vector<FontAtlas::Shaped>> shape_cache_;
+    const FontAtlas* shape_font_ = nullptr;
+    float shape_font_size_ = 0;
+    bool shape_ligatures_ = true;
+    uint64_t shape_generation_ = 0;
     CompletionPopup completion_;
     const std::vector<LSPDiagnostic>* diagnostics_ = nullptr;
     void render_diagnostics(RenderContext& ctx, Rect text_rect);
