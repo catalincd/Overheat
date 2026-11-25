@@ -20,6 +20,8 @@ public:
     void render(RenderContext& ctx, Rect bounds) override;
     void update(float dt);
     void toggle_blame() { show_blame_ = !show_blame_; }
+    void set_wrap(bool on) { wrap_ = on; wrap_version_ = UINT64_MAX; }
+    bool wrap() const { return wrap_; }
     bool blame() const { return show_blame_; }
     void set_minimap(bool on) { show_minimap_ = on; }
     bool minimap() const { return show_minimap_; }
@@ -27,9 +29,7 @@ public:
     bool find_has_focus() const { return find_.has_input_focus(); }
     void set_diagnostics(const std::vector<LSPDiagnostic>* d) { diagnostics_ = d; }
     CompletionPopup& completion() { return completion_; }
-    void reveal_cursor() {
-        if (editor_) editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h, cached_char_w_, cached_line_h_);
-    }
+    void reveal_cursor();
     bool handle_key(const KeyEvent& e) override;
     bool handle_mouse(const MouseEvent& e) override;
     bool handle_text(const std::string& text) override;
@@ -85,7 +85,21 @@ private:
     void render_selections(RenderContext& ctx, Rect text_rect);
     void render_minimap(RenderContext& ctx, Rect minimap_rect);
     Position position_at(float x, float y) const;
-    float row_y(size_t line, Rect text_rect) const;
+    float row_y(size_t line, Rect text_rect) const;  // top of the line's first visual row
+    // Word wrap: byte offsets where each visual row of a line starts ({0} if not wrapping).
+    std::vector<size_t> segments(const std::string& text) const;
+    size_t first_row(size_t line) const;
+    size_t total_rows() const;
+    std::pair<size_t, size_t> line_at_row(size_t row) const;  // (line, segment)
+    struct Pt { float x, y; };
+    Pt point(const std::string& text, size_t line, size_t byte, Rect text_rect) const;
+    void update_wrap_map(float text_width);
+    bool wrap_ = false;
+    bool wrapping() const;
+    size_t wrap_cols_ = 0;
+    std::vector<size_t> row_start_;  // row_start_[line] = first visual row; back() = total
+    uint64_t wrap_version_ = UINT64_MAX;
+    size_t wrap_map_cols_ = 0;
     float col_x(const std::string& line_text, size_t byte_col, Rect text_rect) const;
     std::pair<size_t, size_t> visible_lines(Rect text_rect) const;  // [first, end)
 

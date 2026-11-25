@@ -28,6 +28,7 @@ void KeyMap::init_defaults() {
     bind(SDLK_B,     KeyMod::Ctrl,                      "toggle_sidebar");
     bind(SDLK_COMMA, KeyMod::Ctrl,                      "open_settings");
     bind(SDLK_I,     KeyMod::Ctrl | KeyMod::Alt,        "view_chat");
+    bind(SDLK_Z,     KeyMod::Alt,                       "toggle_word_wrap");
     bind(SDLK_BACKSLASH, KeyMod::Ctrl,                  "split_editor");
     bind(SDLK_1,     KeyMod::Ctrl,                      "focus_group_1");
     bind(SDLK_2,     KeyMod::Ctrl,                      "focus_group_2");

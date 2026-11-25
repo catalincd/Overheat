@@ -111,6 +111,8 @@ bool App::init(int argc, char** argv) {
     show_breadcrumbs_ = themes_.setting("breadcrumbs") != "false";
     editor_view_.set_minimap(themes_.setting("minimap") != "false");
     Editor::auto_close_pairs = themes_.setting("auto_close_brackets") != "false";
+    editor_view_.set_wrap(themes_.setting("word_wrap") == "true");
+    editor_view2_.set_wrap(themes_.setting("word_wrap") == "true");
     sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
     terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
     font_.set_ligatures(themes_.setting("ligatures") != "false");
@@ -804,6 +806,12 @@ void App::handle_command(const std::string& cmd) {
         split_editor();
     } else if (cmd == "focus_group_1" || cmd == "focus_group_2") {
         focus_group(cmd == "focus_group_2");
+    } else if (cmd == "toggle_word_wrap") {
+        bool on = !editor_view_.wrap();
+        editor_view_.set_wrap(on);
+        editor_view2_.set_wrap(on);
+        themes_.set_setting("word_wrap", on ? "true" : "false");
+        set_status_message(std::string("Word wrap ") + (on ? "on" : "off"));
     } else if (cmd == "toggle_minimap") {
         editor_view_.set_minimap(!editor_view_.minimap());
         themes_.set_setting("minimap", editor_view_.minimap() ? "true" : "false");
@@ -1498,6 +1506,8 @@ void App::open_settings() {
                           [this] { return font_.ligatures(); }, "toggle_ligatures"));
     rows.push_back(toggle("Animations", "Smooth scrolling, caret glide, panel and popup motion",
                           [] { return anim::enabled; }, "toggle_animations"));
+    rows.push_back(toggle("Word wrap", "Wrap long lines at the editor width (Alt+Z)",
+                          [this] { return editor_view_.wrap(); }, "toggle_word_wrap"));
     rows.push_back(toggle("Minimap", "Code overview at the editor's right edge",
                           [this] { return editor_view_.minimap(); }, "toggle_minimap"));
     rows.push_back(toggle("Breadcrumbs", "Path and enclosing symbols above the editor",
@@ -1918,6 +1928,7 @@ void App::register_commands() {
     add("split_editor",            "View: Split Editor",        "Ctrl+\\");
     add("focus_group_1",           "View: Focus Left Editor Group", "Ctrl+1");
     add("focus_group_2",           "View: Focus Right Editor Group", "Ctrl+2");
+    add("toggle_word_wrap",        "View: Toggle Word Wrap",    "Alt+Z");
     add("toggle_minimap",          "View: Toggle Minimap",      "");
     add("toggle_breadcrumbs",      "View: Toggle Breadcrumbs",  "");
     add("toggle_animations",       "Preferences: Toggle Animations", "");
