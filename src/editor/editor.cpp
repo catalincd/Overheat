@@ -2,9 +2,26 @@
 #include "vfs.h"
 #include "editor/utf8.h"
 #include <algorithm>
+#include <cstring>
+#include <cctype>
 #include <sstream>
 
 namespace oh {
+
+namespace {
+bool word_byte(unsigned char c) { return std::isalnum(c) || c == '_' || c >= 0x80; }
+char closer_for(char c) {
+    switch (c) {
+        case '(': return ')';
+        case '[': return ']';
+        case '{': return '}';
+        case '"': return '"';
+        case '\'': return '\'';
+        case '`': return '`';
+        default: return 0;
+    }
+}
+} // namespace
 
 Editor::Editor() = default;
 
@@ -157,6 +174,19 @@ void Editor::insert_text(const std::string& text) {
 }
 
 void Editor::delete_backward() {
+    if (cursors_.selections().size() == 1 && cursors_.primary().empty()) {
+        Position p = cursors_.primary_pos();
+        std::string l = buffer_.line_text(p.line);
+        if (p.col > 0 && p.col < l.size() && closer_for(l[p.col - 1]) && closer_for(l[p.col - 1]) == l[p.col]) {
+            size_t off = buffer_.offset_of(p.line, p.col - 1);
+            buffer_.begin_undo_group();
+            buffer_.erase(off, 2);  // "(|)" -> "|"
+            buffer_.end_undo_group();
+            cursors_.set_primary({p.line, p.col - 1});
+            on_text_changed();
+            return;
+        }
+    }
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -793,6 +823,135 @@ void Editor::replace_ranges(const std::vector<std::pair<size_t, size_t>>& ranges
 void Editor::goto_line(size_t line) {
     line = std::min(line, buffer_.line_count() - 1);
     cursors_.set_primary({line, 0});
+}
+
+
+void Editor::add_next_occurrence() {
+    const auto& sels = cursors_.selections();
+    if (sels.size() == 1 && sels[0].empty()) {
+        cursors_.select_word(buffer_);
+        return;
+    }
+    const Selection& last = sels.back();
+    if (last.empty()) return;
+    size_t a = buffer_.offset_of(last.min().line, last.min().col);
+    size_t b = buffer_.offset_of(last.max().line, last.max().col);
+    std::string text = buffer_.text();
+    std::string needle = text.substr(a, b - a);
+    size_t pos = text.find(needle, b);
+    if (pos == std::string::npos) pos = text.find(needle);  // wrap around
+    for (int guard = 0; pos != std::string::npos && guard < 100000; guard++) {
+        bool taken = false;
+        for (auto& s : sels)
+            if (buffer_.offset_of(s.min().line, s.min().col) == pos) taken = true;
+        if (!taken) {
+            cursors_.add_selection({buffer_.position_of(pos), buffer_.position_of(pos + needle.size())});
+            return;
+        }
+        pos = text.find(needle, pos + 1);
+        if (pos == std::string::npos) return;  // every occurrence is already selected
+    }
+}
+
+void Editor::add_cursor_vertical(int dir) {
+    std::vector<Position> extra;
+    for (auto& s : cursors_.selections()) {
+        long line = static_cast<long>(s.head.line) + dir;
+        if (line < 0 || line >= static_cast<long>(buffer_.line_count())) continue;
+        std::string from = buffer_.line_text(s.head.line), to = buffer_.line_text(static_cast<size_t>(line));
+        extra.push_back({static_cast<size_t>(line), utf8::byte_col_at(to, utf8::display_col(from, s.head.col))});
+    }
+    for (auto& p : extra) cursors_.add_cursor(p);
+}
+
+void Editor::type_text(const std::string& text) {
+    if (text.size() != 1) {
+        insert_text(text);
+        return;
+    }
+    char c = text[0];
+    const auto& sels = cursors_.selections();
+    bool all_empty = std::all_of(sels.begin(), sels.end(), [](const Selection& s) { return s.empty(); });
+    auto next_char = [&](const Selection& s) {
+        std::string l = buffer_.line_text(s.head.line);
+        return s.head.col < l.size() ? l[s.head.col] : '\0';
+    };
+    auto prev_char = [&](const Selection& s) {
+        std::string l = buffer_.line_text(s.head.line);
+        return s.head.col > 0 && s.head.col <= l.size() ? l[s.head.col - 1] : '\0';
+    };
+    // Typing a closer that is already there just steps over it.
+    bool is_closer = c == ')' || c == ']' || c == '}' || c == '"' || c == '\'' || c == '`';
+    if (all_empty && is_closer && std::all_of(sels.begin(), sels.end(), [&](const Selection& s) { return next_char(s) == c; })) {
+        cursors_.move_right(buffer_, false);
+        return;
+    }
+    char close = closer_for(c);
+    if (!close) {
+        insert_text(text);
+        return;
+    }
+    // Wrap a single selection: "(" around "foo" gives "(foo)" with foo still selected.
+    if (sels.size() == 1 && !sels[0].empty()) {
+        Selection s = sels[0];
+        size_t a = buffer_.offset_of(s.min().line, s.min().col), b = buffer_.offset_of(s.max().line, s.max().col);
+        buffer_.begin_undo_group();
+        buffer_.insert(b, std::string(1, close));
+        buffer_.insert(a, std::string(1, c));
+        buffer_.end_undo_group();
+        cursors_.set_primary(buffer_.position_of(a + 1));
+        cursors_.extend_primary(buffer_.position_of(b + 1));
+        on_text_changed();
+        return;
+    }
+    bool quote = c == '"' || c == '\'' || c == '`';
+    bool pair_ok = all_empty && std::all_of(sels.begin(), sels.end(), [&](const Selection& s) {
+        char n = next_char(s);
+        bool next_ok = n == '\0' || std::isspace(static_cast<unsigned char>(n)) || n == ')' || n == ']' ||
+                       n == '}' || n == ',' || n == ';';
+        bool prev_ok = !quote || !word_byte(static_cast<unsigned char>(prev_char(s)));  // don't pair it's
+        return next_ok && prev_ok;
+    });
+    if (!pair_ok) {
+        insert_text(text);
+        return;
+    }
+    insert_text(std::string{c, close});
+    cursors_.move_left(buffer_, false);
+}
+
+bool Editor::find_bracket_pair(Position& a, Position& b) const {
+    Position cur = cursors_.primary_pos();
+    std::string line = buffer_.line_text(cur.line);
+    auto is_bracket = [](char ch) { return ch && std::strchr("()[]{}", ch); };
+    size_t col;
+    if (cur.col < line.size() && is_bracket(line[cur.col])) col = cur.col;
+    else if (cur.col > 0 && cur.col <= line.size() && is_bracket(line[cur.col - 1])) col = cur.col - 1;
+    else return false;
+    char open = line[col];
+    static const char* pairs = "()[]{}";
+    const char* p = std::strchr(pairs, open);
+    size_t idx = static_cast<size_t>(p - pairs);
+    bool forward = idx % 2 == 0;
+    char want = forward ? pairs[idx + 1] : pairs[idx - 1];
+    int depth = 0;
+    long l = static_cast<long>(cur.line);
+    long c2 = static_cast<long>(col);
+    for (int scanned = 0; scanned < 5000 && l >= 0 && l < static_cast<long>(buffer_.line_count()); scanned++) {
+        std::string text = buffer_.line_text(static_cast<size_t>(l));
+        if (scanned > 0) c2 = forward ? 0 : static_cast<long>(text.size()) - 1;
+        for (; forward ? c2 < static_cast<long>(text.size()) : c2 >= 0; c2 += forward ? 1 : -1) {
+            char ch = text[static_cast<size_t>(c2)];
+            if (ch == open) depth++;
+            else if (ch == want && --depth == 0) {
+                a = {cur.line, col};
+                b = {static_cast<size_t>(l), static_cast<size_t>(c2)};
+                return true;
+            }
+        }
+        l += forward ? 1 : -1;
+    }
+    return false;
 }
 
 void Editor::undo() {

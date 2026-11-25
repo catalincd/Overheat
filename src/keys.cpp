@@ -49,6 +49,8 @@ void KeyMap::init_defaults() {
     // Editing
     bind(SDLK_SLASH, KeyMod::Ctrl,                      "toggle_comment");
     bind(SDLK_K,     KeyMod::Ctrl | KeyMod::Shift,      "delete_line");
+    bind(SDLK_UP,    KeyMod::Ctrl | KeyMod::Alt,        "add_cursor_above");
+    bind(SDLK_DOWN,  KeyMod::Ctrl | KeyMod::Alt,        "add_cursor_below");
     bind(SDLK_UP,    KeyMod::Alt,                       "move_line_up");
     bind(SDLK_DOWN,  KeyMod::Alt,                       "move_line_down");
     bind(SDLK_D,     KeyMod::Ctrl | KeyMod::Shift,      "duplicate_line");

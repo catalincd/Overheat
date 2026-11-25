@@ -610,7 +610,12 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "redo") {
         if (Editor* ed = current_editor()) ed->redo();
     } else if (cmd == "select_word") {
-        if (Editor* ed = current_editor()) ed->cursors().select_word(ed->buffer());
+        if (Editor* ed = current_editor()) {
+            ed->add_next_occurrence();
+            editor_view_.reveal_cursor();
+        }
+    } else if (cmd == "add_cursor_above" || cmd == "add_cursor_below") {
+        if (Editor* ed = current_editor()) ed->add_cursor_vertical(cmd == "add_cursor_above" ? -1 : 1);
     } else if (cmd == "select_line") {
         if (Editor* ed = current_editor()) ed->cursors().select_line(ed->buffer());
     } else if (cmd == "select_all") {
@@ -1353,7 +1358,9 @@ void App::register_commands() {
     add("paste",                   "Paste",                     "Ctrl+V");
     add("undo",                    "Undo",                      "Ctrl+Z");
     add("redo",                    "Redo",                      "Ctrl+Shift+Z");
-    add("select_word",             "Select Word",               "Ctrl+D");
+    add("select_word",             "Add Selection To Next Find Match", "Ctrl+D");
+    add("add_cursor_above",        "Add Cursor Above",          "Ctrl+Alt+Up");
+    add("add_cursor_below",        "Add Cursor Below",          "Ctrl+Alt+Down");
     add("select_line",             "Select Line",               "Ctrl+L");
     add("select_all",              "Select All",                "Ctrl+A");
     add("toggle_comment",          "Toggle Comment",            "Ctrl+/");

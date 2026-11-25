@@ -55,6 +55,7 @@ private:
     const std::vector<LSPDiagnostic>* diagnostics_ = nullptr;
     void render_diagnostics(RenderContext& ctx, Rect text_rect);
     void render_scrollbar(RenderContext& ctx, Rect text_rect);
+    void render_indent_guides(RenderContext& ctx, Rect text_rect);
     Rect ruler_{};
     bool dragging_thumb_ = false;
     float drag_offset_ = 0;

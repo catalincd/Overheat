@@ -39,6 +39,14 @@ public:
     void replace_ranges(const std::vector<std::pair<size_t, size_t>>& ranges, const std::string& text);
     void goto_line(size_t line);
 
+    // VS Code-style multi-cursor helpers.
+    void add_next_occurrence();          // Ctrl+D
+    void add_cursor_vertical(int dir);   // Ctrl+Alt+Up/Down
+    // Typing with auto-closing brackets/quotes, skip-over and selection wrapping.
+    void type_text(const std::string& text);
+    // Matching bracket for the bracket at/before the primary cursor.
+    bool find_bracket_pair(Position& a, Position& b) const;
+
     // Clipboard helpers. With no selection, copy/cut take the whole line
     // (including its newline) and report line_mode so paste inserts above.
     std::string copy_text(bool& line_mode) const;

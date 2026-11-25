@@ -3,6 +3,7 @@
 #include "renderer/font_atlas.h"
 #include "renderer/renderer2d.h"
 #include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_keyboard.h>
 #include <algorithm>
 #include <cmath>
 #include <ctime>
@@ -74,7 +75,22 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
             ctx.r->add_rect({text_rect.x, row_y(cursor_line, text_rect), text_rect.w, cached_line_h_},
                             ctx.theme->current_line);
     }
+    render_indent_guides(ctx, text_rect);
     render_find_matches(ctx, text_rect);
+    {   // Matching bracket outline
+        Position a, b;
+        if (editor_->cursors().selections().size() == 1 && editor_->find_bracket_pair(a, b)) {
+            Color c = ctx.theme->fg_muted;
+            c.a = 0.6f;
+            auto [first, end] = visible_lines(text_rect);
+            for (Position p : {a, b}) {
+                if (p.line < first || p.line >= end) continue;
+                std::string l = editor_->buffer().line_text(p.line);
+                float x = col_x(l, p.col, text_rect);
+                ctx.r->add_rect({x, row_y(p.line, text_rect), cached_char_w_, cached_line_h_}, {0, 0, 0, 0}, 2.0f, 1.0f, c);
+            }
+        }
+    }
     render_selections(ctx, text_rect);
     render_text(ctx, text_rect);
     render_diagnostics(ctx, text_rect);
@@ -400,6 +416,35 @@ void EditorView::render_blame(RenderContext& ctx, Rect text_rect) {
     ctx.r->add_text(x, row_y(line, text_rect) + ctx.font->ascender(), text, c, *ctx.font);
 }
 
+void EditorView::render_indent_guides(RenderContext& ctx, Rect text_rect) {
+    auto& buf = editor_->buffer();
+    auto [first, end] = visible_lines(text_rect);
+    Color c = ctx.theme->line_number;
+    c.a *= 0.35f;
+    auto indent_of = [&](size_t line, bool& blank) {
+        std::string t = buf.line_text(line);
+        size_t col = 0, i = 0;
+        for (; i < t.size() && (t[i] == ' ' || t[i] == '\t'); i++) col += t[i] == '\t' ? 4 - col % 4 : 1;
+        blank = i == t.size();
+        return col;
+    };
+    float x0 = text_rect.x + TEXT_PAD - view_x_;
+    for (size_t line = first; line < end; line++) {
+        bool blank;
+        size_t ind = indent_of(line, blank);
+        if (blank) {  // blank lines continue the guides of the next non-blank line
+            ind = 0;
+            for (size_t n = line + 1; n < std::min(buf.line_count(), line + 50); n++) {
+                bool b2;
+                size_t i2 = indent_of(n, b2);
+                if (!b2) { ind = i2; break; }
+            }
+        }
+        for (size_t col = 4; col < ind + (blank ? 1 : 0) && col <= ind; col += 4)
+            ctx.r->add_rect({x0 + static_cast<float>(col - 4) * cached_char_w_, row_y(line, text_rect), 1.0f, cached_line_h_}, c);
+    }
+}
+
 void EditorView::render_find_matches(RenderContext& ctx, Rect text_rect) {
     if (!find_.is_open()) return;
     find_.refresh(*editor_);
@@ -633,6 +678,10 @@ bool EditorView::handle_mouse(const MouseEvent& e) {
         return true;
     }
     Position pos = position_at(e.x, e.y);
+    if (SDL_GetModState() & SDL_KMOD_ALT) {  // Alt+click adds a cursor
+        editor_->cursors().add_cursor(pos);
+        return true;
+    }
     editor_->cursors().set_primary(pos);
     if (e.double_click) editor_->cursors().select_word(editor_->buffer());
     else mouse_selecting_ = true;
@@ -645,7 +694,7 @@ bool EditorView::handle_text(const std::string& text) {
         reveal_cursor();
         return true;
     }
-    editor_->insert_text(text);
+    editor_->type_text(text);
 
     // Keep cursor in view after typing
     editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h,

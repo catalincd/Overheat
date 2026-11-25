@@ -31,6 +31,7 @@ public:
     void select_line(const TextBuffer& buf);
     // Moves the primary head, keeping its anchor (mouse drag selection).
     void extend_primary(Position pos);
+    void add_selection(Selection s);
 
     const std::vector<Selection>& selections() const { return selections_; }
     const Selection& primary() const { return selections_[0]; }

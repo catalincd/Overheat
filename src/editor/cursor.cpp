@@ -22,6 +22,12 @@ void CursorSet::add_cursor(Position pos) {
     update_preferred_col();
 }
 
+void CursorSet::add_selection(Selection s) {
+    selections_.push_back(s);
+    merge_overlapping();
+    update_preferred_col();
+}
+
 void CursorSet::clear_secondary() {
     if (selections_.size() > 1) {
         Selection primary = selections_[0];
@@ -278,6 +284,8 @@ void CursorSet::select_word(const TextBuffer& buf) {
         if (line.empty()) continue;
 
         size_t col = std::min(h.col, line.size() > 0 ? line.size() - 1 : 0);
+        // A cursor just after a word selects that word (as in VS Code).
+        if (!is_word_char(line[col]) && col > 0 && h.col > 0 && is_word_char(line[h.col - 1])) col = h.col - 1;
 
         if (is_word_char(line[col])) {
             size_t start = col;
