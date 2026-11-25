@@ -25,6 +25,7 @@ void request_redraw() {
 App::App() = default;
 
 App::~App() {
+    llm_.cancel();  // its worker posts to SDL, which is shut down below
     if (vk_.device()) vkDeviceWaitIdle(vk_.device());
     plugins_.shutdown();
 
@@ -154,6 +155,7 @@ bool App::init(int argc, char** argv) {
     file_tree_.set_on_open([this](const fs::path& p) { open_file(p); });
     setup_scm();
     setup_search();
+    setup_chat();
     tab_bar_.set_on_close_request([this](int i) { request_close_tab(i); });
 
     // ---- Terminal ----
@@ -406,6 +408,7 @@ void App::handle_event(const SDL_Event& e) {
             KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
             if (sidebar_view_ == SidebarView::SourceControl && scm_.input_focused() && scm_.handle_key(ke)) break;
             if (sidebar_view_ == SidebarView::Search && search_.input_focused() && search_.handle_key(ke)) break;
+            if (sidebar_view_ == SidebarView::Chat && chat_.input_focused() && chat_.handle_key(ke)) break;
         }
 
         // Check keymap. While the terminal has focus, the shell owns the keyboard
@@ -460,6 +463,8 @@ void App::handle_event(const SDL_Event& e) {
             scm_.handle_text(text);
         } else if (search_.input_focused()) {
             search_.handle_text(text);
+        } else if (chat_.input_focused()) {
+            chat_.handle_text(text);
         } else if (terminal_.focused() && terminal_visible_) {
             terminal_.handle_text(text);
         } else {
@@ -496,8 +501,8 @@ void App::handle_event(const SDL_Event& e) {
             settings_page_.handle_mouse(me);
         } else if (layout.activity_bar.contains(mx, my)) {
             int slot = static_cast<int>((my - layout.activity_bar.y) / ACTIVITY_BAR_W);
-            SidebarView v = static_cast<SidebarView>(std::clamp(slot, 0, 2));
-            if (slot <= 2) {
+            SidebarView v = static_cast<SidebarView>(std::clamp(slot, 0, 3));
+            if (slot <= 3) {
                 if (sidebar_visible_ && v == sidebar_view_) sidebar_visible_ = false;
                 else show_sidebar_view(v);
             }
@@ -766,6 +771,26 @@ void App::handle_command(const std::string& cmd) {
         git_checkout();
     } else if (cmd == "toggle_blame") {
         editor_view_.toggle_blame();
+    } else if (cmd == "view_chat") {
+        show_sidebar_view(SidebarView::Chat);
+        chat_.focus_input();
+    } else if (cmd == "ai_new_chat") {
+        llm_.cancel();
+        chat_.clear();
+        show_sidebar_view(SidebarView::Chat);
+    } else if (cmd == "ai_backend") {
+        pick_llm_backend();
+    } else if (cmd == "ai_ask_selection") {
+        if (Editor* ed = current_editor()) {
+            bool line_mode = false;
+            std::string code = ed->copy_text(line_mode);
+            std::string lang = ed->syntax().language_id();
+            std::string name = ed->buffer().file_path().filename().string();
+            chat_.set_draft("In " + (name.empty() ? std::string("this file") : name) + ":\n```" + lang + "\n" +
+                            code + (code.empty() || code.back() == '\n' ? "" : "\n") + "```\n");
+            show_sidebar_view(SidebarView::Chat);
+            chat_.focus_input();
+        }
     } else if (cmd == "open_settings") {
         open_settings();
     } else if (cmd == "keybindings") {
@@ -1306,7 +1331,7 @@ void App::set_font_size(float size) {
 }
 
 void App::focus(Panel* p) {
-    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_, &search_})
+    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_, &search_, &chat_})
         q->set_focused(q == p);
 }
 
@@ -1357,7 +1382,7 @@ bool App::restore_session() {
             ss >> sv >> tv >> view;
             sidebar_visible_ = sv != 0;
             terminal_visible_ = tv != 0;
-            sidebar_view_ = static_cast<SidebarView>(std::clamp(view, 0, 2));
+            sidebar_view_ = static_cast<SidebarView>(std::clamp(view, 0, 3));
             sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
             terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
         } else if (kind == "tab") {
@@ -1563,9 +1588,9 @@ void App::render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed) {
 
 void App::render_activity_bar(RenderContext& ctx, Rect r) {
     ctx.r->add_rect(r, theme_.tab_bg);
-    const uint32_t icons[] = {0xEAF0, 0xEA6D, 0xEA68};
+    const uint32_t icons[] = {0xEAF0, 0xEA6D, 0xEA68, 0xEAC7};
     float cw = font_.char_width();
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         Rect slot{r.x, r.y + i * ACTIVITY_BAR_W, ACTIVITY_BAR_W, ACTIVITY_BAR_W};
         bool active = sidebar_visible_ && static_cast<int>(sidebar_view_) == i;
         bool hover = slot.contains(ctx.mouse_x, ctx.mouse_y);
@@ -1583,6 +1608,52 @@ void App::render_activity_bar(RenderContext& ctx, Rect r) {
                             theme_.tab_active_bg, font_);
         }
     }
+}
+
+void App::apply_llm_backend(const std::string& kind, const std::string& endpoint) {
+    llm_backend_.kind = kind == "omp" ? LLMBackend::Omp : LLMBackend::OpenAI;
+    llm_backend_.endpoint = endpoint.empty() ? "http://127.0.0.1:8000" : endpoint;
+    llm_backend_.model = themes_.setting("llm_model");
+    const char* key = std::getenv("OVERHEAT_LLM_API_KEY");  // never stored in settings
+    llm_backend_.api_key = key ? key : "";
+    llm_backend_.name = llm_backend_.kind == LLMBackend::Omp ? "OMP agent"
+                      : llm_backend_.endpoint.find("127.0.0.1:8000") != std::string::npos ? "Flint"
+                      : llm_backend_.endpoint;
+    chat_.set_backend_name(llm_backend_.name);
+}
+
+void App::setup_chat() {
+    apply_llm_backend(themes_.setting("llm_backend"), themes_.setting("llm_endpoint"));
+    ChatPanel::Callbacks cb;
+    cb.send = [this](std::vector<ChatMessage> history) {
+        history.insert(history.begin(), {"system", "You are a concise coding assistant inside the Overheat editor. "
+                                                   "Project folder: " + project_root_.string() + "."});
+        llm_.send(llm_backend_, std::move(history), project_root_,
+                  [this](const std::string& delta) { chat_.append_reply(delta); request_redraw(); },
+                  [this](const std::string& err) { chat_.finish_reply(err); request_redraw(); });
+    };
+    cb.stop = [this] { llm_.cancel(); };
+    cb.pick_backend = [this] { pick_llm_backend(); };
+    chat_.set_callbacks(std::move(cb));
+}
+
+void App::pick_llm_backend() {
+    CommandPalette::PickOptions opts;
+    opts.placeholder = "AI backend (or type an OpenAI-compatible base URL)";
+    opts.items = {"Flint (local, http://127.0.0.1:8000)", "OMP agent (omp CLI in the project folder)"};
+    opts.allow_free_text = true;
+    opts.on_pick = [this](int i, const std::string& query) {
+        std::string kind = i == 1 ? "omp" : "openai";
+        std::string endpoint = i < 0 ? query : "http://127.0.0.1:8000";
+        while (!endpoint.empty() && endpoint.back() == '/') endpoint.pop_back();
+        if (i < 0 && endpoint.size() > 3 && endpoint.compare(endpoint.size() - 3, 3, "/v1") == 0)
+            endpoint.resize(endpoint.size() - 3);  // we append /v1/... ourselves
+        themes_.set_setting("llm_backend", "\"" + kind + "\"");
+        themes_.set_setting("llm_endpoint", "\"" + endpoint + "\"");
+        apply_llm_backend(kind, endpoint);
+        set_status_message("AI backend: " + llm_backend_.name);
+    };
+    command_palette_.pick(std::move(opts));
 }
 
 void App::setup_search() {
@@ -1795,6 +1866,10 @@ void App::register_commands() {
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
     add("toggle_blame",            "Git: Toggle Inline Blame",  "");
+    add("view_chat",               "AI: Open Chat",             "Ctrl+Alt+I");
+    add("ai_ask_selection",        "AI: Ask About Selection",   "");
+    add("ai_backend",              "AI: Select Backend",        "");
+    add("ai_new_chat",             "AI: New Chat",              "");
     add("open_settings",           "Preferences: Open Settings", "Ctrl+,");
     add("keybindings",             "Preferences: Keyboard Shortcuts", "");
     add("split_editor",            "View: Split Editor",        "Ctrl+\\");

@@ -12,6 +12,8 @@
 #include "ui/scm_panel.h"
 #include "ui/search_panel.h"
 #include "ui/settings_page.h"
+#include "ui/chat_panel.h"
+#include "llm.h"
 #include "git/repository.h"
 #include "ssh/session.h"
 #include "ssh/ssh_config.h"
@@ -74,12 +76,19 @@ private:
     CommandPalette command_palette_;
     ScmPanel scm_;
     SearchPanel search_;
-    enum class SidebarView { Explorer, Search, SourceControl };  // activity bar order
+    ChatPanel chat_;
+    LLMClient llm_;  // after chat_: destroyed first, so no reply lands in a dead panel
+    LLMBackend llm_backend_;
+    void setup_chat();
+    void pick_llm_backend();
+    void apply_llm_backend(const std::string& kind, const std::string& endpoint);
+    enum class SidebarView { Explorer, Search, SourceControl, Chat };  // activity bar order
     SidebarView sidebar_view_ = SidebarView::Explorer;
     Panel& sidebar_panel() {
         switch (sidebar_view_) {
             case SidebarView::Search: return search_;
             case SidebarView::SourceControl: return scm_;
+            case SidebarView::Chat: return chat_;
             default: return file_tree_;
         }
     }
