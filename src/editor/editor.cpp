@@ -778,6 +778,23 @@ void Editor::paste_text(const std::string& text, bool line_mode) {
     insert_text(text);
 }
 
+void Editor::replace_ranges(const std::vector<std::pair<size_t, size_t>>& ranges, const std::string& text) {
+    if (ranges.empty()) return;
+    buffer_.begin_undo_group();
+    for (auto it = ranges.rbegin(); it != ranges.rend(); ++it) {  // back to front keeps offsets valid
+        buffer_.erase(it->first, it->second);
+        buffer_.insert(it->first, text);
+    }
+    buffer_.end_undo_group();
+    cursors_.set_primary(buffer_.position_of(std::min(ranges.front().first, buffer_.length())));
+    on_text_changed();
+}
+
+void Editor::goto_line(size_t line) {
+    line = std::min(line, buffer_.line_count() - 1);
+    cursors_.set_primary({line, 0});
+}
+
 void Editor::undo() {
     if (auto off = buffer_.undo()) cursors_.set_primary(buffer_.position_of(*off));
     on_text_changed();

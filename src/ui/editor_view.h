@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/panel.h"
 #include "editor/editor.h"
+#include "ui/find_bar.h"
 #include <memory>
 
 namespace oh {
@@ -15,6 +16,8 @@ public:
     void render(RenderContext& ctx, Rect bounds) override;
     void update(float dt);
     void toggle_blame() { show_blame_ = !show_blame_; }
+    void open_find(bool replace) { if (editor_) find_.open(*editor_, replace); reveal_cursor(); }
+    bool find_has_focus() const { return find_.has_input_focus(); }
     void reveal_cursor() {
         if (editor_) editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h, cached_char_w_, cached_line_h_);
     }
@@ -32,6 +35,8 @@ private:
     bool cursor_visible_ = true;
     bool mouse_selecting_ = false;
     bool show_blame_ = true;
+    FindBar find_;
+    void render_find_matches(RenderContext& ctx, Rect text_rect);
     float cached_line_h_ = 20.0f;
     float cached_char_w_ = 9.0f;
     float cached_gutter_w_ = 40.0f;

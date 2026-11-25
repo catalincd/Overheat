@@ -53,6 +53,7 @@ void KeyMap::init_defaults() {
     // Navigation
     bind(SDLK_G,     KeyMod::Ctrl,                      "goto_line");
     bind(SDLK_F,     KeyMod::Ctrl,                      "find");
+    bind(SDLK_H,     KeyMod::Ctrl,                      "replace");
 
     // Window
     bind(SDLK_F11,   KeyMod::None,                      "toggle_fullscreen");

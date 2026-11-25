@@ -531,11 +531,23 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "duplicate_line") {
         if (Editor* ed = current_editor()) ed->duplicate_line();
     } else if (cmd == "goto_line") {
-        // TODO: implement goto line dialog
-        command_palette_.show(CommandPalette::Mode::Commands);
-    } else if (cmd == "find") {
-        // TODO: implement find/replace
-        command_palette_.show(CommandPalette::Mode::Commands);
+        if (Editor* ed = current_editor()) {
+            CommandPalette::PickOptions opts;
+            opts.placeholder = "Go to line (1 - " + std::to_string(ed->buffer().line_count()) + ")";
+            opts.allow_free_text = true;
+            opts.on_pick = [this](int, const std::string& q) {
+                if (Editor* ed = current_editor(); ed && !q.empty()) {
+                    long n = std::strtol(q.c_str(), nullptr, 10);
+                    ed->goto_line(static_cast<size_t>(std::max(1L, n) - 1));
+                    focus_editor();
+                    editor_view_.reveal_cursor();
+                }
+            };
+            command_palette_.pick(std::move(opts));
+        }
+    } else if (cmd == "find" || cmd == "replace") {
+        focus_editor();
+        editor_view_.open_find(cmd == "replace");
     } else if (cmd == "toggle_fullscreen") {
         uint32_t flags = SDL_GetWindowFlags(window_);
         if (flags & SDL_WINDOW_FULLSCREEN) {
@@ -1029,6 +1041,7 @@ void App::register_commands() {
     add("duplicate_line",          "Duplicate Line",            "Ctrl+Shift+D");
     add("goto_line",               "Go to Line",                "Ctrl+G");
     add("find",                    "Find",                      "Ctrl+F");
+    add("replace",                 "Replace",                   "Ctrl+H");
     add("toggle_fullscreen",       "Toggle Fullscreen",         "F11");
     add("zoom_in",                 "Zoom In",                   "Ctrl++");
     add("zoom_out",                "Zoom Out",                  "Ctrl+-");

@@ -35,6 +35,9 @@ public:
     void toggle_comment();
     void undo();
     void redo();
+    // Replace byte ranges (sorted, non-overlapping) with `text` as one undo step.
+    void replace_ranges(const std::vector<std::pair<size_t, size_t>>& ranges, const std::string& text);
+    void goto_line(size_t line);
 
     // Clipboard helpers. With no selection, copy/cut take the whole line
     // (including its newline) and report line_mode so paste inserts above.

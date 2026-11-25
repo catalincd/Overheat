@@ -57,6 +57,7 @@ set(OVERHEAT_SOURCES
     src/ui/tab_bar.cpp
     src/ui/command_palette.cpp
     src/ui/scm_panel.cpp
+    src/ui/find_bar.cpp
     src/git/repository.cpp
     src/ssh/session.cpp
     src/ssh/ssh_config.cpp

@@ -50,11 +50,20 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     render_git_marks(ctx, gutter_rect);
     ctx.r->pop_clip();
     ctx.r->push_clip(text_rect);
+    {   // Current line underneath everything else in the text area.
+        auto [first, end] = visible_lines(text_rect);
+        size_t cursor_line = editor_->cursors().primary_pos().line;
+        if (cursor_line >= first && cursor_line < end)
+            ctx.r->add_rect({text_rect.x, row_y(cursor_line, text_rect), text_rect.w, cached_line_h_},
+                            ctx.theme->current_line);
+    }
+    render_find_matches(ctx, text_rect);
     render_selections(ctx, text_rect);
     render_text(ctx, text_rect);
     render_blame(ctx, text_rect);
     render_cursors(ctx, text_rect);
     ctx.r->pop_clip();
+    find_.render(ctx, bounds);
 }
 
 void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
@@ -199,12 +208,6 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
     auto& buf = editor_->buffer();
     auto [first, end] = visible_lines(text_rect);
 
-    // Current line first, so selections paint over it.
-    size_t cursor_line = editor_->cursors().primary_pos().line;
-    if (cursor_line >= first && cursor_line < end)
-        ctx.r->add_rect({text_rect.x, row_y(cursor_line, text_rect), text_rect.w, cached_line_h_},
-                        ctx.theme->current_line);
-
     for (auto& sel : editor_->cursors().selections()) {
         if (sel.empty()) continue;
         Position mn = sel.min(), mx = sel.max();
@@ -251,6 +254,30 @@ void EditorView::render_blame(RenderContext& ctx, Rect text_rect) {
     ctx.r->add_text(x, row_y(line, text_rect) + ctx.font->ascender(), text, c, *ctx.font);
 }
 
+void EditorView::render_find_matches(RenderContext& ctx, Rect text_rect) {
+    if (!find_.is_open()) return;
+    find_.refresh(*editor_);
+    const auto& ms = find_.matches();
+    if (ms.empty()) return;
+    auto& buf = editor_->buffer();
+    auto [first, end] = visible_lines(text_rect);
+    size_t lo = buf.line_start(first);
+    size_t hi = end < buf.line_count() ? buf.line_start(end) : buf.length();
+    auto it = std::lower_bound(ms.begin(), ms.end(), lo, [](const FindBar::Match& m, size_t o) { return m.start < o; });
+    Color hl = ctx.theme->warning;
+    hl.a = 0.22f;
+    Color cur = ctx.theme->warning;
+    cur.a = 0.5f;
+    for (; it != ms.end() && it->start < hi; ++it) {
+        Position a = buf.position_of(it->start), b = buf.position_of(it->start + it->len);
+        if (a.line != b.line) continue;  // single-line queries only
+        std::string line = buf.line_text(a.line);
+        float x0 = col_x(line, a.col, text_rect), x1 = col_x(line, b.col, text_rect);
+        bool is_cur = static_cast<int>(it - ms.begin()) == find_.current();
+        ctx.r->add_rect({x0, row_y(a.line, text_rect), x1 - x0, cached_line_h_}, is_cur ? cur : hl, 2.0f);
+    }
+}
+
 void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {
     if (!cursor_visible_ || !focused_) return;
     auto& buf = editor_->buffer();
@@ -279,6 +306,14 @@ Position EditorView::position_at(float x, float y) const {
 
 bool EditorView::handle_key(const KeyEvent& e) {
     if (!editor_ || !e.pressed) return false;
+    if (find_.handle_key(*editor_, e)) {
+        reveal_cursor();
+        return true;
+    }
+    if (find_.is_open() && e.keycode == SDLK_ESCAPE) {
+        find_.close();
+        return true;
+    }
 
     bool ctrl = e.mods & KeyMod::Ctrl;
     bool shift = e.mods & KeyMod::Shift;
@@ -390,6 +425,11 @@ bool EditorView::handle_key(const KeyEvent& e) {
 
 bool EditorView::handle_mouse(const MouseEvent& e) {
     if (!editor_) return false;
+    if (find_.handle_mouse(*editor_, e)) {
+        reveal_cursor();
+        return true;
+    }
+    if (e.button == 1 && e.pressed && !e.motion) find_.blur();
     if (!bounds_.contains(e.x, e.y) && !mouse_selecting_) return false;
 
     if (e.scroll_y != 0.0f) {
@@ -419,6 +459,10 @@ bool EditorView::handle_mouse(const MouseEvent& e) {
 
 bool EditorView::handle_text(const std::string& text) {
     if (!editor_) return false;
+    if (find_.handle_text(*editor_, text)) {
+        reveal_cursor();
+        return true;
+    }
     editor_->insert_text(text);
 
     // Keep cursor in view after typing
