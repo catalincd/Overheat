@@ -22,6 +22,7 @@
 #include "anim.h"
 #include "vfs.h"
 #include <future>
+#include <optional>
 #include <SDL3/SDL.h>
 
 namespace oh {
@@ -90,7 +91,19 @@ private:
     void focus(Panel* p);
     void show_sidebar_view(SidebarView v);
     void render_activity_bar(RenderContext& ctx, Rect r);
-    void render_breadcrumbs(RenderContext& ctx, Rect r);
+    void render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed);
+
+    // Split editors: tab_bar_/editor_view_ are always the *active* group; the
+    // other group lives in tab_bar2_/editor_view2_ and the two are swapped on focus.
+    TabBar tab_bar2_;
+    EditorView editor_view2_;
+    bool split_ = false, active_right_ = false;
+    float split_ratio_ = 0.5f;
+    struct ViewState { CursorSet cursors; float sx = 0, sy = 0; };
+    std::optional<ViewState> other_state_;  // inactive view's state when both show one file
+    void split_editor();
+    void focus_group(bool right);
+    void unsplit_if_empty();
     bool show_breadcrumbs_ = true;
     fs::path session_file() const;
     void save_session();
@@ -169,6 +182,9 @@ private:
         Rect tab_bar;
         Rect breadcrumbs;
         Rect editor;
+        // The other editor group when split (empty otherwise).
+        Rect tab_bar2, breadcrumbs2, editor2;
+        float group_split_x = -1;  // x of the divider between groups
         Rect terminal;
         Rect status_bar;
     };
@@ -193,7 +209,7 @@ private:
     std::string font_family_;
 
     // Draggable splitters between sidebar/editor and editor/terminal.
-    enum class Splitter { None, Sidebar, Terminal };
+    enum class Splitter { None, Sidebar, Terminal, Groups };
     Splitter splitter_hover_ = Splitter::None, splitter_drag_ = Splitter::None;
     Splitter splitter_at(float x, float y) const;
     void update_cursor_shape(Splitter s);

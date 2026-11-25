@@ -459,6 +459,12 @@ void App::handle_event(const SDL_Event& e) {
         MouseEvent me{mx, my, static_cast<int>(e.button.button), true,
                       (e.button.clicks >= 2), 0, 0};
 
+        // Clicking into the other editor group makes it the active one.
+        if (split_ && !command_palette_.is_visible() &&
+            (layout.tab_bar2.contains(mx, my) || layout.editor2.contains(mx, my) || layout.breadcrumbs2.contains(mx, my))) {
+            focus_group(!active_right_);
+            layout = compute_layout();
+        }
         // Determine which panel was clicked and set focus
         if (!command_palette_.is_visible() && e.button.button == SDL_BUTTON_LEFT &&
             (splitter_drag_ = splitter_at(mx, my)) != Splitter::None) {
@@ -489,6 +495,10 @@ void App::handle_event(const SDL_Event& e) {
     }
 
     case SDL_EVENT_MOUSE_BUTTON_UP: {
+        if (splitter_drag_ == Splitter::Groups) {
+            splitter_drag_ = Splitter::None;
+            break;
+        }
         if (splitter_drag_ != Splitter::None) {
             themes_.set_setting(splitter_drag_ == Splitter::Sidebar ? "sidebar_width" : "terminal_height",
                                 std::to_string(static_cast<int>(splitter_drag_ == Splitter::Sidebar
@@ -532,7 +542,11 @@ void App::handle_event(const SDL_Event& e) {
     case SDL_EVENT_MOUSE_MOTION: {
         if (splitter_drag_ != Splitter::None) {
             Layout l = compute_layout();
-            if (splitter_drag_ == Splitter::Sidebar)
+            if (splitter_drag_ == Splitter::Groups) {
+                float left = std::min(l.editor.x, l.editor2.x);
+                float total = l.editor.w + l.editor2.w;
+                split_ratio_ = std::clamp((e.motion.x - left) / total, 0.15f, 0.85f);
+            } else if (splitter_drag_ == Splitter::Sidebar)
                 sidebar_width_ = std::clamp(e.motion.x - l.sidebar.x, 140.0f, l.sidebar.w + l.editor.w - 200.0f);
             else
                 terminal_height_ = std::clamp(l.terminal.y + l.terminal.h - e.motion.y, 60.0f,
@@ -726,6 +740,10 @@ void App::handle_command(const std::string& cmd) {
         git_checkout();
     } else if (cmd == "toggle_blame") {
         editor_view_.toggle_blame();
+    } else if (cmd == "split_editor") {
+        split_editor();
+    } else if (cmd == "focus_group_1" || cmd == "focus_group_2") {
+        focus_group(cmd == "focus_group_2");
     } else if (cmd == "toggle_minimap") {
         editor_view_.set_minimap(!editor_view_.minimap());
         themes_.set_setting("minimap", editor_view_.minimap() ? "true" : "false");
@@ -776,11 +794,22 @@ App::Layout App::compute_layout() const {
     float right_x = ab_w + sb_w;
     float right_w = fw - right_x;
 
-    // Tab bar at the top of the right region, breadcrumbs under it
+    // Tab bar at the top of the editor region, breadcrumbs under it; two columns when split.
     float tab_h = 36.0f;
-    l.tab_bar = {right_x, 0, right_w, tab_h};
     float crumbs_h = show_breadcrumbs_ ? 24.0f : 0.0f;
-    l.breadcrumbs = {right_x, tab_h, right_w, crumbs_h};
+    float left_w = split_ ? std::floor(right_w * split_ratio_) : right_w;
+    float act_x = right_x, act_w = left_w, oth_x = right_x + left_w, oth_w = right_w - left_w;
+    if (split_ && active_right_) {
+        std::swap(act_x, oth_x);
+        std::swap(act_w, oth_w);
+    }
+    l.tab_bar = {act_x, 0, act_w, tab_h};
+    l.breadcrumbs = {act_x, tab_h, act_w, crumbs_h};
+    if (split_) {
+        l.tab_bar2 = {oth_x, 0, oth_w, tab_h};
+        l.breadcrumbs2 = {oth_x, tab_h, oth_w, crumbs_h};
+        l.group_split_x = right_x + left_w;
+    }
     tab_h += crumbs_h;
 
     // Terminal: at bottom of right region (above status bar)
@@ -791,7 +820,8 @@ App::Layout App::compute_layout() const {
     float editor_y = tab_h;
     float editor_h = content_h - tab_h - term_h;
     if (editor_h < 0) editor_h = 0;
-    l.editor = {right_x, editor_y, right_w, editor_h};
+    l.editor = {act_x, editor_y, act_w, editor_h};
+    if (split_) l.editor2 = {oth_x, editor_y, oth_w, editor_h};
 
     return l;
 }
@@ -943,6 +973,11 @@ void App::update(float dt) {
     editor_view_.update(dt);
     status_bar_.update(dt);
 
+    if (split_) {
+        editor_view2_.set_editor(tab_bar2_.active_editor());
+        editor_view2_.update(dt);
+    }
+
     // Keep status bar in sync with current editor
     auto ed = tab_bar_.active_editor();
     status_bar_.set_editor(ed);
@@ -984,14 +1019,39 @@ void App::render() {
     if (sidebar_visible_) clipped(sidebar_panel(), layout.sidebar);
     clipped(tab_bar_, layout.tab_bar);
     renderer_.push_clip(layout.breadcrumbs);
-    render_breadcrumbs(ctx, layout.breadcrumbs);
+    render_breadcrumbs(ctx, layout.breadcrumbs, current_editor());
     renderer_.pop_clip();
     clipped(editor_view_, layout.editor);
+    if (split_) {
+        clipped(tab_bar2_, layout.tab_bar2);
+        auto other = tab_bar2_.active_editor();
+        renderer_.push_clip(layout.breadcrumbs2);
+        render_breadcrumbs(ctx, layout.breadcrumbs2, other.get());
+        renderer_.pop_clip();
+        // Same document in both groups: draw the other view with its own cursors/scroll.
+        bool shared = other && other == tab_bar_.active_editor();
+        ViewState saved;
+        if (shared) {
+            if (!other_state_) other_state_ = ViewState{other->cursors(), other->scroll_x(), other->scroll_y()};
+            saved = {other->cursors(), other->scroll_x(), other->scroll_y()};
+            other->cursors() = other_state_->cursors;
+            other->set_scroll(other_state_->sx, other_state_->sy);
+        }
+        clipped(editor_view2_, layout.editor2);
+        if (shared) {
+            other->cursors() = saved.cursors;
+            other->set_scroll(saved.sx, saved.sy);
+        }
+        Color div = theme_.border;
+        renderer_.add_rect({layout.group_split_x, 0, 1.0f, layout.editor.y + layout.editor.h}, div);
+    }
     if (terminal_visible_) clipped(terminal_, layout.terminal);
     clipped(status_bar_, layout.status_bar);
     if (Splitter sp = splitter_drag_ != Splitter::None ? splitter_drag_ : splitter_hover_; sp != Splitter::None) {
         Color c = theme_.accent;
-        if (sp == Splitter::Sidebar)
+        if (sp == Splitter::Groups)
+            renderer_.add_rect({layout.group_split_x - 1.0f, 0, 2.0f, layout.editor.y + layout.editor.h}, c);
+        else if (sp == Splitter::Sidebar)
             renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1.0f, 0, 2.0f, layout.status_bar.y}, c);
         else
             renderer_.add_rect({layout.terminal.x, layout.terminal.y - 1.0f, layout.terminal.w, 2.0f}, c);
@@ -1116,6 +1176,8 @@ App::Splitter App::splitter_at(float x, float y) const {
         return Splitter::Sidebar;
     if (terminal_visible_ && std::abs(y - l.terminal.y) <= GRAB && x >= l.terminal.x)
         return Splitter::Terminal;
+    if (split_ && std::abs(x - l.group_split_x) <= GRAB && y < l.editor.y + l.editor.h)
+        return Splitter::Groups;
     return Splitter::None;
 }
 
@@ -1126,7 +1188,8 @@ void App::update_cursor_shape(Splitter s) {
         cursor_ew_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
         cursor_ns_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
     }
-    SDL_SetCursor(s == Splitter::Sidebar ? cursor_ew_ : s == Splitter::Terminal ? cursor_ns_ : cursor_default_);
+    SDL_SetCursor(s == Splitter::Sidebar || s == Splitter::Groups ? cursor_ew_
+                  : s == Splitter::Terminal ? cursor_ns_ : cursor_default_);
 }
 
 std::vector<std::string> App::build_font_chain(const std::string& family) const {
@@ -1283,10 +1346,58 @@ bool App::restore_session() {
     return any;
 }
 
-void App::render_breadcrumbs(RenderContext& ctx, Rect r) {
+void App::split_editor() {
+    auto ed = tab_bar_.active_editor();
+    if (!ed) return;
+    if (split_) {
+        focus_group(!active_right_);
+        return;
+    }
+    split_ = true;
+    tab_bar2_ = TabBar{};
+    tab_bar2_.set_on_close_request([this](int i) { request_close_tab(i); });
+    tab_bar2_.add_tab(ed);
+    other_state_ = ViewState{ed->cursors(), ed->scroll_x(), ed->scroll_y()};
+    focus_group(true);
+}
+
+void App::focus_group(bool right) {
+    if (!split_ || right == active_right_) return;
+    auto a = tab_bar_.active_editor(), b = tab_bar2_.active_editor();
+    if (a && a == b) {  // same document: exchange per-view cursors and scroll
+        ViewState current{a->cursors(), a->scroll_x(), a->scroll_y()};
+        if (other_state_) {
+            a->cursors() = other_state_->cursors;
+            a->set_scroll(other_state_->sx, other_state_->sy);
+        }
+        other_state_ = current;
+    }
+    std::swap(tab_bar_, tab_bar2_);
+    std::swap(editor_view_, editor_view2_);
+    active_right_ = right;
+    editor_view2_.set_focused(false);
+    focus_editor();
+}
+
+void App::unsplit_if_empty() {
+    if (!split_) return;
+    if (tab_bar_.empty()) {  // keep the surviving group as the only one
+        std::swap(tab_bar_, tab_bar2_);
+        std::swap(editor_view_, editor_view2_);
+    }
+    if (!tab_bar2_.empty() && !tab_bar_.empty()) return;
+    split_ = false;
+    active_right_ = false;
+    other_state_.reset();
+    tab_bar2_ = TabBar{};
+    auto ed = tab_bar_.active_editor();
+    editor_view_.set_editor(ed);
+    status_bar_.set_editor(ed);
+}
+
+void App::render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed) {
     if (r.h <= 0) return;
     ctx.r->add_rect(r, theme_.bg);
-    Editor* ed = current_editor();
     if (!ed) return;
     float cw = font_.char_width();
     float base = r.y + (r.h - font_.line_height()) * 0.5f + font_.ascender();
@@ -1423,6 +1534,10 @@ void App::close_current_tab() {
 
 void App::close_tab_now(int idx) {
     tab_bar_.close_tab(idx);
+    if (split_ && tab_bar_.empty()) {
+        unsplit_if_empty();
+        return;
+    }
     if (tab_bar_.empty()) {
         new_file();
     } else {
@@ -1551,6 +1666,9 @@ void App::register_commands() {
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
     add("toggle_blame",            "Git: Toggle Inline Blame",  "");
+    add("split_editor",            "View: Split Editor",        "Ctrl+\\");
+    add("focus_group_1",           "View: Focus Left Editor Group", "Ctrl+1");
+    add("focus_group_2",           "View: Focus Right Editor Group", "Ctrl+2");
     add("toggle_minimap",          "View: Toggle Minimap",      "");
     add("toggle_breadcrumbs",      "View: Toggle Breadcrumbs",  "");
     add("toggle_animations",       "Preferences: Toggle Animations", "");
