@@ -2,6 +2,7 @@
 #include "ui/panel.h"
 #include "editor/editor.h"
 #include "ui/find_bar.h"
+#include "ui/completion_popup.h"
 #include <memory>
 
 namespace oh {
@@ -18,6 +19,8 @@ public:
     void toggle_blame() { show_blame_ = !show_blame_; }
     void open_find(bool replace) { if (editor_) find_.open(*editor_, replace); reveal_cursor(); }
     bool find_has_focus() const { return find_.has_input_focus(); }
+    void set_diagnostics(const std::vector<LSPDiagnostic>* d) { diagnostics_ = d; }
+    CompletionPopup& completion() { return completion_; }
     void reveal_cursor() {
         if (editor_) editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h, cached_char_w_, cached_line_h_);
     }
@@ -36,6 +39,10 @@ private:
     bool mouse_selecting_ = false;
     bool show_blame_ = true;
     FindBar find_;
+    CompletionPopup completion_;
+    const std::vector<LSPDiagnostic>* diagnostics_ = nullptr;
+    void render_diagnostics(RenderContext& ctx, Rect text_rect);
+    bool line_has_diagnostic(size_t line) const;
     void render_find_matches(RenderContext& ctx, Rect text_rect);
     float cached_line_h_ = 20.0f;
     float cached_char_w_ = 9.0f;

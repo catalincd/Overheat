@@ -385,6 +385,7 @@ void App::handle_event(const SDL_Event& e) {
             terminal_.handle_text(text);
         } else {
             editor_view_.handle_text(text);
+            lsp_maybe_complete(text, false);
         }
         break;
     }
@@ -569,6 +570,10 @@ void App::handle_command(const std::string& cmd) {
         remote_disconnect();
     } else if (cmd == "view_explorer") {
         show_sidebar_view(SidebarView::Explorer);
+    } else if (cmd == "trigger_suggest") {
+        lsp_maybe_complete("", true);
+    } else if (cmd == "goto_definition") {
+        lsp_goto_definition();
     } else if (cmd == "view_search") {
         show_sidebar_view(SidebarView::Search);
         search_.focus_input();
@@ -748,6 +753,7 @@ void App::select_theme() {
 }
 
 void App::update(float dt) {
+    lsp_update();
     poll_remote_connect();
     search_.tick(dt);
     if (search_job_.valid() && search_job_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
@@ -1102,6 +1108,8 @@ void App::register_commands() {
     add("remote_connect",          "Remote-SSH: Connect to Host...", "");
     add("remote_disconnect",       "Remote-SSH: Close Remote Connection", "");
     add("view_explorer",           "View: Explorer",            "Ctrl+Shift+E");
+    add("trigger_suggest",         "Trigger Suggest",           "Ctrl+Space");
+    add("goto_definition",         "Go to Definition",          "F12");
     add("view_search",             "Search: Find in Files",     "Ctrl+Shift+F");
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
@@ -1144,47 +1152,5 @@ void App::scan_project_files() {
 // ---------------------------------------------------------------------------
 // LSP helper
 // ---------------------------------------------------------------------------
-
-void App::setup_lsp_for_file(const fs::path& path) {
-    if (vfs_->is_remote()) return;  // language servers run locally only (for now)
-    if (lsp_.is_running()) {
-        // Notify of new file
-        auto ed = tab_bar_.active_editor();
-        if (ed) {
-            std::string lang = SyntaxHighlighter::detect_language(path);
-            lsp_.did_open(path, lang, ed->buffer().text());
-        }
-        return;
-    }
-
-    // Try to start an LSP server based on file type
-    std::string lang = SyntaxHighlighter::detect_language(path);
-    std::string lsp_cmd;
-    std::vector<std::string> lsp_args;
-
-    if (lang == "cpp" || lang == "c") {
-        lsp_cmd = "clangd";
-    } else if (lang == "python") {
-        lsp_cmd = "pylsp";
-    } else if (lang == "rust") {
-        lsp_cmd = "rust-analyzer";
-    } else if (lang == "typescript" || lang == "javascript") {
-        lsp_cmd = "typescript-language-server";
-        lsp_args = {"--stdio"};
-    } else if (lang == "go") {
-        lsp_cmd = "gopls";
-    }
-
-    if (!lsp_cmd.empty()) {
-        if (lsp_.start(lsp_cmd, lsp_args)) {
-            lsp_.initialize(project_root_);
-
-            auto ed = tab_bar_.active_editor();
-            if (ed) {
-                lsp_.did_open(path, lang, ed->buffer().text());
-            }
-        }
-    }
-}
 
 } // namespace oh

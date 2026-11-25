@@ -85,6 +85,12 @@ void StatusBar::render(RenderContext& ctx, Rect bounds) {
         }
         x += 18.0f;
     }
+    if (errors_ || warnings_) {
+        ctx.r->add_char(x, baseline, 0xEA87, errors_ ? th.error : th.status_fg, *ctx.font);
+        x = ctx.r->add_text(x + 2.0f * char_w, baseline, std::to_string(errors_), th.status_fg, *ctx.font);
+        ctx.r->add_char(x + char_w, baseline, 0xEA6C, warnings_ ? th.warning : th.status_fg, *ctx.font);
+        x = ctx.r->add_text(x + 3.0f * char_w, baseline, std::to_string(warnings_), th.status_fg, *ctx.font) + 18.0f;
+    }
     if (!message_.empty()) {
         ctx.r->add_text(x, baseline, message_, th.fg, *ctx.font);
     } else if (editor_) {

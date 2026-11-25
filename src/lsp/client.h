@@ -8,6 +8,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <unordered_map>
+#include <unordered_set>
+#include <optional>
 
 namespace oh {
 
@@ -42,6 +44,10 @@ public:
     bool start(const std::string& command, const std::vector<std::string>& args = {});
     void stop();
     bool is_running() const { return running_; }
+    // True when the server agreed to UTF-8 byte columns; otherwise columns are UTF-16 units.
+    bool utf8_positions() const { return utf8_positions_; }
+    bool is_open(const fs::path& path) const { return open_docs_.count(path.string()) != 0; }
+    void mark_open(const fs::path& path) { open_docs_.insert(path.string()); }
 
     // Lifecycle
     void initialize(const fs::path& root_uri);
@@ -85,6 +91,9 @@ private:
     std::mutex pending_mutex_;
     std::unordered_map<int, std::function<void(const std::string&)>> pending_requests_;
     DiagnosticsCallback on_diagnostics_;
+    std::atomic<bool> utf8_positions_{false};
+    std::unordered_map<std::string, int> versions_;  // document versions (UI thread only)
+    std::unordered_set<std::string> open_docs_;
 
     void send_message(const std::string& json);
     void send_request(const std::string& method, const std::string& params,

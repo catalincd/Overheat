@@ -60,10 +60,16 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     render_find_matches(ctx, text_rect);
     render_selections(ctx, text_rect);
     render_text(ctx, text_rect);
+    render_diagnostics(ctx, text_rect);
     render_blame(ctx, text_rect);
     render_cursors(ctx, text_rect);
     ctx.r->pop_clip();
     find_.render(ctx, bounds);
+    if (completion_.visible()) {
+        const Position& a = completion_.anchor();
+        std::string line = editor_->buffer().line_text(a.line);
+        completion_.render(ctx, col_x(line, a.col, text_rect), row_y(a.line, text_rect), cached_line_h_, bounds);
+    }
 }
 
 void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
@@ -223,6 +229,50 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
     }
 }
 
+bool EditorView::line_has_diagnostic(size_t line) const {
+    if (!diagnostics_) return false;
+    for (auto& d : *diagnostics_)
+        if (d.start.line == line) return true;
+    return false;
+}
+
+void EditorView::render_diagnostics(RenderContext& ctx, Rect text_rect) {
+    if (!diagnostics_ || diagnostics_->empty()) return;
+    auto& buf = editor_->buffer();
+    auto [first, end] = visible_lines(text_rect);
+    auto color_of = [&](int sev) {
+        return sev == 1 ? ctx.theme->error : sev == 2 ? ctx.theme->warning : ctx.theme->info;
+    };
+    std::vector<const LSPDiagnostic*> worst(end - first, nullptr);  // per visible line, most severe
+    for (const LSPDiagnostic& d : *diagnostics_) {
+        if (d.end.line < first || d.start.line >= end) continue;
+        for (size_t line = std::max(d.start.line, first); line <= d.end.line && line < end; line++) {
+            std::string text = buf.line_text(line);
+            size_t c0 = line == d.start.line ? std::min(d.start.col, text.size()) : 0;
+            size_t c1 = line == d.end.line ? std::min(d.end.col, text.size()) : text.size();
+            float x0 = col_x(text, c0, text_rect);
+            float x1 = std::max(col_x(text, c1, text_rect), x0 + cached_char_w_);
+            float y = row_y(line, text_rect) + cached_line_h_ - 5.0f;
+            ctx.r->add_squiggle({x0, y, x1 - x0, 5.0f}, color_of(d.severity), 1.2f, 6.0f, 1.2f);
+        }
+        if (d.start.line >= first) {
+            auto& slot = worst[d.start.line - first];
+            if (!slot || d.severity < slot->severity) slot = &d;
+        }
+    }
+    // Message after the end of the line (Error Lens style), first line of the text only.
+    for (size_t i = 0; i < worst.size(); i++) {
+        if (!worst[i]) continue;
+        size_t line = first + i;
+        std::string text = buf.line_text(line);
+        std::string msg = worst[i]->message.substr(0, worst[i]->message.find('\n'));
+        Color c = color_of(worst[i]->severity);
+        c.a *= 0.85f;
+        float x = col_x(text, text.size(), text_rect) + cached_char_w_ * 4.0f;
+        ctx.r->add_text(x, row_y(line, text_rect) + ctx.font->ascender(), msg, c, *ctx.font);
+    }
+}
+
 static std::string relative_time(int64_t when) {
     int64_t d = static_cast<int64_t>(std::time(nullptr)) - when;
     auto fmt = [](int64_t n, const char* unit) {
@@ -239,6 +289,7 @@ static std::string relative_time(int64_t when) {
 void EditorView::render_blame(RenderContext& ctx, Rect text_rect) {
     if (!show_blame_ || editor_->cursors().selections().size() != 1) return;
     size_t line = editor_->cursors().primary_pos().line;
+    if (line_has_diagnostic(line)) return;  // the diagnostic message owns the line end
     auto [first, end] = visible_lines(text_rect);
     if (line < first || line >= end) return;
     bool uncommitted = false;
@@ -306,6 +357,10 @@ Position EditorView::position_at(float x, float y) const {
 
 bool EditorView::handle_key(const KeyEvent& e) {
     if (!editor_ || !e.pressed) return false;
+    if (completion_.handle_key(*editor_, e)) {
+        reveal_cursor();
+        return true;
+    }
     if (find_.handle_key(*editor_, e)) {
         reveal_cursor();
         return true;
@@ -388,6 +443,7 @@ bool EditorView::handle_key(const KeyEvent& e) {
     }
 
     if (nav_handled) {
+        completion_.refilter(*editor_);
         editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_, bounds_.h,
                                   cached_char_w_, cached_line_h_);
         return true;
@@ -425,10 +481,12 @@ bool EditorView::handle_key(const KeyEvent& e) {
 
 bool EditorView::handle_mouse(const MouseEvent& e) {
     if (!editor_) return false;
+    if (completion_.handle_mouse(*editor_, e)) return true;
     if (find_.handle_mouse(*editor_, e)) {
         reveal_cursor();
         return true;
     }
+    if (e.button == 1 && e.pressed) completion_.hide();
     if (e.button == 1 && e.pressed && !e.motion) find_.blur();
     if (!bounds_.contains(e.x, e.y) && !mouse_selecting_) return false;
 

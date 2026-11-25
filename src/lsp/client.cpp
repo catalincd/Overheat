@@ -1,4 +1,5 @@
 #include "lsp/client.h"
+#include <cstdlib>
 #include <cerrno>
 #include <unistd.h>
 #include <signal.h>
@@ -51,6 +52,34 @@ static std::string find_string_value(const std::string& json, const std::string&
             if (next == 'n') { result += '\n'; pos += 2; continue; }
             if (next == 'r') { result += '\r'; pos += 2; continue; }
             if (next == 't') { result += '\t'; pos += 2; continue; }
+            if (next == 'u' && pos + 5 < json.size()) {
+                auto hex4 = [&](size_t at) {
+                    return static_cast<uint32_t>(std::strtoul(json.substr(at, 4).c_str(), nullptr, 16));
+                };
+                uint32_t cp = hex4(pos + 2);
+                pos += 6;
+                if (cp >= 0xD800 && cp < 0xDC00 && pos + 5 < json.size() && json[pos] == '\\' &&
+                    json[pos + 1] == 'u') {
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (hex4(pos + 2) - 0xDC00);  // surrogate pair
+                    pos += 6;
+                }
+                if (cp < 0x80) {
+                    result += static_cast<char>(cp);
+                } else if (cp < 0x800) {
+                    result += static_cast<char>(0xC0 | (cp >> 6));
+                    result += static_cast<char>(0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    result += static_cast<char>(0xE0 | (cp >> 12));
+                    result += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                    result += static_cast<char>(0x80 | (cp & 0x3F));
+                } else {
+                    result += static_cast<char>(0xF0 | (cp >> 18));
+                    result += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+                    result += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                    result += static_cast<char>(0x80 | (cp & 0x3F));
+                }
+                continue;
+            }
             result += next; pos += 2; continue;
         }
         if (c == '"') break;
@@ -529,8 +558,10 @@ void LSPClient::initialize(const fs::path& root_uri) {
         "{\"processId\":" + std::to_string(getpid()) +
         ",\"rootUri\":\"" + escape_json(uri) + "\""
         ",\"capabilities\":{"
+            "\"general\":{\"positionEncodings\":[\"utf-8\",\"utf-16\"]},"
             "\"textDocument\":{"
                 "\"synchronization\":{\"didSave\":true,\"didOpen\":true,\"didClose\":true},"
+                "\"publishDiagnostics\":{},"
                 "\"completion\":{\"completionItem\":{\"snippetSupport\":false}},"
                 "\"hover\":{},"
                 "\"definition\":{},"
@@ -538,7 +569,9 @@ void LSPClient::initialize(const fs::path& root_uri) {
             "}"
         "}}";
 
-    send_request("initialize", params, [this](const std::string& /*response*/) {
+    send_request("initialize", params, [this](const std::string& response) {
+        // LSP 3.17 position encoding negotiation; servers that ignore it use UTF-16.
+        utf8_positions_ = find_string_value(response, "positionEncoding") == "utf-8";
         send_notification("initialized", "{}");
     });
 }
@@ -550,7 +583,7 @@ void LSPClient::did_open(const fs::path& path, const std::string& language, cons
         "{\"textDocument\":{"
             "\"uri\":\"" + escape_json(uri) + "\","
             "\"languageId\":\"" + escape_json(language) + "\","
-            "\"version\":1,"
+            "\"version\":" + std::to_string(versions_[uri] = 1) + ","
             "\"text\":\"" + escaped_text + "\""
         "}}";
     send_notification("textDocument/didOpen", params);
@@ -562,7 +595,7 @@ void LSPClient::did_change(const fs::path& path, const std::string& text) {
     std::string params =
         "{\"textDocument\":{"
             "\"uri\":\"" + escape_json(uri) + "\","
-            "\"version\":1"
+            "\"version\":" + std::to_string(++versions_[uri]) +
         "},\"contentChanges\":[{\"text\":\"" + escaped_text + "\"}]}";
     send_notification("textDocument/didChange", params);
 }

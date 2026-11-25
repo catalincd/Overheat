@@ -27,6 +27,8 @@ void KeyMap::init_defaults() {
     bind(SDLK_E,     KeyMod::Ctrl | KeyMod::Shift,      "view_explorer");
     bind(SDLK_G,     KeyMod::Ctrl | KeyMod::Shift,      "view_scm");
     bind(SDLK_F,     KeyMod::Ctrl | KeyMod::Shift,      "view_search");
+    bind(SDLK_SPACE, KeyMod::Ctrl,                      "trigger_suggest");
+    bind(SDLK_F12,   KeyMod::None,                      "goto_definition");
 
     // Undo/redo
     bind(SDLK_Z,     KeyMod::Ctrl,                      "undo");

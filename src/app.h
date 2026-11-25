@@ -107,6 +107,19 @@ private:
     void open_remote_folder(const fs::path& path);
     void remote_disconnect();
     LSPClient lsp_;
+    std::string lsp_server_;
+    std::mutex lsp_mutex_;
+    std::vector<std::function<void()>> lsp_tasks_;
+    std::unordered_map<std::string, std::vector<LSPDiagnostic>> diagnostics_;
+    struct LspDoc { uint64_t version = 0; TimePoint changed{}; uint64_t sent = 0; };
+    std::unordered_map<std::string, LspDoc> lsp_docs_;
+    uint64_t completion_request_ = 0;
+    void lsp_post(std::function<void()> fn);
+    void lsp_update();
+    void lsp_maybe_complete(const std::string& typed, bool manual);
+    void lsp_goto_definition();
+    size_t lsp_col_to_byte(const fs::path& path, size_t line, size_t col);
+    Position lsp_position(Editor& ed);
     PluginManager plugins_;
 
     ScriptRunner script_;

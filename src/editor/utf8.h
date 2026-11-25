@@ -45,4 +45,21 @@ inline size_t byte_col_at(const std::string& s, size_t dcol) {
     return i;
 }
 
+// LSP's default position unit is UTF-16 code units; these convert per line.
+inline size_t utf16_col(const std::string& s, size_t byte_col) {
+    size_t u = 0;
+    for (size_t i = 0; i < byte_col && i < s.size(); i = next_boundary(s, i))
+        u += (static_cast<unsigned char>(s[i]) >= 0xF0) ? 2 : 1;  // astral planes take a surrogate pair
+    return u;
+}
+
+inline size_t byte_col_from_utf16(const std::string& s, size_t u16) {
+    size_t u = 0, i = 0;
+    while (i < s.size() && u < u16) {
+        u += (static_cast<unsigned char>(s[i]) >= 0xF0) ? 2 : 1;
+        i = next_boundary(s, i);
+    }
+    return i;
+}
+
 } // namespace oh::utf8

@@ -59,6 +59,7 @@ set(OVERHEAT_SOURCES
     src/ui/scm_panel.cpp
     src/ui/find_bar.cpp
     src/ui/search_panel.cpp
+    src/ui/completion_popup.cpp
     src/search.cpp
     src/git/repository.cpp
     src/ssh/session.cpp
@@ -70,6 +71,7 @@ set(OVERHEAT_SOURCES
     src/theme.cpp
     src/vfs.cpp
     src/remote.cpp
+    src/lsp_glue.cpp
 )
 
 add_executable(overheat ${OVERHEAT_SOURCES})
