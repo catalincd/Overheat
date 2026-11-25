@@ -40,6 +40,10 @@ public:
     void save_as();
     void new_file();
     void close_current_tab();
+    void request_close_tab(int idx);
+    void close_tab_now(int idx);
+    // Runs `then` once unsaved editors are saved or explicitly discarded.
+    void confirm_discard(const std::string& action, std::function<void()> then);
     void set_status_message(const std::string& msg, float seconds = 3.0f);
     Editor* current_editor();
 

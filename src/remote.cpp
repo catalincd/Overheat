@@ -88,9 +88,12 @@ void App::poll_remote_connect() {
         opts.on_pick = [this, home](int, const std::string& query) {
             fs::path p = query.empty() ? fs::path(home) : fs::path(query);
             if (p.is_relative()) p = fs::path(home) / p;
-            open_remote_folder(p.lexically_normal());
+            confirm_discard("Open Remote Folder", [this, p] { open_remote_folder(p.lexically_normal()); });
         };
-        opts.on_cancel = [this] { open_remote_folder(ssh_.home_dir()); };
+        opts.on_cancel = [this] {
+            std::string home = ssh_.home_dir();
+            confirm_discard("Open Remote Folder", [this, home] { open_remote_folder(home); });
+        };
         command_palette_.pick(std::move(opts));
         break;
     }

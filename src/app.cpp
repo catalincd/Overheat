@@ -146,6 +146,7 @@ bool App::init(int argc, char** argv) {
     file_tree_.set_on_open([this](const fs::path& p) { open_file(p); });
     setup_scm();
     setup_search();
+    tab_bar_.set_on_close_request([this](int i) { request_close_tab(i); });
 
     // ---- Terminal ----
     terminal_.spawn({}, project_root_);
@@ -307,7 +308,8 @@ void App::handle_event(const SDL_Event& e) {
     switch (e.type) {
 
     case SDL_EVENT_QUIT:
-        quit();
+        if (script_.active()) quit();  // test runs never block on prompts
+        else confirm_discard("Quit", [this] { quit(); });
         break;
 
     case SDL_EVENT_CLIPBOARD_UPDATE:
@@ -567,7 +569,7 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "remote_connect") {
         remote_connect_prompt();
     } else if (cmd == "remote_disconnect") {
-        remote_disconnect();
+        confirm_discard("Disconnect", [this] { remote_disconnect(); });
     } else if (cmd == "view_explorer") {
         show_sidebar_view(SidebarView::Explorer);
     } else if (cmd == "trigger_suggest") {
@@ -586,7 +588,7 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "select_theme") {
         select_theme();
     } else if (cmd == "quit") {
-        quit();
+        confirm_discard("Quit", [this] { quit(); });
     }
 }
 
@@ -1041,20 +1043,76 @@ void App::setup_scm() {
 }
 
 void App::close_current_tab() {
-    int idx = tab_bar_.active_index();
-    if (idx < 0) return;
+    if (tab_bar_.active_index() >= 0) request_close_tab(tab_bar_.active_index());
+}
 
-    // TODO: prompt to save if modified
+void App::close_tab_now(int idx) {
     tab_bar_.close_tab(idx);
-
     if (tab_bar_.empty()) {
         new_file();
     } else {
-        int new_active = tab_bar_.active_index();
         auto ed = tab_bar_.active_editor();
         editor_view_.set_editor(ed);
         status_bar_.set_editor(ed);
     }
+}
+
+void App::request_close_tab(int idx) {
+    if (idx < 0 || idx >= static_cast<int>(tab_bar_.tabs().size())) return;
+    auto ed = tab_bar_.tabs()[static_cast<size_t>(idx)].editor;
+    if (!ed || !ed->is_modified()) {
+        close_tab_now(idx);
+        return;
+    }
+    std::string name = ed->buffer().file_path().empty() ? "Untitled" : ed->buffer().file_path().filename().string();
+    CommandPalette::PickOptions opts;
+    opts.placeholder = "Save changes to " + name + " before closing?";
+    opts.items = {"Save", "Don't Save", "Cancel"};
+    opts.on_pick = [this, ed](int choice, const std::string&) {
+        // Find the tab again: the list may have changed while the prompt was open.
+        int idx = -1;
+        for (size_t i = 0; i < tab_bar_.tabs().size(); i++)
+            if (tab_bar_.tabs()[i].editor == ed) idx = static_cast<int>(i);
+        if (idx < 0 || choice == 2 || choice < 0) return;
+        if (choice == 0) {
+            tab_bar_.set_active(idx);
+            editor_view_.set_editor(ed);
+            if (ed->buffer().file_path().empty()) { save_as(); return; }  // closes after a later save
+            save_current();
+            if (ed->is_modified()) return;  // save failed; keep the tab
+        }
+        close_tab_now(idx);
+    };
+    command_palette_.pick(std::move(opts));
+}
+
+void App::confirm_discard(const std::string& action, std::function<void()> then) {
+    std::vector<std::shared_ptr<Editor>> dirty;
+    for (auto& t : tab_bar_.tabs())
+        if (t.editor && t.editor->is_modified()) dirty.push_back(t.editor);
+    if (dirty.empty()) {
+        then();
+        return;
+    }
+    CommandPalette::PickOptions opts;
+    opts.placeholder = std::to_string(dirty.size()) + " unsaved file(s). " + action + "?";
+    opts.items = {"Save All and " + action, action + " Without Saving", "Cancel"};
+    opts.on_pick = [this, dirty, then](int choice, const std::string&) {
+        if (choice == 0) {
+            for (auto& ed : dirty) {
+                if (ed->buffer().file_path().empty()) continue;  // untitled: nowhere to save
+                if (!vfs_->write(ed->buffer().file_path(), ed->buffer().text())) {
+                    set_status_message("Save FAILED: " + ed->buffer().file_path().string(), 8.0f);
+                    return;
+                }
+                ed->buffer().set_unmodified();
+            }
+            then();
+        } else if (choice == 1) {
+            then();
+        }
+    };
+    command_palette_.pick(std::move(opts));
 }
 
 void App::set_status_message(const std::string& msg, float seconds) {

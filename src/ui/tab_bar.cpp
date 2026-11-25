@@ -109,7 +109,10 @@ bool TabBar::handle_mouse(const MouseEvent& e) {
         float w = tab_width(tabs_[i]);
         if (e.x >= x && e.x < x + w) {
             bool on_close = e.x >= x + w - PAD - CLOSE_W;
-            if (e.button == 2 || (e.button == 1 && on_close)) close_tab(static_cast<int>(i));
+            if (e.button == 2 || (e.button == 1 && on_close)) {
+                if (on_close_request_) on_close_request_(static_cast<int>(i));
+                else close_tab(static_cast<int>(i));
+            }
             else if (e.button == 1) set_active(static_cast<int>(i));
             return true;
         }

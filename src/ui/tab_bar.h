@@ -31,7 +31,11 @@ public:
     void render(RenderContext& ctx, Rect bounds) override;
     bool handle_mouse(const MouseEvent& e) override;
 
+    // When set, close clicks ask the host (to confirm unsaved changes) instead of closing.
+    void set_on_close_request(std::function<void(int)> cb) { on_close_request_ = std::move(cb); }
+
 private:
+    std::function<void(int)> on_close_request_;
     static constexpr float PAD = 14.0f;
     static constexpr float CLOSE_W = 16.0f;
     float char_w_ = 9.0f;
