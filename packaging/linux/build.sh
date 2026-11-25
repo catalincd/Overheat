@@ -40,11 +40,11 @@ Version: $VER
 Section: editors
 Priority: optional
 Architecture: amd64
-Maintainer: Overheat developers <overheat@localhost>
+Maintainer: catalincd <https://github.com/catalincd>
 Depends: libc6 (>= $GLIBC), libvulkan1, libfontconfig1, mesa-vulkan-drivers | vulkan-icd
 Recommends: git, openssh-client, clangd
 Installed-Size: $(du -sk "$DEB/usr" | cut -f1)
-Homepage: https://localhost/overheat
+Homepage: https://github.com/catalincd/Overheat
 Description: Fast GPU-accelerated code editor
  Overheat is a Vulkan-rendered code editor with tree-sitter highlighting,
  LSP support, an integrated terminal, Git integration and Remote-SSH.

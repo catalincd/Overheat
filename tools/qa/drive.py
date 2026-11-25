@@ -40,7 +40,7 @@ subprocess.run(["hyprctl", "eval", "hl.window_rule({ name = 'overheat-qa', match
                 "workspace = 'special:ohqa silent', no_initial_focus = true, float = true })"], capture_output=True)
 if app_capture:
     extra = ["--shot-dir", os.path.abspath(outdir), *extra]
-proc = subprocess.Popen([binary, "--script", script, *extra], cwd=root, env=env,
+proc = subprocess.Popen([binary, "--script", script, *extra], cwd=os.environ.get("QA_CWD", root), env=env,
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 win = None
 for _ in range(100):
