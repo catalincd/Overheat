@@ -1,4 +1,5 @@
 #include "editor/editor.h"
+#include "vfs.h"
 #include "editor/utf8.h"
 #include <algorithm>
 #include <sstream>
@@ -8,7 +9,14 @@ namespace oh {
 Editor::Editor() = default;
 
 void Editor::load_file(const fs::path& path) {
-    buffer_.load_file(path);
+    std::string content;
+    LocalVfs().read(path, content);
+    load_content(path, content);
+}
+
+void Editor::load_content(const fs::path& path, const std::string& content) {
+    buffer_.load_string(content);
+    buffer_.set_file_path(path);
     cursors_.set_primary({0, 0});
     scroll_x_ = 0;
     scroll_y_ = 0;
@@ -804,6 +812,7 @@ const std::vector<GutterMark>& Editor::git_marks() {
 
 const GitBlame* Editor::blame_for_line(size_t line, bool& uncommitted) {
     uncommitted = false;
+    if (!git_base_ && !blame_job_.valid()) return nullptr;  // untracked, remote or untitled
     if (blame_job_.valid() && blame_job_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         auto raw = blame_job_.get();
         blame_.clear();
@@ -834,7 +843,7 @@ void Editor::reload() {
     Position cur = cursors_.primary_pos();
     float sx = scroll_x_, sy = scroll_y_;
     fs::path path = buffer_.file_path();
-    load_file(path);
+    load_file(path);  // reload is for local files (git checkout); remote editors are not reloaded
     size_t line = std::min(cur.line, buffer_.line_count() - 1);
     cursors_.set_primary({line, std::min(cur.col, buffer_.line_length(line))});
     scroll_x_ = sx;

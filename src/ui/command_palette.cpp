@@ -186,6 +186,11 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
     float text_x = input_rect.x + 10.0f;
     float baseline = input_rect.y + (input_h - line_h) * 0.5f + ctx.font->ascender();
     std::string shown = prefix + query_;
+    if (mode_ == Mode::Pick && pick_.password) {
+        shown.clear();
+        for (unsigned char c : query_)
+            if ((c & 0xC0) != 0x80) shown += "\u2022";
+    }
     if (query_.empty() && mode_ == Mode::Pick && !pick_.placeholder.empty()) {
         ctx.r->add_text(text_x, baseline, pick_.placeholder, th.fg_muted, *ctx.font);
     } else if (query_.empty() && mode_ == Mode::Files) {

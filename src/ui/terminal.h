@@ -33,7 +33,8 @@ public:
     Terminal();
     ~Terminal();
 
-    bool spawn(const std::string& shell = "");
+    // Empty argv runs $SHELL. cwd empty = inherit.
+    bool spawn(const std::vector<std::string>& argv = {}, const fs::path& cwd = {});
     void kill();
     bool is_alive() const { return alive_; }
 
@@ -78,6 +79,8 @@ private:
     void process_char(char c);
     void put_codepoint(uint32_t cp);
     bool bracketed_paste_ = false;
+    int saved_x_ = 0, saved_y_ = 0;
+    uint32_t saved_fg_ = termcolor::DEFAULT, saved_bg_ = termcolor::DEFAULT;
     uint32_t utf8_cp_ = 0;
     int utf8_remaining_ = 0;
     void process_csi(char final_char);

@@ -1,6 +1,7 @@
 #pragma once
 #include "types.h"
 #include <libssh2.h>
+#include <libssh2_sftp.h>
 #include <string>
 #include <vector>
 #include <functional>
@@ -15,21 +16,33 @@ struct SSHConfig {
     int port = 22;
     std::string user;
     std::string password;
-    std::string key_path;
+    std::string key_path;                  // legacy single key; prefer identity_files
+    std::vector<std::string> identity_files;
     std::string key_passphrase;
+    std::string known_hosts;               // OpenSSH known_hosts file to verify against
+    bool trust_new_host = false;           // add an unknown host key (after user consent)
 };
+
+enum class SSHConnectStatus { Ok, NetworkError, HostUnknown, HostChanged, AuthFailed };
 
 class SSHSession {
 public:
     SSHSession();
     ~SSHSession();
 
-    bool connect(const SSHConfig& config);
+    // Blocking; run off the UI thread. On HostUnknown, host_fingerprint() holds the
+    // SHA256 fingerprint to show the user before retrying with trust_new_host.
+    SSHConnectStatus connect(const SSHConfig& config);
+    const std::string& last_error() const { return last_error_; }
+    const std::string& host_fingerprint() const { return host_fingerprint_; }
+    bool needs_passphrase() const { return needs_passphrase_; }
+    // Remote absolute path of the login directory (SFTP realpath of ".").
+    std::string home_dir();
     void disconnect();
     bool is_connected() const { return connected_; }
 
     // Remote file operations
-    std::string read_file(const std::string& remote_path);
+    bool read_file(const std::string& remote_path, std::string& out);
     bool write_file(const std::string& remote_path, const std::string& content);
     std::vector<FileEntry> list_dir(const std::string& remote_path);
     bool file_exists(const std::string& remote_path);
@@ -58,6 +71,8 @@ public:
 
 private:
     LIBSSH2_SESSION* session_ = nullptr;
+    LIBSSH2_SFTP* sftp_ = nullptr;  // one SFTP channel for the connection
+    LIBSSH2_SFTP* sftp();
     LIBSSH2_CHANNEL* shell_channel_ = nullptr;
     int sock_ = -1;
     bool connected_ = false;
@@ -68,6 +83,11 @@ private:
     OutputCallback shell_callback_;
 
     bool authenticate();
+    SSHConnectStatus verify_host_key();
+    void teardown();
+    std::string last_error_;
+    std::string host_fingerprint_;
+    bool needs_passphrase_ = false;
 };
 
 } // namespace oh

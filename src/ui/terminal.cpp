@@ -32,8 +32,16 @@ Terminal::~Terminal() {
 // PTY spawning
 // ---------------------------------------------------------------------------
 
-bool Terminal::spawn(const std::string& shell) {
-    if (alive_) return false;
+bool Terminal::spawn(const std::vector<std::string>& argv, const fs::path& cwd) {
+    kill();  // also reaps a previous session that ended by itself
+    {
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        for (auto& row : screen_) std::fill(row.begin(), row.end(), TermCell{});
+        cursor_x_ = cursor_y_ = 0;
+        current_fg_ = current_bg_ = termcolor::DEFAULT;
+        parse_state_ = ParseState::Normal;
+        bracketed_paste_ = false;
+    }
 
     struct winsize ws{};
     ws.ws_row = static_cast<unsigned short>(rows_);
@@ -43,16 +51,18 @@ bool Terminal::spawn(const std::string& shell) {
     if (pid < 0) return false;
 
     if (pid == 0) {
-        // Child process
-        const char* sh = nullptr;
-        if (!shell.empty()) {
-            sh = shell.c_str();
-        } else {
-            sh = std::getenv("SHELL");
-            if (!sh) sh = "/bin/bash";
-        }
         setenv("TERM", "xterm-256color", 1);
-        execlp(sh, sh, nullptr);
+        if (!cwd.empty() && chdir(cwd.c_str()) != 0) {}
+        if (argv.empty()) {
+            const char* sh = std::getenv("SHELL");
+            if (!sh) sh = "/bin/bash";
+            execlp(sh, sh, nullptr);
+        } else {
+            std::vector<char*> args;
+            for (auto& a : argv) args.push_back(const_cast<char*>(a.c_str()));
+            args.push_back(nullptr);
+            execvp(args[0], args.data());
+        }
         _exit(127);
     }
 
@@ -96,21 +106,17 @@ bool Terminal::spawn(const std::string& shell) {
 }
 
 void Terminal::kill() {
-    if (!alive_ && master_fd_ < 0) return;
-
     alive_ = false;
-
     if (child_pid_ > 0) {
         ::kill(child_pid_, SIGHUP);
-        waitpid(child_pid_, nullptr, WNOHANG);
+        waitpid(child_pid_, nullptr, 0);
         child_pid_ = -1;
     }
+    // Join before closing: the reader must not touch a closed (or reused) fd.
+    if (reader_thread_.joinable()) reader_thread_.join();
     if (master_fd_ >= 0) {
         ::close(master_fd_);
         master_fd_ = -1;
-    }
-    if (reader_thread_.joinable()) {
-        reader_thread_.join();
     }
 }
 
@@ -188,6 +194,7 @@ void Terminal::update(float /*dt*/) {
         pid_t result = waitpid(child_pid_, &status, WNOHANG);
         if (result > 0) {
             alive_ = false;
+            child_pid_ = -1;  // reaped: never signal this pid again (it may be reused)
         }
     }
 }
@@ -335,12 +342,17 @@ void Terminal::process_char(char c) {
             for (int y = 0; y < rows_; ++y)
                 clear_line(y);
             parse_state_ = ParseState::Normal;
-        } else if (uc == '7') {
-            // Save cursor (we save position only)
-            // Using csi_params_ as temp storage is hacky; keep it simple
+        } else if (uc == '7') {  // DECSC
+            saved_x_ = cursor_x_;
+            saved_y_ = cursor_y_;
+            saved_fg_ = current_fg_;
+            saved_bg_ = current_bg_;
             parse_state_ = ParseState::Normal;
-        } else if (uc == '8') {
-            // Restore cursor
+        } else if (uc == '8') {  // DECRC
+            cursor_x_ = std::clamp(saved_x_, 0, cols_ - 1);
+            cursor_y_ = std::clamp(saved_y_, 0, rows_ - 1);
+            current_fg_ = saved_fg_;
+            current_bg_ = saved_bg_;
             parse_state_ = ParseState::Normal;
         } else {
             // Unknown escape, ignore
@@ -364,8 +376,8 @@ void Terminal::process_char(char c) {
             // Handle title change: osc_data_ might be "0;title" or "2;title"
             parse_state_ = ParseState::Normal;
         } else if (uc == 0x1B) {
-            // Might be ST (ESC \) – peek would be needed; just end OSC
-            parse_state_ = ParseState::Normal;
+            // ST is ESC '\': the Escape state swallows the backslash.
+            parse_state_ = ParseState::Escape;
         } else {
             osc_data_ += static_cast<char>(uc);
         }

@@ -18,6 +18,7 @@ public:
         std::function<void(int index)> on_preview;
         std::function<void()> on_cancel;
         bool allow_free_text = false;
+        bool password = false;  // mask typed text
         int initial = 0;
     };
     void pick(PickOptions opts);

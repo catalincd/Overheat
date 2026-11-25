@@ -59,12 +59,14 @@ set(OVERHEAT_SOURCES
     src/ui/scm_panel.cpp
     src/git/repository.cpp
     src/ssh/session.cpp
+    src/ssh/ssh_config.cpp
     src/lsp/client.cpp
     src/plugin/api.cpp
     src/keys.cpp
     src/script.cpp
     src/theme.cpp
     src/vfs.cpp
+    src/remote.cpp
 )
 
 add_executable(overheat ${OVERHEAT_SOURCES})

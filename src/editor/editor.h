@@ -15,6 +15,7 @@ public:
     Editor();
 
     void load_file(const fs::path& path);
+    void load_content(const fs::path& path, const std::string& content);
     void save();
     void save_as(const fs::path& path);
     void new_file();

@@ -12,6 +12,7 @@
 #include "ui/scm_panel.h"
 #include "git/repository.h"
 #include "ssh/session.h"
+#include "ssh/ssh_config.h"
 #include "lsp/client.h"
 #include "plugin/api.h"
 #include "keys.h"
@@ -35,6 +36,7 @@ public:
     // Public API for plugins
     void open_file(const fs::path& path);
     void save_current();
+    void save_as();
     void new_file();
     void close_current_tab();
     void set_status_message(const std::string& msg, float seconds = 3.0f);
@@ -80,6 +82,16 @@ private:
     void git_checkout();
     void after_head_change();
     SSHSession ssh_;
+    SshConfig ssh_config_;
+    SshTarget remote_target_;
+    std::future<SSHConnectStatus> connect_job_;
+    bool remote_active_ = false;
+    fs::path local_root_;
+    void remote_connect_prompt();
+    void remote_connect(const std::string& target, bool trust_host, const std::string& secret);
+    void poll_remote_connect();
+    void open_remote_folder(const fs::path& path);
+    void remote_disconnect();
     LSPClient lsp_;
     PluginManager plugins_;
 

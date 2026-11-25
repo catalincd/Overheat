@@ -147,7 +147,7 @@ bool App::init(int argc, char** argv) {
     setup_scm();
 
     // ---- Terminal ----
-    terminal_.spawn();
+    terminal_.spawn({}, project_root_);
 
     // ---- Open files from command line, or create empty editor ----
     if (!file_args.empty()) {
@@ -465,8 +465,7 @@ void App::handle_command(const std::string& cmd) {
     if (cmd == "save") {
         save_current();
     } else if (cmd == "save_as") {
-        // TODO: file dialog
-        save_current();
+        save_as();
     } else if (cmd == "new_file") {
         new_file();
     } else if (cmd == "open_file") {
@@ -548,6 +547,10 @@ void App::handle_command(const std::string& cmd) {
         // TODO: adjust font size and reinit font atlas
     } else if (cmd == "zoom_out") {
         // TODO: adjust font size and reinit font atlas
+    } else if (cmd == "remote_connect") {
+        remote_connect_prompt();
+    } else if (cmd == "remote_disconnect") {
+        remote_disconnect();
     } else if (cmd == "view_explorer") {
         show_sidebar_view(SidebarView::Explorer);
     } else if (cmd == "view_scm") {
@@ -726,6 +729,7 @@ void App::select_theme() {
 }
 
 void App::update(float dt) {
+    poll_remote_connect();
     poll_git_refresh();
     git_poll_timer_ += dt;
     if (git_poll_timer_ > 3.0f) {
@@ -822,11 +826,22 @@ void App::open_file(const fs::path& path) {
         }
     }
 
+    std::string content;
+    if (!vfs_->read(path, content)) {
+        set_status_message("Cannot open " + path.string(), 6.0f);
+        return;
+    }
     auto editor = std::make_shared<Editor>();
-    editor->load_file(path);
-    attach_git(*editor);
+    editor->load_content(path, content);
+    if (!vfs_->is_remote()) attach_git(*editor);
 
+    // Replace a pristine "Untitled" tab instead of piling up empty tabs.
+    int replace = -1;
+    if (auto cur = tab_bar_.active_editor(); cur && cur->buffer().file_path().empty() &&
+                                              !cur->is_modified() && cur->buffer().length() == 0)
+        replace = tab_bar_.active_index();
     tab_bar_.add_tab(editor);
+    if (replace >= 0) tab_bar_.close_tab(replace);
     tab_bar_.set_active(static_cast<int>(tab_bar_.tabs().size()) - 1);
     editor_view_.set_editor(editor);
     status_bar_.set_editor(editor);
@@ -838,7 +853,15 @@ void App::open_file(const fs::path& path) {
 
 void App::save_current() {
     if (Editor* ed = current_editor()) {
-        ed->save();
+        if (ed->buffer().file_path().empty()) {
+            save_as();
+            return;
+        }
+        if (!vfs_->write(ed->buffer().file_path(), ed->buffer().text())) {
+            set_status_message("Save FAILED: " + ed->buffer().file_path().string(), 8.0f);
+            return;
+        }
+        ed->buffer().set_unmodified();
         set_status_message("Saved " + ed->buffer().file_path().filename().string());
         request_git_refresh();
 
@@ -847,6 +870,23 @@ void App::save_current() {
             lsp_.did_save(ed->buffer().file_path());
         }
     }
+}
+
+void App::save_as() {
+    Editor* ed = current_editor();
+    if (!ed) return;
+    CommandPalette::PickOptions opts;
+    opts.placeholder = "Save as (path relative to " + project_root_.string() + ")";
+    opts.allow_free_text = true;
+    opts.on_pick = [this](int, const std::string& query) {
+        Editor* ed = current_editor();
+        if (!ed || query.empty()) return;
+        fs::path p = fs::path(query).is_absolute() ? fs::path(query) : project_root_ / query;
+        ed->buffer().set_file_path(p.lexically_normal());
+        save_current();
+        file_tree_.refresh();
+    };
+    command_palette_.pick(std::move(opts));
 }
 
 void App::new_file() {
@@ -992,6 +1032,8 @@ void App::register_commands() {
     add("toggle_fullscreen",       "Toggle Fullscreen",         "F11");
     add("zoom_in",                 "Zoom In",                   "Ctrl++");
     add("zoom_out",                "Zoom Out",                  "Ctrl+-");
+    add("remote_connect",          "Remote-SSH: Connect to Host...", "");
+    add("remote_disconnect",       "Remote-SSH: Close Remote Connection", "");
     add("view_explorer",           "View: Explorer",            "Ctrl+Shift+E");
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
@@ -1006,35 +1048,28 @@ void App::register_commands() {
 
 void App::scan_project_files() {
     all_files_.clear();
-
     static const std::vector<std::string> skip_dirs = {
-        ".git", "node_modules", ".cache", "__pycache__", ".tox",
-        "build", "dist", ".idea", ".vscode", "target", ".eggs",
-        "vendor", "third_party", ".hg", ".svn"
-    };
-
-    std::function<void(const fs::path&)> scan = [&](const fs::path& dir) {
-        std::error_code ec;
-        for (auto& entry : fs::directory_iterator(dir, ec)) {
-            if (ec) break;
-            const auto& p = entry.path();
-            std::string name = p.filename().string();
-
+        "node_modules", "__pycache__", "build", "dist", "target", "vendor", "third_party"};
+    // Bounded so a huge (or remote) tree cannot stall startup.
+    const size_t max_files = vfs_->is_remote() ? 5000 : 50000;
+    auto deadline = Clock::now() + std::chrono::milliseconds(vfs_->is_remote() ? 2000 : 4000);
+    std::function<void(const fs::path&, int)> scan = [&](const fs::path& dir, int depth) {
+        if (depth > 16 || all_files_.size() >= max_files || Clock::now() > deadline) return;
+        std::vector<Vfs::DirEntry> items;
+        if (!vfs_->list(dir, items)) return;
+        for (auto& it : items) {
+            if (it.name.empty() || it.name[0] == '.') continue;
+            fs::path p = dir / it.name;
             if (git_.is_open() && git_.is_ignored(p)) continue;
-            if (entry.is_directory(ec)) {
-                if (std::find(skip_dirs.begin(), skip_dirs.end(), name) == skip_dirs.end()
-                    && name[0] != '.') {
-                    scan(p);
-                }
-            } else if (entry.is_regular_file(ec)) {
+            if (it.is_dir) {
+                if (std::find(skip_dirs.begin(), skip_dirs.end(), it.name) == skip_dirs.end()) scan(p, depth + 1);
+            } else {
                 all_files_.push_back(p);
+                if (all_files_.size() >= max_files) return;
             }
         }
     };
-
-    scan(project_root_);
-
-    // Sort for consistent ordering
+    scan(project_root_, 0);
     std::sort(all_files_.begin(), all_files_.end());
 }
 
@@ -1043,6 +1078,7 @@ void App::scan_project_files() {
 // ---------------------------------------------------------------------------
 
 void App::setup_lsp_for_file(const fs::path& path) {
+    if (vfs_->is_remote()) return;  // language servers run locally only (for now)
     if (lsp_.is_running()) {
         // Notify of new file
         auto ed = tab_bar_.active_editor();
