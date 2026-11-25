@@ -145,6 +145,7 @@ bool App::init(int argc, char** argv) {
     file_tree_.set_root(project_root_, vfs_.get());
     file_tree_.set_on_open([this](const fs::path& p) { open_file(p); });
     setup_scm();
+    setup_search();
 
     // ---- Terminal ----
     terminal_.spawn({}, project_root_);
@@ -327,10 +328,11 @@ void App::handle_event(const SDL_Event& e) {
             if (command_palette_.handle_key(ke)) break;
         }
 
-        // The commit message box takes typing keys before global bindings.
-        if (scm_.input_focused() && sidebar_visible_ && sidebar_view_ == SidebarView::SourceControl) {
+        // Sidebar text inputs (commit message, search) take typing keys before global bindings.
+        if (sidebar_visible_ && !command_palette_.is_visible()) {
             KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
-            if (scm_.handle_key(ke)) break;
+            if (sidebar_view_ == SidebarView::SourceControl && scm_.input_focused() && scm_.handle_key(ke)) break;
+            if (sidebar_view_ == SidebarView::Search && search_.input_focused() && search_.handle_key(ke)) break;
         }
 
         // Check keymap. While the terminal has focus, the shell owns the keyboard
@@ -377,6 +379,8 @@ void App::handle_event(const SDL_Event& e) {
             command_palette_.handle_text(text);
         } else if (scm_.input_focused()) {
             scm_.handle_text(text);
+        } else if (search_.input_focused()) {
+            search_.handle_text(text);
         } else if (terminal_.focused() && terminal_visible_) {
             terminal_.handle_text(text);
         } else {
@@ -400,8 +404,8 @@ void App::handle_event(const SDL_Event& e) {
             command_palette_.handle_mouse(me);
         } else if (layout.activity_bar.contains(mx, my)) {
             int slot = static_cast<int>((my - layout.activity_bar.y) / ACTIVITY_BAR_W);
-            SidebarView v = slot == 0 ? SidebarView::Explorer : SidebarView::SourceControl;
-            if (slot <= 1) {
+            SidebarView v = static_cast<SidebarView>(std::clamp(slot, 0, 2));
+            if (slot <= 2) {
                 if (sidebar_visible_ && v == sidebar_view_) sidebar_visible_ = false;
                 else show_sidebar_view(v);
             }
@@ -565,6 +569,9 @@ void App::handle_command(const std::string& cmd) {
         remote_disconnect();
     } else if (cmd == "view_explorer") {
         show_sidebar_view(SidebarView::Explorer);
+    } else if (cmd == "view_search") {
+        show_sidebar_view(SidebarView::Search);
+        search_.focus_input();
     } else if (cmd == "view_scm") {
         show_sidebar_view(SidebarView::SourceControl);
     } else if (cmd == "git_checkout") {
@@ -742,6 +749,14 @@ void App::select_theme() {
 
 void App::update(float dt) {
     poll_remote_connect();
+    search_.tick(dt);
+    if (search_job_.valid() && search_job_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        auto hits = search_job_.get();
+        if (!search_cancel_ || !search_cancel_->load()) {
+            bool truncated = hits.size() >= 20000;
+            search_.set_results(std::move(hits), truncated);
+        }
+    }
     poll_git_refresh();
     git_poll_timer_ += dt;
     if (git_poll_timer_ > 3.0f) {
@@ -914,7 +929,7 @@ void App::new_file() {
 void App::focus_editor() { focus(&editor_view_); }
 
 void App::focus(Panel* p) {
-    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_})
+    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_, &search_})
         q->set_focused(q == p);
 }
 
@@ -926,16 +941,16 @@ void App::show_sidebar_view(SidebarView v) {
 
 void App::render_activity_bar(RenderContext& ctx, Rect r) {
     ctx.r->add_rect(r, theme_.tab_bg);
-    const uint32_t icons[] = {0xEAF0, 0xEA68};
+    const uint32_t icons[] = {0xEAF0, 0xEA6D, 0xEA68};
     float cw = font_.char_width();
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         Rect slot{r.x, r.y + i * ACTIVITY_BAR_W, ACTIVITY_BAR_W, ACTIVITY_BAR_W};
         bool active = sidebar_visible_ && static_cast<int>(sidebar_view_) == i;
         if (active) ctx.r->add_rect({slot.x, slot.y + 10.0f, 2.0f, slot.h - 20.0f}, theme_.accent, 1.0f);
         float bx = slot.x + (slot.w - cw) * 0.5f;
         float by = slot.y + (slot.h - font_.line_height()) * 0.5f + font_.ascender();
         ctx.r->add_char(bx, by, icons[i], active ? theme_.fg : theme_.fg_muted, font_);
-        if (i == 1 && scm_.change_count() > 0) {
+        if (i == 2 && scm_.change_count() > 0) {
             std::string n = std::to_string(std::min<size_t>(scm_.change_count(), 99));
             float bw = std::max(16.0f, static_cast<float>(n.size()) * cw + 8.0f);
             Rect badge{slot.x + slot.w - bw - 6.0f, slot.y + slot.h - 22.0f, bw, 16.0f};
@@ -944,6 +959,45 @@ void App::render_activity_bar(RenderContext& ctx, Rect r) {
                             badge.y + (16.0f - font_.line_height()) * 0.5f + font_.ascender(), n,
                             theme_.tab_active_bg, font_);
         }
+    }
+}
+
+void App::setup_search() {
+    SearchPanel::Callbacks cb;
+    cb.run = [this](const SearchQuery& q) { run_search(q); };
+    cb.open = [this](const SearchHit& h) { open_at(h.file, h.line, h.col, h.len); };
+    search_.set_callbacks(std::move(cb));
+    search_.set_root(project_root_);
+}
+
+void App::run_search(const SearchQuery& q) {
+    if (search_cancel_) search_cancel_->store(true);
+    search_cancel_ = std::make_shared<std::atomic<bool>>(false);
+    if (q.text.empty()) {
+        search_.set_results({}, false);
+        return;
+    }
+    if (vfs_->is_remote()) {
+        auto hits = search_remote(q);  // runs on the SSH session; brief UI wait
+        bool truncated = hits.size() >= 20000;
+        search_.set_results(std::move(hits), truncated);
+        return;
+    }
+    search_job_ = std::async(std::launch::async, [files = all_files_, q, cancel = search_cancel_] {
+        auto hits = search_files(files, q, *cancel);
+        request_redraw();
+        return hits;
+    });
+}
+
+void App::open_at(const fs::path& path, size_t line, size_t col, size_t len) {
+    open_file(path);
+    if (Editor* ed = current_editor()) {
+        line = std::min(line, ed->buffer().line_count() - 1);
+        ed->cursors().set_primary({line, col});
+        ed->cursors().extend_primary({line, col + len});
+        focus_editor();
+        editor_view_.reveal_cursor();
     }
 }
 
@@ -1048,6 +1102,7 @@ void App::register_commands() {
     add("remote_connect",          "Remote-SSH: Connect to Host...", "");
     add("remote_disconnect",       "Remote-SSH: Close Remote Connection", "");
     add("view_explorer",           "View: Explorer",            "Ctrl+Shift+E");
+    add("view_search",             "Search: Find in Files",     "Ctrl+Shift+F");
     add("view_scm",                "View: Source Control",      "Ctrl+Shift+G");
     add("git_checkout",            "Git: Checkout to...",       "");
     add("toggle_blame",            "Git: Toggle Inline Blame",  "");

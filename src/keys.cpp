@@ -26,6 +26,7 @@ void KeyMap::init_defaults() {
     bind(SDLK_B,     KeyMod::Ctrl,                      "toggle_sidebar");
     bind(SDLK_E,     KeyMod::Ctrl | KeyMod::Shift,      "view_explorer");
     bind(SDLK_G,     KeyMod::Ctrl | KeyMod::Shift,      "view_scm");
+    bind(SDLK_F,     KeyMod::Ctrl | KeyMod::Shift,      "view_search");
 
     // Undo/redo
     bind(SDLK_Z,     KeyMod::Ctrl,                      "undo");

@@ -13,6 +13,29 @@ std::string shell_quote(const std::string& s) {
 }
 } // namespace
 
+std::vector<SearchHit> App::search_remote(const SearchQuery& q) {
+    std::string cmd = "grep -rnI --exclude-dir=.git -m 500 -F";
+    if (!q.case_sensitive) cmd += " -i";
+    if (q.whole_word) cmd += " -w";
+    cmd += " -e " + shell_quote(q.text) + " -- " + shell_quote(project_root_.string()) +
+           " 2>/dev/null | head -n 20000";
+    std::vector<SearchHit> hits;
+    std::string out = ssh_.exec(cmd).stdout_data;
+    size_t start = 0;
+    while (start < out.size()) {
+        size_t nl = out.find('\n', start);
+        std::string row = out.substr(start, (nl == std::string::npos ? out.size() : nl) - start);
+        start = nl == std::string::npos ? out.size() : nl + 1;
+        size_t c1 = row.find(':'), c2 = c1 == std::string::npos ? c1 : row.find(':', c1 + 1);
+        if (c2 == std::string::npos) continue;
+        std::string text = row.substr(c2 + 1);
+        size_t line = static_cast<size_t>(std::strtoul(row.c_str() + c1 + 1, nullptr, 10));
+        for (auto [col, len] : find_in_line(text, q))
+            hits.push_back({fs::path(row.substr(0, c1)), line ? line - 1 : 0, col, len, text.substr(0, 400)});
+    }
+    return hits;
+}
+
 void App::remote_connect_prompt() {
     ssh_config_.load(SshConfig::default_path());
     CommandPalette::PickOptions opts;
@@ -120,6 +143,7 @@ void App::open_remote_folder(const fs::path& path) {
     scan_project_files();
     command_palette_.set_root(project_root_);
     command_palette_.set_file_list(all_files_);
+    search_.set_root(project_root_);
     new_file();
 
     // Remote shell via the system ssh client, so agent, ProxyJump etc. just work.
@@ -150,6 +174,7 @@ void App::remote_disconnect() {
     scan_project_files();
     command_palette_.set_root(project_root_);
     command_palette_.set_file_list(all_files_);
+    search_.set_root(project_root_);
     terminal_.spawn({}, project_root_);
     new_file();
     if (git_.is_open()) {

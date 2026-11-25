@@ -10,6 +10,7 @@
 #include "ui/command_palette.h"
 #include "ui/editor_view.h"
 #include "ui/scm_panel.h"
+#include "ui/search_panel.h"
 #include "git/repository.h"
 #include "ssh/session.h"
 #include "ssh/ssh_config.h"
@@ -62,9 +63,22 @@ private:
     StatusBar status_bar_;
     CommandPalette command_palette_;
     ScmPanel scm_;
-    enum class SidebarView { Explorer, SourceControl };
+    SearchPanel search_;
+    enum class SidebarView { Explorer, Search, SourceControl };  // activity bar order
     SidebarView sidebar_view_ = SidebarView::Explorer;
-    Panel& sidebar_panel() { return sidebar_view_ == SidebarView::Explorer ? static_cast<Panel&>(file_tree_) : scm_; }
+    Panel& sidebar_panel() {
+        switch (sidebar_view_) {
+            case SidebarView::Search: return search_;
+            case SidebarView::SourceControl: return scm_;
+            default: return file_tree_;
+        }
+    }
+    std::future<std::vector<SearchHit>> search_job_;
+    std::shared_ptr<std::atomic<bool>> search_cancel_;
+    void setup_search();
+    void run_search(const SearchQuery& q);
+    std::vector<SearchHit> search_remote(const SearchQuery& q);
+    void open_at(const fs::path& path, size_t line, size_t col, size_t len);
     void focus(Panel* p);
     void show_sidebar_view(SidebarView v);
     void render_activity_bar(RenderContext& ctx, Rect r);
