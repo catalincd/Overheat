@@ -3,6 +3,51 @@
 Living list of what is next, known limitations, and ideas. Done items move to
 the git log; keep this file short and current.
 
+## C, C++ and Rust IDE core (next round)
+
+Goal: a complete edit → build → fix → debug loop for C, C++ and Rust, on the local machine
+first, then over Remote-SSH. Language servers: clangd (C/C++) and rust-analyzer (Rust).
+Builds: CMake, Make and Cargo. Debugging: gdb's built-in DAP (`gdb -i dap`, gdb >= 14)
+for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
+
+- [ ] **Build tasks:** auto-detect CMake (configure, build, presets), Make and Cargo
+  (build, run, test, check, clippy), plus a project task file and an import of
+  `.vscode/tasks.json`. Ctrl+Shift+B builds, F5 runs, and Run Task… lists the rest.
+  Output goes to a task terminal; Ctrl+Break cancels.
+- [ ] **Problem matchers and Problems panel:** parse gcc/clang (`file:line:col: error:`),
+  MSVC (`file(line,col): error`), CMake and rustc/cargo output (`--> file:line:col`, or
+  `--message-format=json`), including notes and "in expansion of" chains. A Problems panel
+  lists LSP diagnostics and build errors together, with severity filters; F8 /
+  Shift+F8 step through them, and the jump line highlights the location.
+- [ ] **Clickable `file:line:col`** in the terminal and task output (Ctrl+click), with
+  paths resolved against the task's cwd.
+- [ ] **Linting:** clang-tidy through clangd (`.clang-tidy`), `cargo clippy` as a task
+  with its own matcher, quick fixes / code actions (Ctrl+.) from both, and format on save
+  with clang-format / rustfmt (via the LSP).
+- [ ] **LSP navigation:** hover tooltips with a small markdown renderer; Ctrl+click and
+  hover-underline go-to-definition; Peek Definition (Alt+F12); Go to Declaration / Type
+  Definition / Implementation; Find All References with a peek view; rename (F2) with a
+  preview; document symbols (Ctrl+Shift+O) and workspace symbols (Ctrl+T); clangd's
+  switch header/source (Alt+O); inlay hints (parameter names, types) for rust-analyzer
+  and clangd; back/forward navigation history (Ctrl+Alt+- / Ctrl+Shift+-).
+- [ ] **Debugger (DAP):**
+  - launch and attach configurations: the CMake target or Cargo binary, args, env,
+    cwd; `.vscode/launch.json` import
+  - breakpoints (gutter click, F9), conditional breakpoints and logpoints
+  - stepping: continue (F5), step over/into/out (F10/F11/Shift+F11), restart, stop
+  - panels for call stack, threads, variables / watch with expandable structs and
+    pretty printers (libstdc++ and Rust's gdb printers), and a debug console
+  - inline values next to the code, and the current line highlighted
+  - Rust: `rust-gdb` printers; Rust panics break automatically
+- [ ] **Multibuffers** (Zed): references, search results and the Problems panel as one
+  editable list of excerpts (see "From the editor survey").
+- [ ] **Remote:** run clangd / rust-analyzer, builds and gdb on the Remote-SSH host
+  (stdio over an SSH channel), with path mapping between remote and local paths.
+- [ ] Tests: a small C, C++ (CMake) and Rust (Cargo) sample project in `tests/projects/`
+  driving all of the above in `--script` mode. On this machine clangd, clang-tidy, gdb 18,
+  cargo and rustc are installed; rust-analyzer and lldb-dap are not (install rust-analyzer
+  to test Rust LSP).
+
 ## Requested (2026-11-26)
 
 - [ ] **New logo/icon:** a flat but 3D-looking flame in the style of Obsidian's logo,
@@ -108,11 +153,6 @@ the git log; keep this file short and current.
 
 ## Next up
 
-- [ ] Hover tooltips (LSP `textDocument/hover`) with a small markdown renderer
-- [ ] Rename symbol (F2), format document / selection, organize imports
-- [ ] Document symbols (Ctrl+Shift+O) and workspace symbols (Ctrl+T)
-- [ ] Find all references with a peek view
-- [ ] Problems panel (diagnostics for all open files, click to jump)
 - [ ] Remote-SSH: git status/blame/commit over the SSH connection
 - [ ] Remote-SSH: run language servers on the remote host
 - [ ] Remote search without blocking the UI (dedicated SSH channel / thread)
