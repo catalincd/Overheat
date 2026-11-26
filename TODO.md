@@ -6,7 +6,6 @@ the git log; keep this file short and current.
 ## Requested (2026-11-26)
 
 - [ ] Full-featured status bar (keep reading `status.background`; Dark+/Light+ use a blue bar)
-- [ ] File-type icons in the explorer and tabs, like VS Code's but in our own style
 - [ ] **New logo/icon:** a flat but 3D-looking flame in the style of Obsidian's logo,
   centred, with no background. Keep the current colours, using contrast between them for
   shading. No drop light

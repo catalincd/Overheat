@@ -1,6 +1,7 @@
 #include "app.h"
 #include "platform/platform.h"
 #include "fonts.h"
+#include "ui/file_icons.h"
 #include <SDL3/SDL.h>
 #include <cmath>
 #include <fstream>
@@ -120,6 +121,7 @@ bool App::init(int argc, char** argv) {
     font_family_ = themes_.setting("font_family");
     anim::enabled = themes_.setting("animations") != "false";
     show_breadcrumbs_ = themes_.setting("breadcrumbs") != "false";
+    file_icons::style = file_icons::parse_style(themes_.setting("file_icons"));
     remote_monitor_ = themes_.setting("remote_monitor") != "false";
     local_monitor_ = themes_.setting("local_monitor") == "true";
     editor_view_.set_minimap(themes_.setting("minimap") != "false");
@@ -921,6 +923,8 @@ void App::handle_command(const std::string& cmd) {
         set_status_message(std::string("Ligatures ") + (font_.ligatures() ? "on" : "off"));
     } else if (cmd == "select_theme") {
         select_theme();
+    } else if (cmd == "select_file_icons") {
+        select_file_icons();
     } else if (cmd == "quit") {
         confirm_discard("Quit", [this] { quit(); });
     }
@@ -1084,6 +1088,26 @@ void App::git_checkout() {
         }
         set_status_message((i >= 0 ? "Switched to " : "Created and switched to ") + name);
         after_head_change();
+    };
+    command_palette_.pick(std::move(opts));
+}
+
+void App::select_file_icons() {
+    using file_icons::Style;
+    static const Style styles[] = {Style::Overheat, Style::Minimal, Style::None};
+    CommandPalette::PickOptions opts;
+    opts.placeholder = "Select file icons (live preview)";
+    opts.items = {"Overheat", "Minimal", "None"};
+    opts.details = {"coloured per file type", "plain file and folder glyphs", "names only"};
+    for (int i = 0; i < 3; i++)
+        if (styles[i] == file_icons::style) opts.initial = i;
+    Style original = file_icons::style;
+    opts.on_preview = [](int i) { file_icons::style = styles[i]; };
+    opts.on_cancel = [original] { file_icons::style = original; };
+    opts.on_pick = [this](int i, const std::string&) {
+        if (i < 0) return;
+        file_icons::style = styles[i];
+        themes_.set_setting("file_icons", std::string("\"") + file_icons::style_name(styles[i]) + "\"");
     };
     command_palette_.pick(std::move(opts));
 }
@@ -1632,6 +1656,12 @@ void App::open_settings() {
     rows.push_back({Row::Choice, "Font family", "Any installed monospace font; icons fall back to Nerd Fonts",
                     [this] { return font_family_.empty() ? std::string("JetBrainsMono Nerd Font Mono") : font_family_; },
                     nullptr, [this](int) { select_font(); }});
+    rows.push_back({Row::Choice, "File icons", "Icons in the explorer, tabs, Quick Open and breadcrumbs",
+                    [] {
+                        const char* names[] = {"Overheat", "Minimal", "None"};
+                        return std::string(names[static_cast<int>(file_icons::style)]);
+                    },
+                    nullptr, [this](int) { select_file_icons(); }});
     rows.push_back({Row::Stepper, "Font size", "Also Ctrl+= / Ctrl+- / Ctrl+wheel",
                     [this] { return std::to_string(static_cast<int>(font_size_)); }, nullptr,
                     [this](int d) { if (d) set_font_size(font_size_ + static_cast<float>(d)); }});
@@ -1784,6 +1814,7 @@ void App::render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed) {
         if (!first) sep();
         first = false;
         bool file = part == rel.filename();
+        if (file) x = file_icons::draw(*ctx.r, font_, theme_, x, base, part.string(), false);
         x = ctx.r->add_text(x, base, part.string(), file ? theme_.fg : theme_.fg_muted, font_) + 4.0f;
     }
     Position cur = ed->cursors().primary_pos();
@@ -2127,6 +2158,7 @@ void App::register_commands() {
     add("select_font",             "Preferences: Font Family",  "");
     add("toggle_ligatures",        "Preferences: Toggle Font Ligatures", "");
     add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");
+    add("select_file_icons",       "Preferences: File Icon Theme", "");
     add("workspace_switch",        "Workspaces: Open Workspace...", "Ctrl+R");
     add("workspace_save_as",       "Workspaces: Save Workspace As...", "");
     add("workspace_add_folder",    "Workspaces: Add Folder to Workspace...", "");

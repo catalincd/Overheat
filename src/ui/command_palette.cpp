@@ -1,6 +1,7 @@
 #include "ui/command_palette.h"
 #include "renderer/font_atlas.h"
 #include "renderer/renderer2d.h"
+#include "ui/file_icons.h"
 #include <SDL3/SDL_keycode.h>
 #include <algorithm>
 #include <cctype>
@@ -228,7 +229,9 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
         }
         ctx.r->push_clip({palette_x, y, right - palette_x, row_h});
         ctx.r->set_fade(right - 24.0f, right);
-        float end = ctx.r->add_text(palette_x + 18.0f, by, m.display, sel ? th.fg : th.fg, *ctx.font);
+        float tx = palette_x + 18.0f;
+        if (mode_ == Mode::Files) tx = file_icons::draw(*ctx.r, *ctx.font, th, tx, by, m.display, false);
+        float end = ctx.r->add_text(tx, by, m.display, th.fg, *ctx.font);
         if (!m.detail_right && !m.detail.empty())
             ctx.r->add_text(end + 12.0f, by, m.detail, th.fg_muted, *ctx.font);
         ctx.r->set_fade(0, 0);

@@ -47,6 +47,7 @@ private:
     static constexpr float PAD = 14.0f;
     static constexpr float CLOSE_W = 16.0f;
     float char_w_ = 9.0f;
+    float icon_w_ = 0.0f;  // file icon plus its gap (file_icons::advance)
     anim::Smooth ul_x_, ul_w_;
     std::string tab_title(const Tab& tab) const;
     float tab_width(const Tab& tab) const;

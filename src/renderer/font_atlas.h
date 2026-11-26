@@ -35,6 +35,9 @@ public:
     const GlyphInfo* glyph_by_index(uint32_t gid) const;  // primary face
     // A codepoint at an explicit pixel size (UI icons), cached separately.
     const GlyphInfo* glyph_sized(uint32_t codepoint, uint32_t px) const;
+    // A glyph of the embedded Overheat icon font (assets/icons) with a px-tall em box,
+    // drawn unhinted so layered icon parts stay aligned. nullptr if it has no such glyph.
+    const GlyphInfo* icon_glyph(uint32_t codepoint, uint32_t px) const;
     void set_ligatures(bool on) { ligatures_ = on; }
     bool ligatures() const { return ligatures_; }
     // Bumped on every init(): glyph ids from a previous font are invalid.
@@ -54,10 +57,12 @@ public:
 
 private:
     const GlyphInfo* rasterize(uint32_t codepoint) const;
-    const GlyphInfo* rasterize_glyph(FT_Face face, uint32_t index, GlyphInfo info_seed, bool cache_by_index) const;
+    const GlyphInfo* rasterize_glyph(FT_Face face, uint32_t index, GlyphInfo info_seed, bool cache_by_index,
+                                     int32_t load_flags = -1) const;
 
     FT_Library ft_ = nullptr;
     std::vector<FT_Face> faces_;
+    FT_Face icon_face_ = nullptr;
 
     mutable std::unordered_map<uint32_t, GlyphInfo> glyphs_;
     mutable std::unordered_map<uint32_t, GlyphInfo> by_gid_;

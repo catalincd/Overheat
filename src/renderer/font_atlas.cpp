@@ -3,6 +3,7 @@
 #include FT_FREETYPE_H
 #include <hb.h>
 #include <hb-ft.h>
+#include "generated/overheat_icons_ttf.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -36,6 +37,8 @@ bool FontAtlas::init(VulkanContext& vk, const std::vector<std::string>& font_pat
         fprintf(stderr, "No usable font found\n");
         return false;
     }
+    if (FT_New_Memory_Face(ft_, overheat_icons_ttf, static_cast<FT_Long>(sizeof overheat_icons_ttf), 0, &icon_face_))
+        icon_face_ = nullptr;
 
     FT_Face primary = faces_[0];
     hb_font_ = hb_ft_font_create_referenced(primary);
@@ -75,6 +78,8 @@ void FontAtlas::cleanup(VulkanContext& vk) {
     hb_font_ = nullptr;
     for (auto f : faces_) FT_Done_Face(f);
     faces_.clear();
+    if (icon_face_) FT_Done_Face(icon_face_);
+    icon_face_ = nullptr;
     if (ft_) FT_Done_FreeType(ft_);
     ft_ = nullptr;
 }
@@ -109,8 +114,10 @@ const GlyphInfo* FontAtlas::rasterize(uint32_t codepoint) const {
     return &(glyphs_[codepoint] = info);
 }
 
-const GlyphInfo* FontAtlas::rasterize_glyph(FT_Face face, uint32_t index, GlyphInfo info, bool cache_by_index) const {
-    if (FT_Load_Glyph(face, index, FT_LOAD_RENDER | FT_LOAD_TARGET_LIGHT)) return nullptr;
+const GlyphInfo* FontAtlas::rasterize_glyph(FT_Face face, uint32_t index, GlyphInfo info, bool cache_by_index,
+                                           int32_t load_flags) const {
+    if (load_flags < 0) load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_LIGHT;
+    if (FT_Load_Glyph(face, index, load_flags)) return nullptr;
     FT_GlyphSlot g = face->glyph;
     uint32_t w = g->bitmap.width, h = g->bitmap.rows;
     info.width     = static_cast<float>(w);
@@ -165,6 +172,19 @@ const GlyphInfo* FontAtlas::glyph_sized(uint32_t codepoint, uint32_t px) const {
         return &(sized_[key] = *gi);
     }
     return glyph(codepoint);
+}
+
+const GlyphInfo* FontAtlas::icon_glyph(uint32_t codepoint, uint32_t px) const {
+    if (!icon_face_ || px == 0) return nullptr;
+    uint64_t key = (1ull << 63) | (static_cast<uint64_t>(px) << 32) | codepoint;
+    if (auto it = sized_.find(key); it != sized_.end()) return &it->second;
+    FT_UInt index = FT_Get_Char_Index(icon_face_, codepoint);
+    if (!index) return nullptr;
+    FT_Set_Pixel_Sizes(icon_face_, 0, px);
+    const GlyphInfo* gi = rasterize_glyph(icon_face_, index, GlyphInfo{}, false,
+                                          FT_LOAD_RENDER | FT_LOAD_NO_HINTING | FT_LOAD_NO_AUTOHINT);
+    if (!gi) return nullptr;
+    return &(sized_[key] = *gi);
 }
 
 const GlyphInfo* FontAtlas::glyph_by_index(uint32_t gid) const {
