@@ -33,7 +33,7 @@ the git log; keep this file short and current.
   `compositeAlpha` (rare on Windows); reliable per-pixel needs presenting via
   DirectComposition (Vulkan → D3D11 interop)
 - [ ] Fonts: bold / italic faces; consider dropping Iosevka (8 MB of the 10.6 MB)
-- [ ] Themes: Gruvbox Light, Tokyo Night Day; string-escape and namespace colours
+- [ ] Themes: Tokyo Night Day; string-escape and namespace colours
 - [ ] Ctrl+K Ctrl+T (theme picker chord) doesn't fire in `--script` mode
 
 ## From the editor survey (2026-11-26)

@@ -240,7 +240,12 @@ void ThemeManager::init(const fs::path& config_dir) {
         Entry e;
         parse_stream(in, "<built-in>", e);
         Theme t;
-        if (e.has_dark && !e.builtin.dark) t = light_theme();
+        if (const Entry* b = e.base.empty() ? nullptr : find(e.base)) {
+            t = b->builtin;  // variants (e.g. Gruvbox Dark Hard) override a few keys
+            if (!e.has_dark) e.builtin.dark = t.dark;
+        } else if (e.has_dark && !e.builtin.dark) {
+            t = light_theme();
+        }
         t.name = e.name;
         t.dark = e.builtin.dark;
         apply_overrides(t, e.overrides, "built-in theme " + e.name);

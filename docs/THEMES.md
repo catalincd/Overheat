@@ -24,6 +24,11 @@ each theme straight away, and `Escape` goes back to the theme you had before.
 | Catppuccin Latte | light | Catppuccin | [catppuccin/vscode](https://github.com/catppuccin/vscode), [catppuccin/palette](https://github.com/catppuccin/palette) | MIT |
 | Tokyo Night | dark | Tokyo Night | [enkia/tokyo-night-vscode-theme](https://github.com/enkia/tokyo-night-vscode-theme) | MIT |
 | Gruvbox Dark | dark | Gruvbox Theme (medium contrast), after morhetz/gruvbox | [jdinhify/vscode-theme-gruvbox](https://github.com/jdinhify/vscode-theme-gruvbox) | MIT |
+| Gruvbox Dark Hard | dark | Gruvbox Dark with the `dark0_hard` background | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
+| Gruvbox Dark Soft | dark | Gruvbox Dark with the `dark0_soft` background | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
+| Gruvbox Light | light | light palette with the "faded" accents, as in `colors/gruvbox.vim` | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
+| Gruvbox Light Hard | light | Gruvbox Light with the `light0_hard` background | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
+| Gruvbox Light Soft | light | Gruvbox Light with the `light0_soft` background | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
 | Ayu Light | light | Ayu | [ayu-theme/vscode-ayu](https://github.com/ayu-theme/vscode-ayu) | MIT |
 | Night Owl | dark | Night Owl (Sarah Drasner) | [sdras/night-owl-vscode-theme](https://github.com/sdras/night-owl-vscode-theme) | MIT |
 

@@ -1045,6 +1045,142 @@ git.untracked = "#b8bb26"
 git.ignored = "#7c6f64"
 )";
 
+// Gruvbox contrast variants and Gruvbox Light, from the original palette in
+// morhetz/gruvbox (colors/gruvbox.vim, MIT): bg0 is dark0_hard / dark0_soft /
+// light0 / light0_hard / light0_soft; light mode uses the "faded" accents.
+const char* GRUVBOX_DARK_HARD = R"(
+name = "Gruvbox Dark Hard"
+base = "Gruvbox Dark"
+editor.background = "#1d2021"
+gutter.background = "#1d2021"
+sidebar.background = "#1d2021"
+tabs.background = "#1d2021"
+status.background = "#1d2021"
+terminal.background = "#1d2021"
+ui.surface = "#282828"
+ui.surface_hover = "#3c3836"
+ui.input_background = "#3c3836"
+)";
+
+const char* GRUVBOX_DARK_SOFT = R"(
+name = "Gruvbox Dark Soft"
+base = "Gruvbox Dark"
+editor.background = "#32302f"
+gutter.background = "#32302f"
+sidebar.background = "#32302f"
+tabs.background = "#32302f"
+status.background = "#32302f"
+terminal.background = "#32302f"
+ui.surface = "#3c3836"
+ui.surface_hover = "#504945"
+ui.input_background = "#504945"
+tabs.active_background = "#504945"
+ui.border = "#504945"
+)";
+
+const char* GRUVBOX_LIGHT = R"(
+name = "Gruvbox Light"
+dark = false
+editor.background = "#fbf1c7"
+editor.foreground = "#3c3836"
+editor.current_line = "#ebdbb280"
+editor.selection = "#689d6a40"
+editor.cursor = "#3c3836"
+editor.bracket_match = "#bdae93"
+editor.find_match = "#d65d0e30"
+editor.find_match_active = "#45858870"
+editor.indent_guide = "#ebdbb2"
+gutter.background = "#fbf1c7"
+gutter.line_number = "#bdae93"
+gutter.line_number_active = "#3c3836"
+sidebar.background = "#fbf1c7"
+sidebar.selection = "#ebdbb2"
+tabs.background = "#fbf1c7"
+tabs.active_background = "#ebdbb2"
+tabs.active_foreground = "#3c3836"
+tabs.inactive_foreground = "#7c6f64"
+status.background = "#fbf1c7"
+status.foreground = "#3c3836"
+terminal.background = "#fbf1c7"
+terminal.foreground = "#3c3836"
+terminal.ansi0 = "#fbf1c7"
+terminal.ansi1 = "#cc241d"
+terminal.ansi2 = "#98971a"
+terminal.ansi3 = "#d79921"
+terminal.ansi4 = "#458588"
+terminal.ansi5 = "#b16286"
+terminal.ansi6 = "#689d6a"
+terminal.ansi7 = "#7c6f64"
+terminal.ansi8 = "#928374"
+terminal.ansi9 = "#9d0006"
+terminal.ansi10 = "#79740e"
+terminal.ansi11 = "#b57614"
+terminal.ansi12 = "#076678"
+terminal.ansi13 = "#8f3f71"
+terminal.ansi14 = "#427b58"
+terminal.ansi15 = "#3c3836"
+ui.accent = "#b57614"
+ui.foreground_muted = "#7c6f64"
+ui.surface = "#f2e5bc"
+ui.surface_hover = "#ebdbb2"
+ui.input_background = "#ebdbb2"
+ui.border = "#d5c4a1"
+ui.shadow = "#3c383633"
+ui.scrollbar = "#bdae9399"
+syntax.comment = "#928374"
+syntax.keyword = "#af3a03"
+syntax.keyword_control = "#9d0006"
+syntax.string = "#79740e"
+syntax.number = "#8f3f71"
+syntax.constant = "#8f3f71"
+syntax.function = "#427b58"
+syntax.type = "#b57614"
+syntax.type_builtin = "#af3a03"
+syntax.operator = "#427b58"
+syntax.punctuation = "#7c6f64"
+syntax.property = "#076678"
+syntax.variable = "#076678"
+syntax.preprocessor = "#427b58"
+diagnostic.error = "#9d0006"
+diagnostic.warning = "#b57614"
+diagnostic.info = "#076678"
+git.added = "#79740e"
+git.modified = "#b57614"
+git.deleted = "#9d0006"
+git.untracked = "#79740e"
+git.ignored = "#a89984"
+)";
+
+const char* GRUVBOX_LIGHT_HARD = R"(
+name = "Gruvbox Light Hard"
+base = "Gruvbox Light"
+editor.background = "#f9f5d7"
+gutter.background = "#f9f5d7"
+sidebar.background = "#f9f5d7"
+tabs.background = "#f9f5d7"
+status.background = "#f9f5d7"
+terminal.background = "#f9f5d7"
+ui.surface = "#fbf1c7"
+ui.surface_hover = "#ebdbb2"
+ui.input_background = "#ebdbb2"
+)";
+
+const char* GRUVBOX_LIGHT_SOFT = R"(
+name = "Gruvbox Light Soft"
+base = "Gruvbox Light"
+editor.background = "#f2e5bc"
+gutter.background = "#f2e5bc"
+sidebar.background = "#f2e5bc"
+tabs.background = "#f2e5bc"
+status.background = "#f2e5bc"
+terminal.background = "#f2e5bc"
+ui.surface = "#ebdbb2"
+ui.surface_hover = "#d5c4a1"
+ui.input_background = "#d5c4a1"
+tabs.active_background = "#d5c4a1"
+editor.current_line = "#ebdbb2"
+)";
+
 // Ayu Light (ayu-theme/vscode-ayu). Syntax colours darkened slightly (same hues)
 // so every token reaches about 3:1 contrast on the background.
 const char* AYU_LIGHT = R"(
@@ -1200,7 +1336,8 @@ const std::vector<const char*>& builtin_theme_sources() {
     static const std::vector<const char*> sources = {
         DARK_PLUS, LIGHT_PLUS, ONE_DARK_PRO, DRACULA, GITHUB_DARK, GITHUB_LIGHT, MONOKAI,
         SOLARIZED_DARK, SOLARIZED_LIGHT, NORD, CATPPUCCIN_MOCHA, CATPPUCCIN_LATTE,
-        TOKYO_NIGHT, GRUVBOX_DARK, AYU_LIGHT, NIGHT_OWL,
+        TOKYO_NIGHT, GRUVBOX_DARK, GRUVBOX_DARK_HARD, GRUVBOX_DARK_SOFT, GRUVBOX_LIGHT,
+        GRUVBOX_LIGHT_HARD, GRUVBOX_LIGHT_SOFT, AYU_LIGHT, NIGHT_OWL,
     };
     return sources;
 }
