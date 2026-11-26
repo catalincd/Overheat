@@ -34,6 +34,13 @@ the git log; keep this file short and current.
 - [ ] **4coder-style underlines**: underline the token under the cursor and its other
   occurrences, and the lines of the current jump/compile-error location. Make the style
   (underline, box, background) configurable per theme
+- [ ] **4coder-style Ctrl/Alt + arrows** (changes current bindings; make the old ones a
+  "VS Code" keymap preset):
+  - Ctrl+Left/Right: jump by whitespace boundaries (whole tokens like `foo.bar()`)
+  - Alt+Left/Right: finer steps by alphanumeric / camelCase / snake_case boundaries
+  - Ctrl+Up/Down: jump to the previous/next blank line (paragraph / function hops);
+    today Ctrl+Alt+Up/Down add cursors and Alt+Up/Down move lines, so decide where those go
+  - Shift with any of these extends the selection
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
 
 ## Follow-ups from the 2026-11-26 batch
