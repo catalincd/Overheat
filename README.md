@@ -223,6 +223,7 @@ ligatures = true
 word_wrap = false
 minimap = true
 animations = true
+opacity = 1.0                        # 0.5-1.0: translucent background, opaque text
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
 ```
 

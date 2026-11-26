@@ -80,9 +80,25 @@ bool App::init(int argc, char** argv) {
         return false;
     }
 
-    window_ = SDL_CreateWindow("Overheat",
-                               1600, 900,
-                               SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    // ---- Settings location ----
+    {
+        config_dir_ = platform::config_dir();
+        themes_.set_config_dir(config_dir_);
+    }
+    if (std::string v = themes_.setting("opacity"); !v.empty())
+        opacity_ = std::clamp(std::strtof(v.c_str(), nullptr), 0.5f, 1.0f);
+
+    // A transparent window can composite per-pixel alpha (Wayland, X11 ARGB visual,
+    // DWM blur-behind on Windows). It costs nothing while the swapchain stays opaque,
+    // so Linux always asks for it and opacity changes apply live. On Windows SDL
+    // implements it with DwmEnableBlurBehindWindow; only opt in when wanted.
+    SDL_WindowFlags win_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
+#ifdef _WIN32
+    if (opacity_ < 1.0f) win_flags |= SDL_WINDOW_TRANSPARENT;
+#else
+    win_flags |= SDL_WINDOW_TRANSPARENT;
+#endif
+    window_ = SDL_CreateWindow("Overheat", 1600, 900, win_flags);
     if (!window_) {
         std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         return false;
@@ -92,12 +108,6 @@ bool App::init(int argc, char** argv) {
     if (!vk_.init(window_)) {
         std::fprintf(stderr, "VulkanContext::init failed\n");
         return false;
-    }
-
-    // ---- Settings location ----
-    {
-        config_dir_ = platform::config_dir();
-        themes_.set_config_dir(config_dir_);
     }
 
     // ---- Font ----
@@ -125,6 +135,11 @@ bool App::init(int argc, char** argv) {
     if (!renderer_.init(vk_, font_)) {
         std::fprintf(stderr, "Renderer2D::init failed\n");
         return false;
+    }
+
+    if (opacity_ < 1.0f) {
+        const char* mode = apply_opacity();
+        std::fprintf(stderr, "Window opacity %.2f: %s\n", opacity_, mode);
     }
 
     // ---- Theme ----
@@ -1359,6 +1374,36 @@ void App::set_font_size(float size) {
     set_status_message("Font size " + std::to_string(static_cast<int>(size)));
 }
 
+const char* App::apply_opacity() {
+    bool want = opacity_ < 0.999f;
+    bool per_pixel = vk_.set_translucent(want && renderer_.can_translucent());
+    renderer_.set_window_opacity(per_pixel ? opacity_ : 1.0f);
+    // Fallback: the whole window, text included, through the window manager
+    // (_NET_WM_WINDOW_OPACITY on X11, a layered window on Windows). Wayland has none.
+    // Windows: per-pixel alpha needs DWM blur-behind (SDL_WINDOW_TRANSPARENT) and a
+    // driver whose Vulkan surface offers PRE/POST_MULTIPLIED; many only offer OPAQUE.
+    // Terminals that get it everywhere present through DXGI/DirectComposition
+    // (Windows Terminal, Zed) or WGL (Alacritty, WezTerm's OpenGL front end).
+    bool whole = want && !per_pixel && SDL_SetWindowOpacity(window_, opacity_);
+    if (window_opacity_set_ && !whole) SDL_SetWindowOpacity(window_, 1.0f);
+    window_opacity_set_ = whole;
+    if (!want) return "opaque";
+    if (per_pixel) return "translucent background";
+    if (whole) return "whole-window opacity (per-pixel alpha unsupported here)";
+    return "unsupported by this window system";
+}
+
+void App::set_opacity(float o) {
+    o = std::clamp(std::round(o * 20.0f) / 20.0f, 0.5f, 1.0f);
+    if (o == opacity_) return;
+    opacity_ = o;
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "%.2f", o);
+    themes_.set_setting("opacity", buf);
+    const char* mode = apply_opacity();
+    set_status_message("Window opacity " + std::to_string(static_cast<int>(std::lround(o * 100))) + "%: " + mode);
+}
+
 void App::focus(Panel* p) {
     for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_, &search_, &chat_})
         q->set_focused(q == p);
@@ -1510,6 +1555,10 @@ void App::open_settings() {
     rows.push_back({Row::Stepper, "Font size", "Also Ctrl+= / Ctrl+- / Ctrl+wheel",
                     [this] { return std::to_string(static_cast<int>(font_size_)); }, nullptr,
                     [this](int d) { if (d) set_font_size(font_size_ + static_cast<float>(d)); }});
+    rows.push_back({Row::Stepper, "Window opacity",
+                    "Translucent background, opaque text (50-100%)",
+                    [this] { return std::to_string(static_cast<int>(std::lround(opacity_ * 100))) + "%"; }, nullptr,
+                    [this](int d) { if (d) set_opacity(opacity_ + 0.05f * static_cast<float>(d)); }});
     rows.push_back(toggle("Font ligatures", "Render => != -> as joined glyphs when the font has them",
                           [this] { return font_.ligatures(); }, "toggle_ligatures"));
     rows.push_back(toggle("Animations", "Smooth scrolling, caret glide, panel and popup motion",

@@ -65,6 +65,8 @@ private:
     fs::path config_dir_;
     std::vector<std::string> font_chain_;
     float font_size_ = 15.0f;
+    float opacity_ = 1.0f;          // window background opacity (settings: opacity)
+    bool window_opacity_set_ = false;  // whole-window fallback in use
     float theme_poll_timer_ = 0;
     KeyMap keymap_;
 
@@ -227,6 +229,10 @@ private:
     void emit_probe(const std::string& label);
     void focus_editor();
     void set_font_size(float size);
+    // Applies opacity_: per-pixel translucency when the surface supports it, else
+    // whole-window opacity (X11/Windows), else opaque. Returns a short mode name.
+    const char* apply_opacity();
+    void set_opacity(float o);
     std::vector<std::string> build_font_chain(const std::string& family) const;
     bool reload_font(const std::string& family, float size);
     void select_font();

@@ -12,7 +12,7 @@ the git log; keep this file short and current.
 - [ ] Workspaces like VS Code's, but smarter and never auto-opened on startup
 - [ ] More bundled fonts: research what editor users like (Reddit and similar threads)
 - [ ] More themes, using popular VS Code themes as references
-- [ ] Window transparency on Linux and Windows
+- [x] Window transparency on Linux and Windows (`opacity`; per-pixel where the Vulkan surface composites alpha, else whole-window opacity on X11/Windows)
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
 - [ ] Full-featured status bar
 - [ ] File-type icons in the explorer and tabs, like VS Code's but in our own style
