@@ -1,4 +1,5 @@
 #include "renderer/vulkan_context.h"
+#include "shaders/spirv.h"
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -37,6 +38,10 @@ bool VulkanContext::init(SDL_Window* window) {
     if (!create_command_pool())   return false;
     if (!create_descriptor_pool())return false;
     if (!create_sync_objects())   return false;
+    if (!create_translucency_objects()) {
+        fprintf(stderr, "Translucent window support unavailable\n");
+        dual_src_blend_ = false;
+    }
     return true;
 }
 
@@ -50,10 +55,15 @@ void VulkanContext::cleanup() {
             if (frames_[i].in_flight)       vkDestroyFence(device_, frames_[i].in_flight, nullptr);
         }
 
+        if (resolve_pipeline_) vkDestroyPipeline(device_, resolve_pipeline_, nullptr);
+        if (resolve_layout_)   vkDestroyPipelineLayout(device_, resolve_layout_, nullptr);
+        if (resolve_dsl_)      vkDestroyDescriptorSetLayout(device_, resolve_dsl_, nullptr);
+        if (resolve_sampler_)  vkDestroySampler(device_, resolve_sampler_, nullptr);
         if (descriptor_pool_) vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
         if (command_pool_)    vkDestroyCommandPool(device_, command_pool_, nullptr);
         cleanup_swapchain();
         if (render_pass_) vkDestroyRenderPass(device_, render_pass_, nullptr);
+        if (offscreen_pass_) vkDestroyRenderPass(device_, offscreen_pass_, nullptr);
         vkDestroyDevice(device_, nullptr);
     }
     if (surface_)     vkDestroySurfaceKHR(instance_, surface_, nullptr);
@@ -94,11 +104,12 @@ bool VulkanContext::begin_frame(uint32_t& image_index) {
 
     VkRenderPassBeginInfo rp_info{};
     rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp_info.renderPass = render_pass_;
-    rp_info.framebuffer = framebuffers_[image_index];
+    rp_info.renderPass = translucent_ ? offscreen_pass_ : render_pass_;
+    rp_info.framebuffer = translucent_ ? offscreen_fb_ : framebuffers_[image_index];
     rp_info.renderArea.extent = swapchain_extent_;
     VkClearValue clear{};
-    clear.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    // Translucent: rgb is overwritten by the full-window background, alpha starts empty.
+    clear.color = {{0.0f, 0.0f, 0.0f, translucent_ ? 0.0f : 1.0f}};
     rp_info.clearValueCount = 1;
     rp_info.pClearValues = &clear;
     vkCmdBeginRenderPass(frame.cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -119,6 +130,30 @@ bool VulkanContext::begin_frame(uint32_t& image_index) {
 void VulkanContext::end_frame(uint32_t image_index) {
     auto& frame = frames_[current_frame_];
     vkCmdEndRenderPass(frame.cmd);
+
+    if (translucent_) {
+        // Resolve the offscreen frame (straight colour + window alpha) into the swapchain.
+        VkRenderPassBeginInfo rp_info{};
+        rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rp_info.renderPass = render_pass_;
+        rp_info.framebuffer = framebuffers_[image_index];
+        rp_info.renderArea.extent = swapchain_extent_;
+        VkClearValue clear{};
+        rp_info.clearValueCount = 1;
+        rp_info.pClearValues = &clear;
+        vkCmdBeginRenderPass(frame.cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBindPipeline(frame.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, resolve_pipeline_);
+        vkCmdBindDescriptorSets(frame.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, resolve_layout_, 0, 1,
+                                &resolve_set_, 0, nullptr);
+        uint32_t pc[2] = {
+            composite_alpha_ == VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR ? 1u : 0u,
+            (swapchain_format_ == VK_FORMAT_B8G8R8A8_SRGB || swapchain_format_ == VK_FORMAT_R8G8B8A8_SRGB ||
+             swapchain_format_ == VK_FORMAT_A8B8G8R8_SRGB_PACK32) ? 1u : 0u,
+        };
+        vkCmdPushConstants(frame.cmd, resolve_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
+        vkCmdDraw(frame.cmd, 3, 1, 0, 0);
+        vkCmdEndRenderPass(frame.cmd);
+    }
 
     Buffer capture{};
     if (!capture_path_.empty()) {
@@ -189,23 +224,39 @@ void VulkanContext::end_frame(uint32_t image_index) {
 }
 
 void VulkanContext::write_capture(const Buffer& buf) const {
-    // Swapchain is B8G8R8A8 (sRGB-encoded); PPM wants RGB bytes.
-    FILE* f = std::fopen(capture_path_.c_str(), "wb");
+    // Swapchain is B8G8R8A8 (sRGB-encoded); PPM wants RGB bytes. A translucent frame
+    // keeps its alpha: PAM (RGBA, straight alpha, so it converts to a normal PNG).
+    std::string path = capture_path_;
+    bool alpha = translucent_;
+    if (alpha && path.size() > 4 && path.compare(path.size() - 4, 4, ".ppm") == 0)
+        path.replace(path.size() - 4, 4, ".pam");
+    FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) {
-        std::fprintf(stderr, "capture: cannot write %s\n", capture_path_.c_str());
+        std::fprintf(stderr, "capture: cannot write %s\n", path.c_str());
         return;
     }
     uint32_t w = swapchain_extent_.width, h = swapchain_extent_.height;
-    std::fprintf(f, "P6\n%u %u\n255\n", w, h);
+    size_t ch = alpha ? 4 : 3;
+    if (alpha) std::fprintf(f, "P7\nWIDTH %u\nHEIGHT %u\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n", w, h);
+    else       std::fprintf(f, "P6\n%u %u\n255\n", w, h);
     const auto* px = static_cast<const uint8_t*>(buf.mapped);
-    std::vector<uint8_t> row(size_t(w) * 3);
+    std::vector<uint8_t> row(size_t(w) * ch);
     bool bgr = swapchain_format_ == VK_FORMAT_B8G8R8A8_SRGB || swapchain_format_ == VK_FORMAT_B8G8R8A8_UNORM;
+    bool premul = composite_alpha_ == VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+    std::vector<uint8_t> src(size_t(w) * 4);  // mapped memory may be uncached: read each row once
     for (uint32_t y = 0; y < h; y++) {
+        std::memcpy(src.data(), px + size_t(y) * w * 4, src.size());
         for (uint32_t x = 0; x < w; x++) {
-            const uint8_t* p = px + (size_t(y) * w + x) * 4;
-            row[x * 3 + 0] = bgr ? p[2] : p[0];
-            row[x * 3 + 1] = p[1];
-            row[x * 3 + 2] = bgr ? p[0] : p[2];
+            const uint8_t* p = &src[size_t(x) * 4];
+            uint8_t* o = &row[x * ch];
+            o[0] = bgr ? p[2] : p[0];
+            o[1] = p[1];
+            o[2] = bgr ? p[0] : p[2];
+            if (!alpha) continue;
+            o[3] = p[3];
+            if (premul && p[3] > 0 && p[3] < 255)
+                for (int k = 0; k < 3; k++)
+                    o[k] = static_cast<uint8_t>(std::min(255, (o[k] * 255 + p[3] / 2) / p[3]));
         }
         std::fwrite(row.data(), 1, row.size(), f);
     }
@@ -223,6 +274,129 @@ void VulkanContext::recreate_swapchain() {
     cleanup_swapchain();
     create_swapchain();
     create_framebuffers();
+}
+
+bool VulkanContext::set_translucent(bool on) {
+    want_translucent_ = on;
+    if (on == translucent_) return translucent_;
+    if (on) {
+        if (!dual_src_blend_ || !resolve_pipeline_ || !(SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT))
+            return false;
+        VkSurfaceCapabilitiesKHR caps;
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device_, surface_, &caps);
+        if (!(caps.supportedCompositeAlpha & (VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR |
+                                              VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)))
+            return false;
+    }
+    recreate_swapchain();
+    fprintf(stderr, "Swapchain composite alpha: %s\n",
+            composite_alpha_ == VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR  ? "pre-multiplied" :
+            composite_alpha_ == VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR ? "post-multiplied" : "opaque");
+    return translucent_;
+}
+
+bool VulkanContext::create_translucency_objects() {
+    if (!dual_src_blend_) return true;  // nothing to build; translucency stays off
+
+    // Offscreen pass: same shape as the swapchain pass, ends ready for sampling.
+    VkAttachmentDescription att{};
+    att.format         = OFFSCREEN_FORMAT;
+    att.samples        = VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    att.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    att.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkAttachmentReference ref{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sub{};
+    sub.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = 1;
+    sub.pColorAttachments    = &ref;
+    VkSubpassDependency deps[2]{};
+    // The previous frame's resolve must finish reading before this frame writes.
+    deps[0].srcSubpass    = VK_SUBPASS_EXTERNAL;
+    deps[0].dstSubpass    = 0;
+    deps[0].srcStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[0].dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].srcSubpass    = 0;
+    deps[1].dstSubpass    = VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    VkRenderPassCreateInfo rp{};
+    rp.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rp.attachmentCount = 1;
+    rp.pAttachments    = &att;
+    rp.subpassCount    = 1;
+    rp.pSubpasses      = &sub;
+    rp.dependencyCount = 2;
+    rp.pDependencies   = deps;
+    if (vkCreateRenderPass(device_, &rp, nullptr, &offscreen_pass_) != VK_SUCCESS) return false;
+
+    resolve_sampler_ = create_sampler(VK_FILTER_NEAREST);
+    VkDescriptorSetLayoutBinding b{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+                                   VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+    VkDescriptorSetLayoutCreateInfo dl{};
+    dl.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    dl.bindingCount = 1;
+    dl.pBindings    = &b;
+    if (vkCreateDescriptorSetLayout(device_, &dl, nullptr, &resolve_dsl_) != VK_SUCCESS) return false;
+    VkDescriptorSetAllocateInfo ai{};
+    ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ai.descriptorPool     = descriptor_pool_;
+    ai.descriptorSetCount = 1;
+    ai.pSetLayouts        = &resolve_dsl_;
+    if (vkAllocateDescriptorSets(device_, &ai, &resolve_set_) != VK_SUCCESS) return false;
+
+    VkPushConstantRange pcr{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 8};
+    VkPipelineLayoutCreateInfo pl{};
+    pl.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pl.setLayoutCount         = 1;
+    pl.pSetLayouts            = &resolve_dsl_;
+    pl.pushConstantRangeCount = 1;
+    pl.pPushConstantRanges    = &pcr;
+    if (vkCreatePipelineLayout(device_, &pl, nullptr, &resolve_layout_) != VK_SUCCESS) return false;
+
+    VkShaderModule vert = load_shader(spirv_resolve_vert, sizeof spirv_resolve_vert);
+    VkShaderModule frag = load_shader(spirv_resolve_frag, sizeof spirv_resolve_frag);
+    if (vert && frag) resolve_pipeline_ = create_graphics_pipeline(vert, frag, resolve_layout_, {}, {}, false);
+    if (vert) vkDestroyShaderModule(device_, vert, nullptr);
+    if (frag) vkDestroyShaderModule(device_, frag, nullptr);
+    return resolve_pipeline_ != VK_NULL_HANDLE;
+}
+
+bool VulkanContext::create_offscreen_target() {
+    offscreen_ = create_image(swapchain_extent_.width, swapchain_extent_.height, OFFSCREEN_FORMAT,
+                              VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    VkFramebufferCreateInfo ci{};
+    ci.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    ci.renderPass      = offscreen_pass_;
+    ci.attachmentCount = 1;
+    ci.pAttachments    = &offscreen_.view;
+    ci.width           = swapchain_extent_.width;
+    ci.height          = swapchain_extent_.height;
+    ci.layers          = 1;
+    if (vkCreateFramebuffer(device_, &ci, nullptr, &offscreen_fb_) != VK_SUCCESS) return false;
+
+    VkDescriptorImageInfo img{resolve_sampler_, offscreen_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet w{};
+    w.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    w.dstSet          = resolve_set_;
+    w.dstBinding      = 0;
+    w.descriptorCount = 1;
+    w.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    w.pImageInfo      = &img;
+    vkUpdateDescriptorSets(device_, 1, &w, 0, nullptr);
+    return true;
+}
+
+void VulkanContext::destroy_offscreen_target() {
+    if (offscreen_fb_) vkDestroyFramebuffer(device_, offscreen_fb_, nullptr);
+    offscreen_fb_ = VK_NULL_HANDLE;
+    destroy_image(offscreen_);
 }
 
 // ---------- Resource helpers ----------
@@ -445,7 +619,9 @@ VkPipeline VulkanContext::create_graphics_pipeline(
     VkPipelineLayout layout,
     const std::vector<VkVertexInputBindingDescription>& bindings,
     const std::vector<VkVertexInputAttributeDescription>& attributes,
-    bool alpha_blend)
+    bool alpha_blend,
+    VkRenderPass pass,
+    bool dual_source)
 {
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -488,12 +664,14 @@ VkPipeline VulkanContext::create_graphics_pipeline(
     blend_att.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     if (alpha_blend) {
+        VkBlendFactor inv = dual_source ? VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA
+                                        : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         blend_att.blendEnable         = VK_TRUE;
         blend_att.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;  // premultiplied
-        blend_att.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blend_att.dstColorBlendFactor = inv;
         blend_att.colorBlendOp        = VK_BLEND_OP_ADD;
         blend_att.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        blend_att.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blend_att.dstAlphaBlendFactor = inv;
         blend_att.alphaBlendOp        = VK_BLEND_OP_ADD;
     }
 
@@ -520,7 +698,7 @@ VkPipeline VulkanContext::create_graphics_pipeline(
     ci.pColorBlendState    = &blend;
     ci.pDynamicState       = &dynamic;
     ci.layout              = layout;
-    ci.renderPass          = render_pass_;
+    ci.renderPass          = pass ? pass : render_pass_;
     ci.subpass             = 0;
 
     VkPipeline pipeline;
@@ -731,7 +909,12 @@ bool VulkanContext::create_logical_device() {
         queue_cis.push_back(qci);
     }
 
+    VkPhysicalDeviceFeatures supported{};
+    vkGetPhysicalDeviceFeatures(physical_device_, &supported);
     VkPhysicalDeviceFeatures features{};
+    // Translucent windows keep a separate alpha channel via dual-source blending.
+    features.dualSrcBlend = supported.dualSrcBlend;
+    dual_src_blend_ = supported.dualSrcBlend == VK_TRUE;
     const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
     VkDeviceCreateInfo ci{};
@@ -821,8 +1004,20 @@ bool VulkanContext::create_swapchain() {
         ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
 
+    // Translucent windows need a surface that composites alpha (Wayland, X11 with an
+    // ARGB visual, some Windows drivers). Everything else stays opaque.
+    composite_alpha_ = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    if (want_translucent_ && dual_src_blend_ && resolve_pipeline_ &&
+        (SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT)) {
+        if (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
+            composite_alpha_ = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+        else if (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)
+            composite_alpha_ = VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
+    }
+    translucent_ = composite_alpha_ != VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+
     ci.preTransform   = caps.currentTransform;
-    ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    ci.compositeAlpha = composite_alpha_;
     ci.presentMode    = chosen_mode;
     ci.clipped        = VK_TRUE;
 
@@ -906,6 +1101,10 @@ bool VulkanContext::create_render_pass() {
 }
 
 bool VulkanContext::create_framebuffers() {
+    if (translucent_ && !create_offscreen_target()) {
+        fprintf(stderr, "Failed to create offscreen target\n");
+        return false;
+    }
     framebuffers_.resize(swapchain_views_.size());
     for (size_t i = 0; i < swapchain_views_.size(); i++) {
         VkFramebufferCreateInfo ci{};
@@ -985,6 +1184,7 @@ bool VulkanContext::create_sync_objects() {
 }
 
 void VulkanContext::cleanup_swapchain() {
+    destroy_offscreen_target();
     for (auto sem : present_sems_) vkDestroySemaphore(device_, sem, nullptr);
     present_sems_.clear();
     for (auto fb : framebuffers_) vkDestroyFramebuffer(device_, fb, nullptr);

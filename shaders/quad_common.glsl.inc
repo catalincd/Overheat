@@ -16,6 +16,7 @@ layout(std140, set = 0, binding = 0) uniform Globals {
     vec2 viewport;
     float time;
     float text_gamma;
+    float opacity;     // window background opacity (translucent mode only)
 } g;
 
 layout(std430, set = 0, binding = 1) readonly buffer Quads {
