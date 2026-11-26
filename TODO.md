@@ -68,6 +68,18 @@ the git log; keep this file short and current.
   over SFTP too
 - [ ] **Toggle the status bar:** View → Toggle Status Bar (palette + settings.toml
   `status_bar = false`), like VS Code; the monitor strip and layout adapt
+- [ ] **VS Code-like split view** (today: two side-by-side groups only):
+  - a grid of editor groups: split right/left/up/down in any nesting (Ctrl+\, the
+    palette, the tab context menu), with draggable sashes and double-click to even out
+  - drag a tab to an edge or the centre of a group, with drop-zone overlays, to split
+    or move it; drag between groups
+  - Ctrl+1/2/3… focus a group, Ctrl+K arrows move focus, and move or copy the editor
+    to the next group
+  - the same file open in two groups shares one buffer (edits, undo, dirty state),
+    with independent cursors and scroll
+  - maximize or restore a group, close a group and merge its tabs, and "Join All Groups"
+  - layouts saved in sessions and workspaces
+  - split terminals in the panel, and later a side-by-side diff view on the same layout
 - [ ] **Build, lint and navigation like VS Code**
   - **Build tasks:** a project task file (like `.vscode/tasks.json`: name, command, cwd,
     env, default build task) with Run Build Task (Ctrl+Shift+B) and Run Task… in the
@@ -141,7 +153,6 @@ the git log; keep this file short and current.
 
 ## Workbench
 
-- [ ] More than two editor groups; vertical splits
 - [ ] Multiple terminals (tabs) and split terminals
 - [ ] Hover fades and press states for buttons (animation polish)
 - [ ] Settings UI: search box, tab width, terminal font, per-language settings
@@ -153,7 +164,7 @@ the git log; keep this file short and current.
 
 - Ligatures are on by default; JetBrains Mono turns `/=` into `≠` (toggle in Settings)
 - The terminal does not reflow old output when resized
-- Split editors support two groups only
+- Split editors support two side-by-side groups only (see "VS Code-like split view")
 - Remote search briefly blocks the UI while `grep` runs on the host (needs a thread-safe
   SSH channel; local search already streams on a worker thread)
 - The OMP chat backend shows the CLI's "Working..." line in replies
