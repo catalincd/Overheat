@@ -535,6 +535,7 @@ void App::tasks_update() {
                                    ": " + counts,
                                ok ? 4.0f : 8.0f);
             status_bar_.set_task_result(what + ": " + (errors || warnings ? counts : ok ? "ok" : "failed"), ok);
+            if (ok && pets_on_) pets_.celebrate();  // a happy jump for a good build
         }
     }
     if (pending_format_ && Clock::now() > pending_format_->deadline) {  // the server never answered

@@ -14,6 +14,7 @@
 #include "ui/settings_page.h"
 #include "ui/chat_panel.h"
 #include "ui/monitor_bar.h"
+#include "ui/pets.h"
 #include "ui/problems_panel.h"
 #include "tasks/runner.h"
 #include "ui/command_center.h"
@@ -367,6 +368,13 @@ private:
     anim::Smooth sidebar_open_, terminal_open_, split_open_;  // 0..1 slide fractions
     void load_motion_settings();  // cursor_animation, cursor_vfx, scroll_animation_ms, wobbly
     bool hover_was_chrome_ = false;
+    // Pet foxes in a strip under the editor (ui/pets.h). Settings: pets, pet_count,
+    // pet_kit_color, pets_sleep_after.
+    Pets pets_;
+    bool pets_on_ = false;
+    TimePoint pets_deadline_{};  // when the yard wants its next frame (max() = never)
+    void load_pet_settings();
+    bool window_shown() const;
     static constexpr float ACTIVITY_BAR_W = 48.0f;
     float terminal_height_ = 200.0f;
     // compute_layout(): below these the sidebar / terminal hide so the editor keeps its minimum.
@@ -388,6 +396,7 @@ private:
         // The other editor group when split (empty otherwise).
         Rect tab_bar2, breadcrumbs2, editor2;
         float group_split_x = -1;  // x of the divider between groups
+        Rect yard;  // pets strip between the editor column and the terminal (h = 0 when hidden)
         Rect terminal_header;
         Rect terminal;
         Rect monitor;  // system monitor strip above the status bar (h = 0 when hidden)

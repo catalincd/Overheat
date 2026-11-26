@@ -125,6 +125,7 @@ bool App::init(int argc, char** argv) {
     font_family_ = themes_.setting("font_family");
     anim::enabled = themes_.setting("animations") != "false";
     load_motion_settings();
+    load_pet_settings();
     show_breadcrumbs_ = themes_.setting("breadcrumbs") != "false";
     file_icons::style = file_icons::parse_style(themes_.setting("file_icons"));
     remote_monitor_ = themes_.setting("remote_monitor") != "false";
@@ -280,6 +281,9 @@ void App::run() {
         auto frame_interval = std::chrono::microseconds(static_cast<int64_t>(1e6 / refresh_rate()));
         int timeout = 500;
         if (script_.active()) timeout = std::min(timeout, script_.ms_until_next(now));
+        if (pets_deadline_ != TimePoint::max())  // the pets' own frame clock (30 fps, Zz tick)
+            timeout = std::min(timeout, static_cast<int>(std::max<int64_t>(
+                0, std::chrono::ceil<std::chrono::milliseconds>(pets_deadline_ - now).count())));
         if (dirty) {
             auto wait = std::chrono::duration_cast<std::chrono::milliseconds>(last_render + frame_interval - now);
             timeout = std::max(0, static_cast<int>(wait.count()));
@@ -426,6 +430,9 @@ void App::emit_probe(const std::string& label) {
     }
     debug_probe();
     nav_probe();
+    if (pets_on_)
+        std::fprintf(stderr, "  yard=(%.0f,%.0f %.0fx%.0f) pets: %s\n", l.yard.x, l.yard.y, l.yard.w, l.yard.h,
+                     pets_.describe().c_str());
 }
 
 void App::quit() {
@@ -446,6 +453,9 @@ KeyMod App::sdl_mods(SDL_Keymod m) const {
 }
 
 void App::handle_event(const SDL_Event& e) {
+    if (pets_on_ && (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                     e.type == SDL_EVENT_MOUSE_WHEEL))
+        pets_.on_input();  // resets their idle clock, wakes sleepers
     switch (e.type) {
 
     case SDL_EVENT_QUIT:
@@ -599,6 +609,8 @@ void App::handle_event(const SDL_Event& e) {
         } else {
             editor_view_.handle_text(text);
             lsp_maybe_complete(text, false);
+            if (pets_on_) pets_.on_key(static_cast<int>(std::count_if(text, text + std::strlen(text),
+                                                                      [](char c) { return !utf8::is_continuation(c); })));
         }
         break;
     }
@@ -660,6 +672,8 @@ void App::handle_event(const SDL_Event& e) {
             if (std::string c = debug_toolbar_.hit(mx, my); !c.empty()) handle_command(c);
         } else if (layout.tab_bar.contains(mx, my)) {
             tab_bar_.handle_mouse(me);
+        } else if (layout.yard.contains(mx, my)) {
+            pets_.click(mx, my);  // no focus change, no buttons: a pet jumps or nothing happens
         } else if (layout.editor.contains(mx, my) && !welcome_click(mx, my)) {
             focus(&editor_view_);
             editor_view_.handle_mouse(me);
@@ -730,7 +744,7 @@ void App::handle_event(const SDL_Event& e) {
                 sidebar_width_ = std::clamp(e.motion.x - l.sidebar.x, 140.0f, l.sidebar.w + l.editor.w - 200.0f);
             else
                 terminal_height_ = std::clamp(l.terminal.y + l.terminal.h - e.motion.y, 60.0f,
-                                              l.terminal.h + l.terminal_header.h + l.editor.h - 80.0f);
+                                              l.terminal.h + l.terminal_header.h + l.yard.h + l.editor.h - 80.0f);
             request_redraw();
             break;
         }
@@ -1029,6 +1043,10 @@ void App::handle_command(const std::string& cmd) {
         renderer_.set_opaque_popups(!renderer_.opaque_popups());
         themes_.set_setting("opaque_popups", renderer_.opaque_popups() ? "true" : "false");
         set_status_message(std::string("Opaque popups ") + (renderer_.opaque_popups() ? "on" : "off"));
+    } else if (cmd == "toggle_pets") {
+        themes_.set_setting("pets", pets_on_ ? "false" : "true");
+        load_pet_settings();
+        set_status_message(pets_on_ ? "Pets on: they nap when you do" : "Pets off");
     } else if (cmd == "toggle_animations") {
         anim::enabled = !anim::enabled;
         themes_.set_setting("animations", anim::enabled ? "true" : "false");
@@ -1114,10 +1132,17 @@ App::Layout App::compute_layout() const {
     l.terminal_header = {right_x, content_h - term_h, right_w, header_h};
     l.terminal = {right_x, content_h - term_h + header_h, right_w, term_h - header_h};
 
-    // Editor: remaining space
+    // Editor: remaining space, less the pets yard under it. The yard spans the whole
+    // editor column and hides before the editor would drop below its minimum, in
+    // fullscreen and in a narrow column.
     float editor_y = tab_h;
     float editor_h = content_h - tab_h - term_h;
     if (editor_h < 0) editor_h = 0;
+    float yard_h = pets_on_ ? Pets::YARD_H : 0.0f;
+    if (editor_h - yard_h < MIN_EDITOR_H || right_w < 240.0f || (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN))
+        yard_h = 0;
+    editor_h -= yard_h;
+    l.yard = {right_x, editor_y + editor_h, right_w, yard_h};
     l.editor = {act_x, editor_y, act_w, editor_h};
     if (split_) l.editor2 = {oth_x, editor_y, oth_w, editor_h};
 
@@ -1316,6 +1341,35 @@ void App::update(float dt) {
     nav_update();
     update_status_bar();
     debug_update();
+
+    pets_deadline_ = TimePoint::max();
+    if (pets_on_) {
+        Rect yard = compute_layout().yard;
+        pets_.set_yard(yard);
+        if (yard.h > 0) {
+            pets_.update(dt, anim::enabled);
+            // Ask for frames only while something moves and the window can be seen.
+            if (float next = pets_.next_frame_in(); next >= 0 && window_shown())
+                pets_deadline_ = Clock::now() + std::chrono::microseconds(static_cast<int64_t>(next * 1e6f));
+        }
+    }
+}
+
+bool App::window_shown() const {
+    SDL_WindowFlags f = SDL_GetWindowFlags(window_);
+    if (f & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) return false;
+    // QA runs park the window on a hidden workspace; they still need frames.
+    return scripted_ || !(f & SDL_WINDOW_OCCLUDED);
+}
+
+void App::load_pet_settings() {
+    pets_on_ = themes_.setting("pets") == "true";
+    int n = 3;
+    if (std::string v = themes_.setting("pet_count"); !v.empty()) n = std::clamp(std::atoi(v.c_str()), 1, 3);
+    pets_.configure(n, Pets::parse_coat(themes_.setting("pet_kit_color")));
+    if (std::string v = themes_.setting("pets_sleep_after"); !v.empty())
+        pets_.set_sleep_after(std::max(1.0f, std::strtof(v.c_str(), nullptr)));
+    if (!pets_on_) pets_deadline_ = TimePoint::max();
 }
 
 // ---------------------------------------------------------------------------
@@ -1386,6 +1440,12 @@ void App::render() {
         renderer_.add_rect({layout.group_split_x, layout.tab_bar.y, 1.0f, layout.editor.y + layout.editor.h - layout.tab_bar.y}, div);
     }
     debug_toolbar_.render(ctx, layout.editor, debugger_);
+    if (layout.yard.h > 0) {
+        renderer_.push_clip(layout.yard);
+        pets_.draw([this](Rect r, Color c) { renderer_.add_rect(r, c); },
+                   {theme_.indent_guide, theme_.fg_muted, theme_.accent, !theme_.dark});
+        renderer_.pop_clip();
+    }
     if (layout.terminal_header.h > 0) {
         renderer_.push_clip(layout.terminal_header);
         render_panel_header(ctx, layout.terminal_header);
@@ -1941,6 +2001,21 @@ void App::open_settings() {
                           [this] { return font_.ligatures(); }, "toggle_ligatures"));
     rows.push_back(toggle("Animations", "Smooth scrolling, cursor smear, panel and popup motion",
                           [] { return anim::enabled; }, "toggle_animations"));
+    rows.push_back(toggle("Pets in the editor", "Foxes play in a strip under the editor and nap when you do",
+                          [this] { return pets_on_; }, "toggle_pets"));
+    rows.push_back({Row::Stepper, "Pet count", "The mother fox, plus one or two kits",
+                    [this] { return std::to_string(pets_.count()); }, nullptr, [this](int d) {
+                        if (!d) return;
+                        themes_.set_setting("pet_count", std::to_string(std::clamp(pets_.count() + d, 1, 3)));
+                        load_pet_settings();
+                    }});
+    rows.push_back({Row::Choice, "Kit colour", "Coat of the first kit: red, arctic or silver",
+                    [this] { return std::string(Pets::coat_name(pets_.kit_coat())); }, nullptr, [this](int d) {
+                        int i = (static_cast<int>(pets_.kit_coat()) + (d < 0 ? 2 : 1)) % 3;
+                        themes_.set_setting("pet_kit_color",
+                                            std::string("\"") + Pets::coat_name(static_cast<Pets::Coat>(i)) + "\"");
+                        load_pet_settings();
+                    }});
     auto cycle = [this](std::string label, std::string desc, std::string key,
                         std::vector<std::string> values, std::function<std::string()> get) {
         return Row{Row::Choice, std::move(label), std::move(desc), get, nullptr,
@@ -2505,6 +2580,7 @@ void App::register_commands() {
     add("toggle_word_wrap",        "View: Toggle Word Wrap",    "Alt+Z");
     add("toggle_minimap",          "View: Toggle Minimap",      "");
     add("toggle_breadcrumbs",      "View: Toggle Breadcrumbs",  "");
+    add("toggle_pets",             "View: Toggle Pets",         "");
     add("toggle_animations",       "Preferences: Toggle Animations", "");
     add("toggle_opaque_popups",    "Preferences: Toggle Opaque Popups", "");
     add("select_font",             "Preferences: Font Family",  "");
