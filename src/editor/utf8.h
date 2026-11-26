@@ -6,7 +6,7 @@
 // boundaries and to on-screen (monospace) columns.
 namespace oh::utf8 {
 
-constexpr size_t TAB_WIDTH = 4;
+inline size_t TAB_WIDTH = 4;  // settings: tab_width
 
 inline bool is_continuation(char c) { return (static_cast<unsigned char>(c) & 0xC0) == 0x80; }
 

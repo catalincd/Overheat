@@ -24,6 +24,8 @@ void TextBuffer::load_string(const std::string& text) {
     undo_stack_.clear();
     redo_stack_.clear();
     changes_.clear();
+    dirty_.clear();  // a reload is not an edit
+    loads_++;
     version_++;
     log_edit(0);
     current_group_ = nullptr;
@@ -128,6 +130,20 @@ void TextBuffer::record_change(size_t start, const std::string& removed, const s
         return p;
     };
     changes_.push_back({start, removed.size(), inserted.size(), s, advance(s, removed), advance(s, inserted)});
+
+    // Shift the dirty ranges through this edit, add it, merge.
+    size_t r = removed.size(), n = inserted.size();
+    auto map = [&](size_t p) { return p < start ? p : p >= start + r ? p - r + n : start + n; };
+    for (auto& d : dirty_) d = {map(d.first), map(d.second)};
+    dirty_.push_back({start, start + n});
+    std::sort(dirty_.begin(), dirty_.end());
+    size_t out = 0;
+    for (size_t i = 1; i < dirty_.size(); i++) {
+        if (dirty_[i].first <= dirty_[out].second + 1) dirty_[out].second = std::max(dirty_[out].second, dirty_[i].second);
+        else dirty_[++out] = dirty_[i];
+    }
+    dirty_.resize(out + 1);
+    if (dirty_.size() > 64) dirty_ = {{dirty_.front().first, dirty_.back().second}};
 }
 
 void TextBuffer::insert(size_t offset, const std::string& text) {
@@ -361,6 +377,12 @@ void TextBuffer::begin_undo_group() {
     undo_stack_.emplace_back();
     current_group_ = &undo_stack_.back();
     redo_stack_.clear();
+}
+
+bool TextBuffer::resume_undo_group() {
+    if (current_group_ || undo_stack_.empty()) return false;
+    current_group_ = &undo_stack_.back();
+    return true;
 }
 
 void TextBuffer::end_undo_group() {

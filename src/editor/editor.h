@@ -3,6 +3,7 @@
 #include "editor/buffer.h"
 #include "editor/cursor.h"
 #include "editor/file_check.h"
+#include "editor/indent.h"
 #include "editor/syntax.h"
 #include "git/repository.h"
 #include <future>
@@ -152,6 +153,30 @@ public:
     bool is_modified() const { return buffer_.is_modified(); }
     std::string title() const;
 
+    // ---- Structural indentation (indent_mode; see editor/indent.h, indent_editor.cpp) ----
+    // Computed indent of a line in display columns, or IndentEngine::KEEP.
+    int computed_indent(size_t line) const;
+    bool indent_supported() const;
+    // Re-indent the lines touched by the selections / the whole file (one undo step).
+    // Return the number of lines changed.
+    size_t reindent_selection();
+    size_t reindent_file();
+    // Virtual whitespace (indent_mode = "virtual"): leading whitespace in the buffer is
+    // not shown; lines are drawn at their computed indent. view_col/view_byte map byte
+    // columns <-> display columns (plain utf8 columns when virtual whitespace is off).
+    bool virtual_ws() const;
+    size_t view_col(size_t line, const std::string& text, size_t byte) const;
+    size_t view_byte(size_t line, const std::string& text, size_t dcol) const;
+    // Keeps carets out of the invisible leading whitespace. With the selections from
+    // before a key: moving left out of the indent goes to the previous line, and
+    // vertical moves keep their on-screen column.
+    enum class Nav { Other, Home, Vertical };
+    void virtual_normalize(const std::vector<Selection>* before = nullptr, Nav nav = Nav::Other,
+                           size_t pref_before = SIZE_MAX);
+    // Called before writing the file: virtual mode with indent_write_on_save writes the
+    // computed indentation into the buffer first.
+    void before_save();
+
 private:
     TextBuffer buffer_;
     CursorSet cursors_;
@@ -176,6 +201,20 @@ private:
     // valid while the cursors still hold `expanded_`.
     std::vector<std::vector<Selection>> expand_history_;
     std::vector<Selection> expanded_;
+    // Indentation state (indent_editor.cpp).
+    mutable IndentEngine indent_;
+    mutable uint64_t indent_version_ = UINT64_MAX, indent_loads_ = UINT64_MAX;
+    bool indent_hold_ = false;   // undo/redo and reindent commands: no auto re-indent
+    size_t virtual_pref_ = 0;    // display column kept by vertical moves in virtual mode
+    void indent_sync() const;
+    void indent_consume_dirty(std::vector<size_t>* lines);
+    void indent_after_edit();
+    bool indent_newline();       // auto/virtual Enter; false = default behaviour
+    bool indent_tab();           // auto/virtual Tab at the indent re-indents the line
+    void virtual_extend_delete(bool backward);
+    std::string virtual_copy(bool& line_mode) const;
+    size_t reindent_lines(std::vector<size_t> lines);
+    void set_selections(const std::vector<Selection>& sels);
 };
 
 } // namespace oh

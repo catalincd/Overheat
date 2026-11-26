@@ -50,26 +50,15 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
 
 ## Requested (2026-11-26)
 
-- [ ] **New logo/icon:** a flat but 3D-looking flame in the style of Obsidian's logo,
-  centred, with no background. Keep the current colours, using contrast between them for
-  shading. No drop light
 - [ ] **Verify on real Windows: text no longer scales while resizing the window.** Cause:
   during a drag-resize Windows runs a modal loop, no frames were drawn, and DWM stretched
   the stale frame. Fixed in b4b5532 by redrawing from SDL's live-resize EXPOSED event
   watch; untested on Windows hardware
-- [ ] **4coder-style indentation**: indentation computed from the code structure
-  (tree-sitter scopes, brackets, continued statements) instead of typed. Every edit
-  re-indents the affected lines automatically. Optionally "virtual whitespace": leading
-  whitespace is drawn from the computed layout and the file's own indentation is ignored,
-  with a setting to write the computed indentation back on save. Per-language rules;
-  off by default, with an explicit "Reindent selection / file" command either way
-- [ ] **4coder-style highlighting of brackets and scopes**: colour parentheses, brackets and
-  braces by nesting depth; tint the backgrounds of enclosing scopes around the cursor (one
-  shade per level); highlight the matching pair and the scope boundaries more strongly
-  than the current bracket match
-- [ ] **4coder-style underlines**: underline the token under the cursor and its other
-  occurrences, and the lines of the current jump/compile-error location. Make the style
-  (underline, box, background) configurable per theme
+- [ ] **Indentation follow-ups** (engine, auto mode and virtual whitespace are in):
+  virtual whitespace while word-wrapping (wrap shows the real whitespace today); the
+  status bar column counts bytes, not the virtual column; per-language/per-workspace
+  indent settings; rustfmt's `)\n.method()` chains and `macro_rules!` bodies; clang-format
+  style operand alignment (`a ||\n    b` aligns under `a`); more languages with real rules
 - [ ] **Hex editor:** "Reopen With → Hex Editor" for any file, and the default for
   detected binaries. Offset / hex / ASCII columns, goto offset, search for bytes or text,
   in-place byte editing with undo and save, and selection kept in sync between the hex
@@ -169,12 +158,11 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
 - [ ] Large files: read-only hex view for binaries; mmap / lazy line indexing instead of
   reading the whole file (today: card above 50 MB, refused above 256 MB)
 - [ ] Remote-SSH: test the binary / large-file checks against a real SFTP server
-- [ ] Configurable tab width and "insert spaces" (currently 4 / spaces)
 - [ ] Bold / italic font faces for syntax styles
 - [ ] Column (box) selection with Alt+Shift+drag
 - [ ] Sticky scroll (current scope pinned at the top)
 - [ ] Code folding
-- [ ] More tree-sitter grammars (Python, Rust, JS/TS, Go, JSON, Markdown, ...)
+- [ ] More tree-sitter grammars (Python, JS/TS, Go, JSON, Markdown, ...)
 - [ ] Diff editor (side-by-side / inline) for git changes
 
 ## Workbench

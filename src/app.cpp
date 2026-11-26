@@ -1,4 +1,5 @@
 #include "app.h"
+#include "editor/utf8.h"
 #include "platform/platform.h"
 #include "fonts.h"
 #include "ui/cursor_fx.h"
@@ -132,6 +133,16 @@ bool App::init(int argc, char** argv) {
     ScopeHighlight::bracket_colors = themes_.setting("bracket_colors") != "false";
     ScopeHighlight::scopes = themes_.setting("scope_highlight") != "false";
     ScopeHighlight::occurrences = themes_.setting("occurrence_underline") != "false";
+    {   // Indentation (editor/indent.h): indent_mode off | auto | virtual
+        IndentSettings::mode = IndentSettings::parse_mode(themes_.setting("indent_mode"));
+        if (std::string v = themes_.setting("tab_width"); !v.empty())
+            IndentSettings::width = std::clamp(std::atoi(v.c_str()), 1, 16);
+        utf8::TAB_WIDTH = static_cast<size_t>(IndentSettings::width);
+        IndentSettings::use_tabs = themes_.setting("insert_spaces") == "false";
+        IndentSettings::write_on_save = themes_.setting("indent_write_on_save") == "true";
+        IndentSettings::indent_namespaces = themes_.setting("indent_namespaces") == "true";
+        IndentSettings::indent_case_labels = themes_.setting("indent_case_labels") != "false";
+    }
     editor_view_.set_wrap(themes_.setting("word_wrap") == "true");
     editor_view2_.set_wrap(themes_.setting("word_wrap") == "true");
     editor_view_.set_on_open_anyway([this](Editor& ed) { open_gated(ed); });
@@ -933,6 +944,31 @@ void App::handle_command(const std::string& cmd) {
         split_editor();
     } else if (cmd == "focus_group_1" || cmd == "focus_group_2") {
         focus_group(cmd == "focus_group_2");
+    } else if (cmd == "reindent_selection" || cmd == "reindent_file") {
+        if (Editor* ed = current_editor()) {
+            if (!ed->indent_supported()) {
+                set_status_message("Reindent: no indentation rules for this language");
+            } else {
+                size_t n = cmd == "reindent_file" ? ed->reindent_file() : ed->reindent_selection();
+                set_status_message("Reindented " + std::to_string(n) + (n == 1 ? " line" : " lines"));
+                editor_view_.reveal_cursor();
+            }
+        }
+    } else if (cmd == "select_indent_mode") {
+        static const char* modes[] = {"off", "auto", "virtual"};
+        CommandPalette::PickOptions opts;
+        opts.placeholder = "Indentation mode";
+        opts.items = {"Off: indentation is typed", "Auto: every edit re-indents the edited lines",
+                      "Virtual whitespace (experimental): draw lines at the computed indent"};
+        opts.initial = static_cast<int>(IndentSettings::mode);
+        opts.on_pick = [this](int i, const std::string&) {
+            if (i < 0 || i > 2) return;
+            IndentSettings::mode = static_cast<IndentMode>(i);
+            IndentSettings::changed();
+            themes_.set_setting("indent_mode", std::string("\"") + modes[i] + "\"");
+            set_status_message(std::string("Indentation mode: ") + modes[i]);
+        };
+        command_palette_.pick(std::move(opts));
     } else if (cmd == "toggle_word_wrap") {
         bool on = !editor_view_.wrap();
         editor_view_.set_wrap(on);
@@ -1455,6 +1491,7 @@ void App::save_current() {
             save_as();
             return;
         }
+        ed->before_save();  // virtual whitespace: optionally write the computed indentation
         if (!vfs_->write(ed->buffer().file_path(), ed->buffer().text())) {
             set_status_message("Save FAILED: " + ed->buffer().file_path().string(), 8.0f);
             return;
@@ -1925,6 +1962,29 @@ void App::open_settings() {
                         &ScopeHighlight::scopes, "scope_highlight"));
     rows.push_back(flag("Occurrence underlines", "Mark the identifier under the cursor wherever it is visible",
                         &ScopeHighlight::occurrences, "occurrence_underline"));
+    rows.push_back({Row::Choice, "Indentation mode",
+                    "Off, Auto (every edit) or Virtual whitespace (experimental)",
+                    [] { return std::string(IndentSettings::mode_name(IndentSettings::mode)); }, nullptr,
+                    [this](int) { handle_command("select_indent_mode"); }});
+    rows.push_back({Row::Stepper, "Tab width", "Columns per indent level and per tab character",
+                    [] { return std::to_string(IndentSettings::width); }, nullptr, [this](int d) {
+                        if (!d) return;
+                        IndentSettings::width = std::clamp(IndentSettings::width + d, 1, 16);
+                        utf8::TAB_WIDTH = static_cast<size_t>(IndentSettings::width);
+                        IndentSettings::changed();
+                        themes_.set_setting("tab_width", std::to_string(IndentSettings::width));
+                    }});
+    rows.push_back({Row::Toggle, "Insert spaces", "Indent with spaces instead of tabs",
+                    nullptr, [] { return !IndentSettings::use_tabs; }, [this](int) {
+                        IndentSettings::use_tabs = !IndentSettings::use_tabs;
+                        IndentSettings::changed();
+                        themes_.set_setting("insert_spaces", IndentSettings::use_tabs ? "false" : "true");
+                    }});
+    rows.push_back({Row::Toggle, "Write indentation on save", "Virtual whitespace: save the computed indentation",
+                    nullptr, [] { return IndentSettings::write_on_save; }, [this](int) {
+                        IndentSettings::write_on_save = !IndentSettings::write_on_save;
+                        themes_.set_setting("indent_write_on_save", IndentSettings::write_on_save ? "true" : "false");
+                    }});
     rows.push_back({Row::Button, "Keyboard shortcuts", "Search commands and assign new key chords",
                     [] { return std::string("Edit"); }, nullptr, [this](int) { settings_page_.close(); open_keybindings(); }});
     rows.push_back({Row::Button, "Settings file", (config_dir_ / "settings.toml").string(),
@@ -2300,6 +2360,7 @@ void App::confirm_discard(const std::string& action, std::function<void()> then)
         if (choice == 0) {
             for (auto& ed : dirty) {
                 if (ed->buffer().file_path().empty()) continue;  // untitled: nowhere to save
+                ed->before_save();
                 if (!vfs_->write(ed->buffer().file_path(), ed->buffer().text())) {
                     set_status_message("Save FAILED: " + ed->buffer().file_path().string(), 8.0f);
                     return;
@@ -2382,6 +2443,9 @@ void App::register_commands() {
     add("move_line_up",            "Move Line Up",              "Alt+Up");
     add("move_line_down",          "Move Line Down",            "Alt+Down");
     add("duplicate_line",          "Duplicate Line",            "Ctrl+Shift+D");
+    add("reindent_selection",      "Edit: Reindent Selection",  "Ctrl+Shift+I");
+    add("reindent_file",           "Edit: Reindent File",       "Ctrl+Shift+Alt+I");
+    add("select_indent_mode",      "Preferences: Indentation Mode...", "");
     add("goto_line",               "Go to Line",                "Ctrl+G");
     add("find",                    "Find",                      "Ctrl+F");
     add("replace",                 "Replace",                   "Ctrl+H");

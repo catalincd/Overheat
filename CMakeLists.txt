@@ -100,6 +100,8 @@ set(OVERHEAT_SOURCES
     src/editor/editor.cpp
     src/editor/cursor.cpp
     src/editor/syntax.cpp
+    src/editor/indent.cpp
+    src/editor/indent_editor.cpp
     src/ui/panel.cpp
     src/ui/editor_view.cpp
     src/ui/cursor_fx.cpp
@@ -284,3 +286,9 @@ foreach(f /usr/bin/ls /usr/bin/cmake /bin/sh)
     endif()
 endforeach()
 add_test(NAME file_check_test COMMAND file_check_test ${CMAKE_BINARY_DIR}/file_check_test_dir ${FILE_CHECK_SAMPLES})
+add_executable(indent_test tests/indent_test.cpp src/editor/indent.cpp src/editor/buffer.cpp src/editor/syntax.cpp)
+target_include_directories(indent_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(indent_test PRIVATE PkgConfig::FREETYPE tree_sitter ts_grammars)
+target_compile_options(indent_test PRIVATE -fsanitize=address,undefined)
+target_link_options(indent_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME indent_test COMMAND indent_test)

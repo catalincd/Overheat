@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """drive.py W H SCRIPT OUTDIR [overheat args...]
-Requires Hyprland (Lua dispatch API) and grim. {expr} in SCRIPT is evaluated with W, H.
+Requires Hyprland (Lua dispatch API) and grim. {expr} in SCRIPT is evaluated with W, H;
+write {{ and }} for literal braces.
 Launches Overheat floating at WxH, runs SCRIPT, screenshots the window on every
 'PROBE shot:<name>' line, and writes the full log to OUTDIR/log.txt."""
 import json, os, subprocess, sys, time
@@ -22,7 +23,10 @@ def find_window(pid):
 
 import re
 src = open(script).read()
+# {{ and }} are literal braces (for typing code); a lone {expr} is evaluated.
+src = src.replace("{{", "\x01").replace("}}", "\x02")
 src = re.sub(r"\{([^}]+)\}", lambda m: str(int(eval(m.group(1), {"W": W, "H": H}))), src)
+src = src.replace("\x01", "{").replace("\x02", "}")
 script = os.path.join(outdir, "script.txt")
 open(script, "w").write(src)
 # Default: the app captures its own frames (works with the screen locked or the

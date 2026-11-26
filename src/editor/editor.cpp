@@ -48,6 +48,7 @@ void Editor::load_content(const fs::path& path, const std::string& content) {
 }
 
 void Editor::save() {
+    before_save();
     if (!buffer_.file_path().empty()) {
         buffer_.save_file(buffer_.file_path());
     }
@@ -178,6 +179,7 @@ void Editor::insert_text(const std::string& text) {
 
 void Editor::delete_backward() {
     if (read_only_) return;
+    virtual_extend_delete(true);
     if (cursors_.selections().size() == 1 && cursors_.primary().empty()) {
         Position p = cursors_.primary_pos();
         std::string l = buffer_.line_text(p.line);
@@ -239,6 +241,7 @@ void Editor::delete_backward() {
 
 void Editor::delete_forward() {
     if (read_only_) return;
+    virtual_extend_delete(false);
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -556,6 +559,7 @@ void Editor::move_line_down() {
 
 void Editor::newline() {
     if (read_only_) return;
+    if (indent_newline()) return;  // indent_mode auto / virtual
     // Auto-indent: copy leading whitespace from current line
     Position pos = cursors_.primary_pos();
     std::string line = buffer_.line_text(pos.line);
@@ -575,6 +579,7 @@ void Editor::newline() {
 void Editor::tab() {
     if (read_only_) return;
     // If there's a selection, indent; otherwise insert spaces
+    if (indent_tab()) return;  // indent_mode auto / virtual: Tab at the indent re-indents
     if (!cursors_.primary().empty()) {
         indent();
     } else {
@@ -601,7 +606,8 @@ void Editor::indent() {
     std::sort(lines.begin(), lines.end());
     lines.erase(std::unique(lines.begin(), lines.end()), lines.end());
 
-    // Insert 4 spaces at the beginning of each line, bottom to top
+    // Insert one indent level at the beginning of each line, bottom to top
+    std::string unit = IndentSettings::use_tabs ? std::string("\t") : std::string(IndentSettings::width, ' ');
     for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
         size_t offset = buffer_.line_start(*it);
         buffer_.insert(offset, indent_unit());
@@ -628,7 +634,7 @@ void Editor::unindent() {
     std::sort(lines.begin(), lines.end());
     lines.erase(std::unique(lines.begin(), lines.end()), lines.end());
 
-    // Remove up to 4 leading spaces from each line, bottom to top
+    // Remove up to one indent level of leading spaces from each line, bottom to top
     for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
         std::string lt = buffer_.line_text(*it);
         size_t to_remove = 0;
@@ -734,7 +740,7 @@ void Editor::toggle_comment() {
 void Editor::scroll_to_cursor(float view_width, float view_height,
                                float char_w, float line_h) {
     Position pos = cursors_.primary_pos();
-    float cursor_x = static_cast<float>(utf8::display_col(buffer_.line_text(pos.line), pos.col)) * char_w;
+    float cursor_x = static_cast<float>(view_col(pos.line, buffer_.line_text(pos.line), pos.col)) * char_w;
     float cursor_y = static_cast<float>(pos.line) * line_h;
 
     // Margins shrink with the view so tiny panes don't oscillate between both edges.
@@ -759,6 +765,7 @@ void Editor::scroll_to_cursor(float view_width, float view_height,
 }
 
 std::string Editor::copy_text(bool& line_mode) const {
+    if (virtual_ws()) return virtual_copy(line_mode);  // with the computed indentation
     const auto& sels = cursors_.selections();
     line_mode = std::all_of(sels.begin(), sels.end(), [](const Selection& s) { return s.empty(); });
     std::string out;
@@ -878,7 +885,7 @@ void Editor::add_cursor_vertical(int dir) {
         long line = static_cast<long>(s.head.line) + dir;
         if (line < 0 || line >= static_cast<long>(buffer_.line_count())) continue;
         std::string from = buffer_.line_text(s.head.line), to = buffer_.line_text(static_cast<size_t>(line));
-        extra.push_back({static_cast<size_t>(line), utf8::byte_col_at(to, utf8::display_col(from, s.head.col))});
+        extra.push_back({static_cast<size_t>(line), view_byte(static_cast<size_t>(line), to, view_col(s.head.line, from, s.head.col))});
     }
     for (auto& p : extra) cursors_.add_cursor(p);
 }
@@ -980,17 +987,22 @@ bool Editor::find_bracket_pair(Position& a, Position& b) const {
 void Editor::undo() {
     if (read_only_) return;
     if (auto off = buffer_.undo()) cursors_.set_primary(buffer_.position_of(*off));
+    indent_hold_ = true;  // undo must not re-indent what it restores
     on_text_changed();
+    indent_hold_ = false;
 }
 
 void Editor::redo() {
     if (read_only_) return;
     if (auto off = buffer_.redo()) cursors_.set_primary(buffer_.position_of(*off));
+    indent_hold_ = true;
     on_text_changed();
+    indent_hold_ = false;
 }
 
 void Editor::on_text_changed() {
-    sync_syntax();
+    sync_syntax();        // the indenter reads the fresh tree
+    indent_after_edit();  // indent_mode = auto: re-indent the edited lines (same undo step)
 }
 
 void Editor::set_git_base(std::optional<std::string> base) {
@@ -1207,7 +1219,8 @@ std::string Editor::indent_unit() const {
 void Editor::detect_indentation() {
     // Like VS Code: tab- vs space-indented lines decide the kind; the most common
     // positive step between consecutive space-indented lines decides the width.
-    indent_style_ = {};
+    // Files with nothing to detect use the tab_width / insert_spaces settings.
+    indent_style_ = {IndentSettings::use_tabs, IndentSettings::width};
     size_t tab_lines = 0, space_lines = 0;
     int steps[9] = {};
     size_t prev = 0;
@@ -1228,6 +1241,7 @@ void Editor::detect_indentation() {
         indent_style_.tabs = true;
         return;
     }
+    if (space_lines) indent_style_.tabs = false;
     int best = 0;
     for (int w : {2, 4, 8, 3})
         if (steps[w] > steps[best]) best = w;

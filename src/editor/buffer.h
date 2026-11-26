@@ -49,6 +49,13 @@ public:
         Position start_pt, old_end_pt, new_end_pt;
     };
     std::vector<Change> take_changes() { return std::exchange(changes_, {}); }
+    // Byte ranges [lo, hi] (current coordinates, merged) touched by mutations since the
+    // last take_dirty(); the indenter re-indents / invalidates from these.
+    std::vector<std::pair<size_t, size_t>> take_dirty() { return std::exchange(dirty_, {}); }
+    // Reopens the last undo group so follow-up edits (auto-indent) undo together with it.
+    bool resume_undo_group();
+    // Increments on every load_string (a reload is not an edit; dirty ranges restart).
+    uint64_t loads() const { return loads_; }
     // Increments on every mutation; cheap change detection for derived data.
     uint64_t version() const { return version_; }
     // Smallest byte offset touched by any mutation after `since` (SIZE_MAX if none,
@@ -96,6 +103,8 @@ private:
     fs::path file_path_;
 
     std::vector<Change> changes_;
+    std::vector<std::pair<size_t, size_t>> dirty_;
+    uint64_t loads_ = 0;
     uint64_t version_ = 0;
     std::vector<std::pair<uint64_t, size_t>> edit_log_;  // (version after change, start offset)
     void log_edit(size_t start);

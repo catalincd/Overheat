@@ -112,6 +112,10 @@ private:
     // there, so shaping and per-byte work stay bounded however long the line is.
     static constexpr size_t MAX_DRAWN_LINE = 64 * 1024;
     std::string view_line(size_t line) const;
+    // Virtual whitespace (indent_mode = "virtual") is drawn when not word-wrapping;
+    // dcol() is the display column of a byte column either way.
+    bool virt() const { return editor_ && !wrapping() && editor_->virtual_ws(); }
+    size_t dcol(const std::string& text, size_t line, size_t byte) const;
     std::pair<size_t, size_t> visible_lines(Rect text_rect) const;  // [first, end)
 
     static constexpr float TEXT_PAD = 4.0f;
