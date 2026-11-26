@@ -46,6 +46,7 @@ Position App::lsp_position(Editor& ed) {
 
 void App::setup_lsp_for_file(const fs::path& path) {
     if (vfs_->is_remote()) return;  // language servers run locally only (for now)
+    if (Editor* ed = current_editor(); ed && (ed->large_file() || ed->read_only())) return;
     std::string lang = SyntaxHighlighter::detect_language(path);
     std::vector<std::string> args;
     std::string server = server_for(lang, args);

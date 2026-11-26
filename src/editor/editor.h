@@ -2,6 +2,7 @@
 #include "types.h"
 #include "editor/buffer.h"
 #include "editor/cursor.h"
+#include "editor/file_check.h"
 #include "editor/syntax.h"
 #include "git/repository.h"
 #include <future>
@@ -130,6 +131,22 @@ public:
     void set_bom(bool on);
     // Language mode override (syntax highlighting); "" = plain text.
     void set_language(const std::string& lang_id);
+    // Binary / very large files (App::open_file). A gated editor has no text yet;
+    // its view shows a card asking whether to open the file anyway.
+    filecheck::Verdict gate() const { return gate_; }
+    uint64_t file_size() const { return file_size_; }
+    void set_gate(filecheck::Verdict g, uint64_t size) {
+        gate_ = g;
+        file_size_ = size;
+        set_read_only(g != filecheck::Verdict::Open);
+    }
+    // Read-only editors ignore every edit (binaries opened anyway, gated files).
+    bool read_only() const { return read_only_; }
+    void set_read_only(bool on) { read_only_ = on; buffer_.set_read_only(on); }
+    // Large-file mode (also for binaries): no syntax tree, LSP, minimap, wrap or blame.
+    bool large_file() const { return large_file_; }
+    bool binary() const { return binary_; }
+    void set_large_file(bool large, bool binary) { large_file_ = large || binary; binary_ = binary; }
 
     // State
     bool is_modified() const { return buffer_.is_modified(); }
@@ -149,6 +166,9 @@ private:
     IndentStyle indent_style_;
     void detect_indentation();
     void replace_all_text(const std::string& text);
+    filecheck::Verdict gate_ = filecheck::Verdict::Open;
+    uint64_t file_size_ = 0;
+    bool read_only_ = false, large_file_ = false, binary_ = false;
 
     void on_text_changed();
 

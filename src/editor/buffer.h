@@ -56,6 +56,8 @@ public:
     size_t earliest_change_since(uint64_t since) const;
 
     bool is_modified() const { return modified_; }
+    // Read-only buffers ignore insert/erase/replace (Editor::set_read_only).
+    void set_read_only(bool on) { read_only_ = on; }
     void set_unmodified() { modified_ = false; save_point_ = undo_stack_.size(); }
 
     const fs::path& file_path() const { return file_path_; }
@@ -90,6 +92,7 @@ private:
     UndoGroup* current_group_ = nullptr;
     size_t save_point_ = 0;
     bool modified_ = false;
+    bool read_only_ = false;
     fs::path file_path_;
 
     std::vector<Change> changes_;

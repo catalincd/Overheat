@@ -1,4 +1,5 @@
 #include "ssh/session.h"
+#include <algorithm>
 #include <cerrno>
 #include <libssh2.h>
 #include <libssh2_sftp.h>
@@ -296,17 +297,29 @@ void SSHSession::disconnect() {
     teardown();
 }
 
-bool SSHSession::read_file(const std::string& remote_path, std::string& out) {
+bool SSHSession::read_file(const std::string& remote_path, std::string& out, size_t max) {
     LIBSSH2_SFTP* s = sftp();
     if (!s) return false;
     LIBSSH2_SFTP_HANDLE* h = libssh2_sftp_open(s, remote_path.c_str(), LIBSSH2_FXF_READ, 0);
     if (!h) return false;
     out.clear();
     char buf[32768];
-    ssize_t n;
-    while ((n = libssh2_sftp_read(h, buf, sizeof buf)) > 0) out.append(buf, static_cast<size_t>(n));
+    ssize_t n = 0;
+    while (out.size() < max &&
+           (n = libssh2_sftp_read(h, buf, std::min(sizeof buf, max - out.size()))) > 0)
+        out.append(buf, static_cast<size_t>(n));
     libssh2_sftp_close(h);
-    return n == 0;
+    return n >= 0;
+}
+
+bool SSHSession::file_size(const std::string& remote_path, uint64_t& out) {
+    LIBSSH2_SFTP* s = sftp();
+    if (!s) return false;
+    LIBSSH2_SFTP_ATTRIBUTES attrs{};
+    if (libssh2_sftp_stat(s, remote_path.c_str(), &attrs) != 0 || !(attrs.flags & LIBSSH2_SFTP_ATTR_SIZE))
+        return false;
+    out = attrs.filesize;
+    return true;
 }
 
 bool SSHSession::write_file(const std::string& remote_path, const std::string& content) {

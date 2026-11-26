@@ -2,6 +2,7 @@
 #include "types.h"
 #include <libssh2.h>
 #include <libssh2_sftp.h>
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <functional>
@@ -46,7 +47,10 @@ public:
     bool is_connected() const { return connected_; }
 
     // Remote file operations
-    bool read_file(const std::string& remote_path, std::string& out);
+    // Reads at most `max` bytes (the whole file by default).
+    bool read_file(const std::string& remote_path, std::string& out, size_t max = SIZE_MAX);
+    // SFTP stat; false if the file is missing or the server sends no size.
+    bool file_size(const std::string& remote_path, uint64_t& out);
     bool write_file(const std::string& remote_path, const std::string& content);
     std::vector<FileEntry> list_dir(const std::string& remote_path);
     bool file_exists(const std::string& remote_path);

@@ -91,6 +91,7 @@ bool App::init(int argc, char** argv) {
     }
     if (std::string v = themes_.setting("opacity"); !v.empty())
         opacity_ = std::clamp(std::strtof(v.c_str(), nullptr), 0.5f, 1.0f);
+    renderer_.set_opaque_popups(themes_.setting("opaque_popups") != "false");
 
     // A transparent window can composite per-pixel alpha (Wayland, X11 ARGB visual,
     // DWM blur-behind on Windows). It costs nothing while the swapchain stays opaque,
@@ -133,6 +134,8 @@ bool App::init(int argc, char** argv) {
     ScopeHighlight::occurrences = themes_.setting("occurrence_underline") != "false";
     editor_view_.set_wrap(themes_.setting("word_wrap") == "true");
     editor_view2_.set_wrap(themes_.setting("word_wrap") == "true");
+    editor_view_.set_on_open_anyway([this](Editor& ed) { open_gated(ed); });
+    editor_view2_.set_on_open_anyway([this](Editor& ed) { open_gated(ed); });
     sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
     terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
     font_.set_ligatures(themes_.setting("ligatures") != "false");
@@ -481,10 +484,36 @@ void App::handle_event(const SDL_Event& e) {
             if (sidebar_view_ == SidebarView::Chat && chat_.input_focused() && chat_.handle_key(ke)) break;
         }
 
+        // Chords (Ctrl+K Ctrl+T): the prefix arms the next key; modifiers alone keep it armed.
+        bool in_terminal = terminal_.focused() && terminal_visible_;
+        chord_eat_text_ = false;
+        if (chord_prefix_) {
+            bool modifier_only = kc == SDLK_LCTRL || kc == SDLK_RCTRL || kc == SDLK_LSHIFT || kc == SDLK_RSHIFT ||
+                                 kc == SDLK_LALT || kc == SDLK_RALT || kc == SDLK_LGUI || kc == SDLK_RGUI;
+            if (modifier_only) break;
+            auto [pk, pm] = *chord_prefix_;
+            chord_prefix_.reset();
+            chord_eat_text_ = true;  // a plain second key must not also type its character
+            std::string chord_cmd = keymap_.lookup_chord(pk, pm, kc, mods);
+            if (chord_cmd.empty()) {
+                set_status_message("(" + KeyMap::chord_to_string(pk, pm) + ", " + KeyMap::chord_to_string(kc, mods) +
+                                   ") is not a command");
+            } else {
+                set_status_message("", 0.0f);
+                handle_command(chord_cmd);
+            }
+            break;
+        }
+        if (!in_terminal && keymap_.is_chord_prefix(kc, mods)) {
+            chord_prefix_ = {kc, mods};
+            set_status_message("(" + KeyMap::chord_to_string(kc, mods) + ") was pressed. Waiting for the second key...",
+                               10.0f);
+            break;
+        }
+
         // Check keymap. While the terminal has focus, the shell owns the keyboard
         // except for a few app-level shortcuts (and Ctrl+Shift+C/V for the clipboard).
         std::string cmd = keymap_.lookup(kc, mods);
-        bool in_terminal = terminal_.focused() && terminal_visible_;
         if (!cmd.empty() && in_terminal) {
             static const char* global_cmds[] = {
                 "toggle_terminal", "command_palette_files", "command_palette_commands",
@@ -527,7 +556,9 @@ void App::handle_event(const SDL_Event& e) {
 
     case SDL_EVENT_TEXT_INPUT: {
         const char* text = e.text.text;
-        if (command_palette_.is_visible()) {
+        if (chord_eat_text_) {
+            chord_eat_text_ = false;
+        } else if (command_palette_.is_visible()) {
             command_palette_.handle_text(text);
         } else if (scm_.input_focused()) {
             scm_.handle_text(text);
@@ -929,6 +960,10 @@ void App::handle_command(const std::string& cmd) {
             update_monitor();
         }
         monitor_bar_.set_detail(!monitor_bar_.detail_open());
+    } else if (cmd == "toggle_opaque_popups") {
+        renderer_.set_opaque_popups(!renderer_.opaque_popups());
+        themes_.set_setting("opaque_popups", renderer_.opaque_popups() ? "true" : "false");
+        set_status_message(std::string("Opaque popups ") + (renderer_.opaque_popups() ? "on" : "off"));
     } else if (cmd == "toggle_animations") {
         anim::enabled = !anim::enabled;
         themes_.set_setting("animations", anim::enabled ? "true" : "false");
@@ -975,7 +1010,11 @@ App::Layout App::compute_layout() const {
     // Activity bar (always visible), then the sidebar view.
     float ab_w = ACTIVITY_BAR_W;
     l.activity_bar = {0, top, ab_w, content_h - top};
-    float sb_w = std::floor(std::min(sidebar_width_, (fw - ab_w) * 0.5f) * sidebar_open_.value);
+    // Small windows (like VS Code): the editor keeps a minimum size; the sidebar
+    // and terminal shrink first and hide below their own minimum.
+    float sb_max = std::min(sidebar_width_, std::min((fw - ab_w) * 0.5f, fw - ab_w - MIN_EDITOR_W));
+    if (sb_max < MIN_SIDEBAR_W) sb_max = 0;
+    float sb_w = std::floor(sb_max * sidebar_open_.value);
     l.sidebar = {ab_w, top, sb_w, content_h - top};
 
     float right_x = ab_w + sb_w;
@@ -1002,7 +1041,9 @@ App::Layout App::compute_layout() const {
     tab_h += crumbs_h + top;
 
     // Terminal: at bottom of right region (above status bar)
-    float term_h = std::floor(std::min(terminal_height_, (content_h - tab_h) * 0.8f) * terminal_open_.value);
+    float term_max = std::min(terminal_height_, std::min((content_h - tab_h) * 0.8f, content_h - tab_h - MIN_EDITOR_H));
+    if (term_max < MIN_TERMINAL_H) term_max = 0;
+    float term_h = std::floor(term_max * terminal_open_.value);
     // A header strip sits on top of the terminal.
     float header_h = std::min(term_h, 28.0f);
     l.terminal_header = {right_x, content_h - term_h, right_w, header_h};
@@ -1057,7 +1098,7 @@ void App::poll_git_refresh() {
 }
 
 void App::attach_git(Editor& ed) {
-    if (!git_.is_open() || ed.buffer().file_path().empty()) return;
+    if (!git_.is_open() || ed.buffer().file_path().empty() || ed.large_file()) return;
     const fs::path path = ed.buffer().file_path();
     ed.set_git_base(git_.head_content(path));
     if (!ed.has_git_base()) return;
@@ -1173,6 +1214,9 @@ void App::update(float dt) {
     sidebar_open_.follow(sidebar_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     terminal_open_.follow(terminal_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     split_open_.follow(split_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
+    // A terminal auto-hidden by a small window must not keep the keyboard.
+    if (terminal_visible_ && terminal_.focused() && terminal_open_.value > 0.99f && compute_layout().terminal_header.h <= 0)
+        focus_editor();
     lsp_update();
     poll_remote_connect();
     update_monitor();
@@ -1229,7 +1273,7 @@ void App::render() {
 
     // Flat layout: panels separate by tone; only a hairline above the terminal.
     renderer_.add_rect({0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)}, theme_.bg);
-    if (terminal_visible_)
+    if (terminal_visible_ && layout.terminal_header.h > 0)
         renderer_.add_rect({layout.terminal.x, layout.terminal.y, layout.terminal.w, 1}, theme_.border);
 
     // All panels add their UI rects (selections, highlights, gutter bg)
@@ -1291,12 +1335,14 @@ void App::render() {
         else
             renderer_.add_rect({layout.terminal_header.x, layout.terminal_header.y - 1.0f, layout.terminal.w, 2.0f}, c);
     }
+    renderer_.set_popup(true);  // opaque on a translucent window (opaque_popups)
     if (layout.monitor.h > 0)
         monitor_bar_.render_detail(ctx, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (settings_page_.visible())
         clipped(settings_page_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (command_palette_.is_visible())
         clipped(command_palette_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
+    renderer_.set_popup(false);
 
     if (debug_hit_ && last_click_x_ >= 0) {
         Color hit = Color::hex(0xff00ff);
@@ -1333,14 +1379,26 @@ void App::open_file(const fs::path& path) {
         }
     }
 
-    std::string content;
-    if (!vfs_->read(path, content)) {
-        set_status_message("Cannot open " + path.string(), 6.0f);
-        return;
+    // Size and a binary sniff before reading (local or SFTP): binaries and very
+    // large files get a card first (EditorView, file_gate_card.cpp).
+    using filecheck::Verdict;
+    uint64_t size = 0;
+    std::string head;
+    Verdict verdict = Verdict::Open;
+    if (vfs_->file_size(path, size)) {
+        if (!vfs_->read_head(path, filecheck::BINARY_PROBE, head)) {
+            set_status_message("Cannot open " + path.string(), 6.0f);
+            return;
+        }
+        verdict = filecheck::classify(size, head);
     }
     auto editor = std::make_shared<Editor>();
-    editor->load_content(path, content);
-    if (!vfs_->is_remote()) attach_git(*editor);
+    if (verdict == Verdict::Open) {
+        if (!load_editor_file(*editor, path, false)) return;
+    } else {
+        editor->buffer().set_file_path(path);
+        editor->set_gate(verdict, size);
+    }
 
     // Replace a pristine "Untitled" tab instead of piling up empty tabs.
     int replace = -1;
@@ -1355,12 +1413,44 @@ void App::open_file(const fs::path& path) {
     focus_editor();
     note_recent_file(path);
 
-    setup_lsp_for_file(path);
+    if (!editor->large_file() && verdict == Verdict::Open) setup_lsp_for_file(path);
+}
 
+bool App::load_editor_file(Editor& ed, const fs::path& path, bool binary) {
+    std::string content;
+    if (!vfs_->read(path, content)) {
+        set_status_message("Cannot open " + path.string(), 6.0f);
+        return false;
+    }
+    bool large = filecheck::large_mode(content.size());
+    ed.set_large_file(large, binary);
+    ed.load_content(path, content);
+    ed.set_read_only(binary);
+    if (!ed.large_file() && !vfs_->is_remote()) attach_git(ed);
+    if (ed.large_file())
+        set_status_message(path.filename().string() + (binary ? ": binary file, read-only" : ": large file mode"), 6.0f);
+    return true;
+}
+
+// "Open Anyway" on a binary / large file card.
+void App::open_gated(Editor& ed) {
+    using filecheck::Verdict;
+    Verdict v = ed.gate();
+    if (v != Verdict::Binary && v != Verdict::AskLarge) return;
+    uint64_t size = ed.file_size();
+    if (!load_editor_file(ed, ed.buffer().file_path(), v == Verdict::Binary)) return;
+    ed.set_gate(Verdict::Open, size);
+    ed.set_read_only(v == Verdict::Binary);
+    if (!ed.large_file()) setup_lsp_for_file(ed.buffer().file_path());
+    request_redraw();
 }
 
 void App::save_current() {
     if (Editor* ed = current_editor()) {
+        if (ed->read_only()) {
+            set_status_message(ed->buffer().file_path().filename().string() + " is read-only");
+            return;
+        }
         if (ed->buffer().file_path().empty()) {
             save_as();
             return;
@@ -1386,6 +1476,8 @@ void App::save_current() {
 void App::save_as() {
     Editor* ed = current_editor();
     if (!ed) return;
+    if (ed->gate() != filecheck::Verdict::Open) return save_current();  // no text loaded
+
     CommandPalette::PickOptions opts;
     opts.placeholder = "Save as (path relative to " + project_root_.string() + ")";
     opts.allow_free_text = true;
@@ -1415,10 +1507,10 @@ void App::focus_editor() { focus(&editor_view_); }
 App::Splitter App::splitter_at(float x, float y) const {
     Layout l = compute_layout();
     constexpr float GRAB = 4.0f;
-    if (sidebar_visible_ && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y >= l.sidebar.y &&
-        y < l.sidebar.y + l.sidebar.h)
+    if (sidebar_visible_ && l.sidebar.w > 0 && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB &&
+        y >= l.sidebar.y && y < l.sidebar.y + l.sidebar.h)
         return Splitter::Sidebar;
-    if (terminal_visible_ && std::abs(y - l.terminal_header.y) <= GRAB && x >= l.terminal.x)
+    if (terminal_visible_ && l.terminal_header.h > 0 && std::abs(y - l.terminal_header.y) <= GRAB && x >= l.terminal.x)
         return Splitter::Terminal;
     if (split_ && std::abs(x - l.group_split_x) <= GRAB && y >= l.tab_bar.y && y < l.editor.y + l.editor.h)
         return Splitter::Groups;
@@ -1767,6 +1859,8 @@ void App::open_settings() {
                     "Translucent background, opaque text (50-100%)",
                     [this] { return std::to_string(static_cast<int>(std::lround(opacity_ * 100))) + "%"; }, nullptr,
                     [this](int d) { if (d) set_opacity(opacity_ + 0.05f * static_cast<float>(d)); }});
+    rows.push_back(toggle("Opaque popups", "Palette, settings and completion stay solid",
+                          [this] { return renderer_.opaque_popups(); }, "toggle_opaque_popups"));
     rows.push_back(toggle("Font ligatures", "Render => != -> as joined glyphs when the font has them",
                           [this] { return font_.ligatures(); }, "toggle_ligatures"));
     rows.push_back(toggle("Animations", "Smooth scrolling, cursor smear, panel and popup motion",
@@ -1867,7 +1961,7 @@ void App::watch_open_files() {
     for (auto& tab : tab_bar_.tabs()) {
         if (!tab.editor) continue;
         const fs::path& p = tab.editor->buffer().file_path();
-        if (p.empty()) continue;
+        if (p.empty() || tab.editor->gate() != filecheck::Verdict::Open) continue;
         std::error_code ec;
         auto t = fs::last_write_time(p, ec);
         if (ec) continue;
@@ -2320,6 +2414,7 @@ void App::register_commands() {
     add("toggle_minimap",          "View: Toggle Minimap",      "");
     add("toggle_breadcrumbs",      "View: Toggle Breadcrumbs",  "");
     add("toggle_animations",       "Preferences: Toggle Animations", "");
+    add("toggle_opaque_popups",    "Preferences: Toggle Opaque Popups", "");
     add("select_font",             "Preferences: Font Family",  "");
     add("toggle_ligatures",        "Preferences: Toggle Font Ligatures", "");
     add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");

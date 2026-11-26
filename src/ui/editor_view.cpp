@@ -33,6 +33,7 @@ float EditorView::gutter_width(const FontAtlas& font) const {
 void EditorView::render(RenderContext& ctx, Rect bounds) {
     bounds_ = bounds;
     if (!editor_) return;
+    if (gated()) return render_gate_card(ctx, bounds);
     editor_->sync_syntax();
 
     cached_line_h_ = ctx.font->line_height();
@@ -48,6 +49,8 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     }
     view_y_ = smooth_y_.follow(editor_->scroll_y(), anim::scroll_duration, 0.5f);
     view_x_ = smooth_x_.follow(editor_->scroll_x(), anim::scroll_duration, 0.5f);
+    // Nothing is drawn past view_line()'s cut: don't scroll into empty space.
+    view_x_ = std::min(view_x_, static_cast<float>(MAX_DRAWN_LINE) * cached_char_w_);
     if (shape_font_ != ctx.font || shape_font_size_ != cached_line_h_ ||
         shape_ligatures_ != ctx.font->ligatures() || ctx.font->generation() != shape_generation_) {
         shape_cache_.clear();
@@ -96,7 +99,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
             auto [first, end] = visible_lines(text_rect);
             for (Position p : {a, b}) {
                 if (p.line < first || p.line >= end) continue;
-                std::string l = editor_->buffer().line_text(p.line);
+                std::string l = view_line(p.line);
                 Pt pt = point(l, p.line, p.col, text_rect);
                 ctx.r->add_rect({pt.x, pt.y, cached_char_w_, cached_line_h_}, {0, 0, 0, 0}, 2.0f, 1.0f, c);
             }
@@ -113,7 +116,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     find_.render(ctx, bounds);
     if (completion_.visible()) {
         const Position& a = completion_.anchor();
-        std::string line = editor_->buffer().line_text(a.line);
+        std::string line = view_line(a.line);
         Pt pt = point(line, a.line, a.col, text_rect);
         completion_.render(ctx, pt.x, pt.y, cached_line_h_, bounds);
     }
@@ -161,7 +164,7 @@ void EditorView::render_gutter(RenderContext& ctx, Rect gutter_rect) {
 }
 
 bool EditorView::wrapping() const {
-    return wrap_ && wrap_cols_ > 0 && editor_ && editor_->buffer().length() <= (2u << 20);
+    return wrap_ && wrap_cols_ > 0 && editor_ && !editor_->large_file() && editor_->buffer().length() <= (2u << 20);
 }
 
 std::vector<size_t> EditorView::segments(const std::string& text) const {
@@ -231,6 +234,24 @@ float EditorView::row_y(size_t line, Rect text_rect) const {
     return text_rect.y + static_cast<float>(first_row(line)) * cached_line_h_ - view_y_;
 }
 
+std::string EditorView::view_line(size_t line) const {
+    const TextBuffer& buf = editor_->buffer();
+    size_t len = buf.line_length(line);
+    if (len <= MAX_DRAWN_LINE) return buf.line_text(line);
+    // Copy only the drawn prefix of a huge line, cut at a character boundary.
+    std::string out;
+    size_t start = buf.line_start(line);
+    while (out.size() < MAX_DRAWN_LINE + 4) {
+        std::string_view c = buf.chunk_at(start + out.size());
+        if (c.empty()) break;
+        out.append(c.substr(0, MAX_DRAWN_LINE + 4 - out.size()));
+    }
+    size_t cut = std::min(out.size(), MAX_DRAWN_LINE);
+    while (cut > MAX_DRAWN_LINE - 4 && utf8::is_continuation(out[cut])) cut--;
+    out.resize(cut);
+    return out;
+}
+
 float EditorView::col_x(const std::string& line_text, size_t byte_col, Rect text_rect) const {
     return text_rect.x + TEXT_PAD - view_x_ +
            static_cast<float>(utf8::display_col(line_text, byte_col)) * cached_char_w_;
@@ -271,7 +292,7 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
     auto [first, end] = visible_lines(text_rect);
 
     for (size_t line_idx = first; line_idx < end; line_idx++) {
-        std::string line = buf.line_text(line_idx);
+        std::string line = view_line(line_idx);
         float y = row_y(line_idx, text_rect);
         size_t line_len = line.size();
         auto tokens = syntax.tokens_for_line(buf, buf.line_start(line_idx), line_len);
@@ -343,21 +364,24 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
             }
             if (x + char_w * 3 < text_rect.x) continue;
             Color c = byte_colors[g.cluster];
-            if (g.gid == 0) {
+            auto ulead = static_cast<unsigned char>(lead);
+            bool control = ulead < 0x20 || ulead == 0x7F;  // NUL etc. in binaries: Control Pictures
+            if (g.gid == 0 || control) {
                 // Not in the primary face: use the per-codepoint fallback chain.
-                size_t end = utf8::next_boundary(line, g.cluster);
-                uint32_t cp = static_cast<unsigned char>(lead);
-                if (cp >= 0x80) {
-                    cp &= 0x3F >> (end - g.cluster - 1);
-                    for (size_t k = g.cluster + 1; k < end; k++)
-                        cp = (cp << 6) | (static_cast<unsigned char>(line[k]) & 0x3F);
-                }
+                // Invalid UTF-8 bytes decode to U+FFFD, one per byte (see utf8.h).
+                uint32_t cp = control ? (ulead == 0x7F ? 0x2421u : 0x2400u + ulead)
+                                      : static_cast<uint32_t>(utf8::decode(line, g.cluster));
+                if (control) c = ctx.theme->fg_muted;
                 ctx.r->add_char(x, baseline - g.y_offset, cp, c, *ctx.font);
             } else {
                 const GlyphInfo* gi = ctx.font->glyph_by_index(g.gid);
                 ctx.r->add_glyph(x, baseline - g.y_offset, gi, c);
                 if (gi) in_cluster += gi->advance;
             }
+        }
+        if (segs.size() == 1 && buf.line_length(line_idx) > line_len) {  // cut by view_line()
+            float x = x_base + static_cast<float>(utf8::display_col(line, line_len)) * char_w;
+            ctx.r->add_text(x + char_w, baseline, "\u2026 long line truncated", ctx.theme->fg_muted, *ctx.font);
         }
     }
 }
@@ -382,7 +406,7 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
         if (sel.empty()) continue;
         Position mn = sel.min(), mx = sel.max();
         for (size_t line_idx = std::max(first, mn.line); line_idx < end && line_idx <= mx.line; line_idx++) {
-            std::string line = buf.line_text(line_idx);
+            std::string line = view_line(line_idx);
             size_t c0 = line_idx == mn.line ? mn.col : 0;
             size_t c1 = line_idx == mx.line ? mx.col : line.size();
             auto segs = segments(line);
@@ -469,7 +493,7 @@ void EditorView::render_diagnostics(RenderContext& ctx, Rect text_rect) {
     for (const LSPDiagnostic& d : *diagnostics_) {
         if (d.end.line < first || d.start.line >= end) continue;
         for (size_t line = std::max(d.start.line, first); line <= d.end.line && line < end; line++) {
-            std::string text = buf.line_text(line);
+            std::string text = view_line(line);
             size_t c0 = line == d.start.line ? std::min(d.start.col, text.size()) : 0;
             size_t c1 = line == d.end.line ? std::min(d.end.col, text.size()) : text.size();
             auto segs = segments(text);
@@ -492,7 +516,7 @@ void EditorView::render_diagnostics(RenderContext& ctx, Rect text_rect) {
     for (size_t i = 0; i < worst.size(); i++) {
         if (!worst[i]) continue;
         size_t line = first + i;
-        std::string text = buf.line_text(line);
+        std::string text = view_line(line);
         std::string msg = worst[i]->message.substr(0, worst[i]->message.find('\n'));
         Color c = color_of(worst[i]->severity);
         c.a *= 0.85f;
@@ -515,7 +539,7 @@ static std::string relative_time(int64_t when) {
 }
 
 void EditorView::render_blame(RenderContext& ctx, Rect text_rect) {
-    if (!show_blame_ || editor_->cursors().selections().size() != 1) return;
+    if (!show_blame_ || editor_->large_file() || editor_->cursors().selections().size() != 1) return;
     size_t line = editor_->cursors().primary_pos().line;
     if (line_has_diagnostic(line)) return;  // the diagnostic message owns the line end
     auto [first, end] = visible_lines(text_rect);
@@ -538,7 +562,7 @@ void EditorView::render_indent_guides(RenderContext& ctx, Rect text_rect) {
     auto [first, end] = visible_lines(text_rect);
     Color c = ctx.theme->indent_guide;
     auto indent_of = [&](size_t line, bool& blank) {
-        std::string t = buf.line_text(line);
+        std::string t = view_line(line);
         size_t col = 0, i = 0;
         for (; i < t.size() && (t[i] == ' ' || t[i] == '\t'); i++) col += t[i] == '\t' ? 4 - col % 4 : 1;
         blank = i == t.size();
@@ -576,7 +600,7 @@ void EditorView::render_find_matches(RenderContext& ctx, Rect text_rect) {
     for (; it != ms.end() && it->start < hi; ++it) {
         Position a = buf.position_of(it->start), b = buf.position_of(it->start + it->len);
         if (a.line != b.line) continue;  // single-line queries only
-        std::string line = buf.line_text(a.line);
+        std::string line = view_line(a.line);
         Pt p0 = point(line, a.line, a.col, text_rect), p1 = point(line, b.line, b.col, text_rect);
         bool is_cur = static_cast<int>(it - ms.begin()) == find_.current();
         if (p1.y == p0.y)
@@ -601,7 +625,7 @@ void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {
         Position pos = sels[i].head;
         bool fx_slot = animated && i < limit;
         if (!fx_slot && (pos.line < first || pos.line >= end)) continue;
-        Pt pt = point(buf.line_text(pos.line), pos.line, pos.col, text_rect);
+        Pt pt = point(view_line(pos.line), pos.line, pos.col, text_rect);
         Rect caret{pt.x, pt.y, 2.0f, cached_line_h_};
         bool draw_self = true;
         if (fx_slot) {
@@ -617,7 +641,8 @@ void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {
 }
 
 float EditorView::minimap_width() const {
-    return show_minimap_ && bounds_.w > 500.0f ? MINIMAP_W : 0.0f;
+    bool large = editor_ && editor_->large_file();
+    return show_minimap_ && !large && bounds_.w > 500.0f ? MINIMAP_W : 0.0f;
 }
 
 // First document line shown at the top of the minimap: the minimap window moves
@@ -660,7 +685,7 @@ void EditorView::render_minimap(RenderContext& ctx, Rect r) {
     size_t count = static_cast<size_t>(r.h / MINIMAP_LINE_H) + 1;
     float cell = 1.2f;  // horizontal pixels per character
     for (size_t line = first; line < first + count && line < buf.line_count(); line++) {
-        std::string text = buf.line_text(line);
+        std::string text = view_line(line);
         if (text.empty()) continue;
         float y = r.y + static_cast<float>(line - first) * MINIMAP_LINE_H;
         auto tokens = syntax.tokens_for_line(buf, buf.line_start(line), text.size());
@@ -712,7 +737,7 @@ Position EditorView::position_at(float x, float y) const {
     size_t row = rel_y > 0 ? static_cast<size_t>(rel_y / cached_line_h_) : 0;
     row = std::min(row, total_rows() - 1);
     auto [line, seg] = line_at_row(row);
-    std::string text = buf.line_text(line);
+    std::string text = view_line(line);
     auto segs = segments(text);
     seg = std::min(seg, segs.size() - 1);
     size_t seg_dcol = utf8::display_col(text, segs[seg]);
@@ -726,6 +751,7 @@ Position EditorView::position_at(float x, float y) const {
 
 bool EditorView::handle_key(const KeyEvent& e) {
     if (!editor_ || !e.pressed) return false;
+    if (gated()) return gate_key(e);
     if (completion_.handle_key(*editor_, e)) {
         reveal_cursor();
         return true;
@@ -848,6 +874,7 @@ bool EditorView::handle_key(const KeyEvent& e) {
 
 bool EditorView::handle_mouse(const MouseEvent& e) {
     if (!editor_) return false;
+    if (gated()) return gate_mouse(e);
     if (completion_.handle_mouse(*editor_, e)) return true;
     // Minimap: click or drag to centre the viewport on that spot.
     if (e.button == 1 && (minimap_drag_ || (e.pressed && !e.motion && minimap_rect_.contains(e.x, e.y) &&

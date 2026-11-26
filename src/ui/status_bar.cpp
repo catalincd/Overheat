@@ -142,7 +142,9 @@ void StatusBar::render(RenderContext& ctx, Rect bounds) {
     if (editor_) {
         const TextBuffer& buf = editor_->buffer();
         auto pos = editor_->cursors().primary_pos();
-        size_t col = utf8::display_col(buf.line_text(pos.line), pos.col);
+        // Huge (minified) lines: the byte column, without copying the line every frame.
+        size_t col = buf.line_length(pos.line) > (1u << 20) ? pos.col
+                                                            : utf8::display_col(buf.line_text(pos.line), pos.col);
         char tmp[96];
         std::snprintf(tmp, sizeof tmp, "Ln %zu, Col %zu", pos.line + 1, col + 1);
         std::string text = tmp;
@@ -162,6 +164,9 @@ void StatusBar::render(RenderContext& ctx, Rect bounds) {
             text += tmp;
         }
         add("position", true, 100, {{0, text}});
+        if (editor_->binary()) add("filemode", true, 90, {{0, "Binary (read-only)"}});
+        else if (editor_->large_file()) add("filemode", true, 90, {{0, "Large File Mode"}});
+        else if (editor_->read_only()) add("filemode", true, 90, {{0, "Read-only"}});
         auto ind = editor_->indent_style();
         add("indent", true, 45, {{0, ind.tabs ? "Tab Size: " + std::to_string(ind.size) : "Spaces: " + std::to_string(ind.size)}});
         if (format_editor_ != editor_.get() || format_version_ != buf.version()) {
