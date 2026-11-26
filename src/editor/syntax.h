@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 #include <future>
-#include <unordered_map>
 
 namespace oh {
 
@@ -26,7 +25,10 @@ public:
     // Replays buffer edits into the tree, then reparses reusing unchanged subtrees.
     void apply_changes(const TextBuffer& buffer, const std::vector<TextBuffer::Change>& changes);
 
-    std::vector<Token> tokens_for_line(size_t line, size_t line_start_byte, size_t line_length) const;
+    // Tokens of one line, in document order and non-overlapping. `buffer` is the text
+    // the tree was parsed from (some languages look at identifier spelling).
+    std::vector<Token> tokens_for_line(const TextBuffer& buffer, size_t line_start_byte,
+                                       size_t line_length) const;
     std::string language_id() const { return lang_id_; }
 
     // Enclosing named scopes at a byte offset, outermost first (for breadcrumbs).
@@ -37,6 +39,10 @@ public:
     std::vector<Scope> scope_at(const TextBuffer& buffer, size_t offset) const;
 
     static std::string detect_language(const fs::path& path);
+    // True when a tree-sitter grammar is built in for this language id.
+    static bool has_grammar(const std::string& lang_id);
+
+    struct Grammar;  // one entry of the language table in syntax.cpp
 
 private:
     TSParser* parser_ = nullptr;
@@ -45,13 +51,7 @@ private:
     void discard_pending();
     std::string lang_id_;
 
-    struct NodeTypeMap {
-        std::unordered_map<std::string, TokenType> map;
-    };
-    NodeTypeMap type_map_;
-
-    void build_type_map();
-    TokenType classify_node(TSNode node) const;
+    const Grammar* grammar_ = nullptr;
 };
 
 } // namespace oh

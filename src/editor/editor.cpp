@@ -78,7 +78,7 @@ const std::vector<Token>& Editor::tokens_for_line(size_t line) const {
     static thread_local std::vector<Token> cached;
     size_t start = buffer_.line_start(line);
     size_t len = buffer_.line_length(line);
-    cached = syntax_.tokens_for_line(line, start, len);
+    cached = syntax_.tokens_for_line(buffer_, start, len);
     return cached;
 }
 

@@ -269,7 +269,7 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
         std::string line = buf.line_text(line_idx);
         float y = row_y(line_idx, text_rect);
         size_t line_len = line.size();
-        auto tokens = syntax.tokens_for_line(line_idx, buf.line_start(line_idx), line_len);
+        auto tokens = syntax.tokens_for_line(buf, buf.line_start(line_idx), line_len);
 
         std::vector<Color> byte_colors(line_len, ctx.theme->fg);
         for (auto& tok : tokens) {
@@ -638,7 +638,7 @@ void EditorView::render_minimap(RenderContext& ctx, Rect r) {
         std::string text = buf.line_text(line);
         if (text.empty()) continue;
         float y = r.y + static_cast<float>(line - first) * MINIMAP_LINE_H;
-        auto tokens = syntax.tokens_for_line(line, buf.line_start(line), text.size());
+        auto tokens = syntax.tokens_for_line(buf, buf.line_start(line), text.size());
         auto color_of = [&](TokenType t) {
             switch (t) {
                 case TokenType::Keyword: return th.keyword;
