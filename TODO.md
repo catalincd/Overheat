@@ -14,13 +14,13 @@ the git log; keep this file short and current.
   open file / workspace name (e.g. `app.cpp — Overheat`). Clicking it opens Quick Open
   (Ctrl+P); Ctrl+Shift+P opens the same box in `>` command mode, and recently opened files
   are listed first
-- [ ] **Small windows must not shrink the text** (VS Code keeps the font size fixed and
-  lets the layout give way). Reported by the user; not reproduced in `--script` runs
-  (char cell stays 9x20 at 1600x1000, 800x600 and 520x380), so check a real tiled/resized
-  Hyprland window and fractional scaling (SDL pixel density / content scale changes).
-  Related, seen at 520x380: the sidebar and terminal keep their size and the editor area
-  collapses to nothing. Give the editor a minimum size and auto-hide or shrink the sidebar
-  and terminal first, like VS Code
+- [ ] **Verify on real Windows: text no longer scales while resizing the window.** Cause:
+  during a drag-resize Windows runs a modal loop, no frames were drawn, and DWM stretched
+  the stale frame. Fixed in b4b5532 by redrawing from SDL's live-resize EXPOSED event
+  watch; untested on Windows hardware
+- [ ] Layout at small sizes (seen at 520x380): the sidebar and terminal keep their size and
+  the editor collapses to nothing. Give the editor a minimum size and shrink or auto-hide
+  the sidebar and terminal first, like VS Code
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
 
 ## Follow-ups from the 2026-11-26 batch
