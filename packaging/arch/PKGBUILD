@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc="Fast GPU-accelerated code editor (Vulkan, tree-sitter, LSP, Git, Remote-SSH)"
 arch=('x86_64')
 url="https://github.com/catalincd/Overheat"
-license=('custom')
+license=('Apache-2.0')
 depends=('sdl3' 'freetype2' 'harfbuzz' 'fontconfig' 'libgit2' 'libssh2' 'vulkan-icd-loader'
          'gcc-libs' 'glibc')
 makedepends=('cmake' 'ninja' 'shaderc' 'glm' 'vulkan-headers' 'pkgconf')
@@ -27,6 +27,7 @@ build() {
 
 package() {
     DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 "$pkgname-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 "$pkgname-$pkgver/assets/fonts/JetBrainsMono-OFL.txt" \
         "$pkgdir/usr/share/licenses/$pkgname/JetBrainsMono-OFL.txt"
     install -Dm644 "$pkgname-$pkgver/third_party/tree-sitter/LICENSE" \

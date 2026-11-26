@@ -12,6 +12,7 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 ![Vulkan](https://img.shields.io/badge/Vulkan-1.2-ffb13d?style=flat-square&logo=vulkan&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-x86__64-1f2026?style=flat-square&logo=linux&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-1f2026?style=flat-square&logo=windows&logoColor=white)
+[![License](https://img.shields.io/badge/license-Apache--2.0-1f2026?style=flat-square)](LICENSE)
 
 [Download](#-download) · [Features](#-features) · [Shortcuts](#%EF%B8%8F-keyboard-shortcuts) · [Build](#-building-from-source) · [Configure](#-configuration) · [Roadmap](TODO.md)
 
@@ -301,6 +302,11 @@ third_party/           tree-sitter core + C/C++ grammars (MIT)
 Next up: hover tooltips, rename and format, symbol search, a Problems panel, Git and language
 servers over Remote-SSH, more grammars, and tool use in the AI chat. See
 **[TODO.md](TODO.md)** for the full list and known limitations.
+
+## 📄 License
+
+Overheat is licensed under the **[Apache License 2.0](LICENSE)**. Vendored tree-sitter code is MIT
+(`third_party/`), and the bundled JetBrains Mono Nerd Font is SIL OFL 1.1.
 
 ## 🙏 Acknowledgements
 

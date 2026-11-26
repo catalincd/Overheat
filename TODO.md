@@ -51,9 +51,8 @@ the git log; keep this file short and current.
 Release builds: `packaging/windows/build.sh` (installer + portable zip),
 `packaging/linux/build.sh` (tarball, .deb, AppImage), `packaging/arch/build.sh`.
 
-- [ ] AppImage: needs `appimagetool` installed (the build script skips it otherwise)
-- [ ] Portable Linux packages need glibc >= 2.43 (libraries come from Arch); build them in an
-      older distro container to support Ubuntu 24.04 / Debian 12
+- Portable Linux packages need glibc >= 2.43 when built on Arch; docs/BUILDING.md has a
+  container recipe for older distros (Ubuntu 24.04 / Debian 12)
 - [ ] Test on real Windows 10/11 hardware (verified under Wine only): HiDPI, IME, ConPTY resize
 - [ ] Windows: settings UI for the terminal shell (now `terminal_shell` in settings.toml)
 - [ ] Windows: Remote-SSH agent auth via Pageant / OpenSSH agent pipe
