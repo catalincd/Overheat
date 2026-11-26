@@ -6,10 +6,19 @@ set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
 set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
 set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)
 
+# CMake re-reads this file for every try_compile, inside the same process, without
+# the -D cache value. The ENV{} assignments below leak back into the main project,
+# so remember the sysroot in the environment as well, or a try_compile pass would
+# point pkg-config back at the default path.
+if(NOT OVERHEAT_WIN_SYSROOT AND DEFINED ENV{OVERHEAT_WIN_SYSROOT})
+    set(OVERHEAT_WIN_SYSROOT "$ENV{OVERHEAT_WIN_SYSROOT}")
+endif()
 if(NOT OVERHEAT_WIN_SYSROOT)
     set(OVERHEAT_WIN_SYSROOT "${CMAKE_CURRENT_LIST_DIR}/../../build-win/deps/sysroot/ucrt64")
 endif()
 get_filename_component(OVERHEAT_WIN_SYSROOT "${OVERHEAT_WIN_SYSROOT}" ABSOLUTE)
+set(ENV{OVERHEAT_WIN_SYSROOT} "${OVERHEAT_WIN_SYSROOT}")
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES OVERHEAT_WIN_SYSROOT)
 
 set(CMAKE_FIND_ROOT_PATH ${OVERHEAT_WIN_SYSROOT} /usr/x86_64-w64-mingw32)
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
