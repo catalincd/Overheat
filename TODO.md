@@ -61,6 +61,13 @@ the git log; keep this file short and current.
   - invalid UTF-8 must render (replacement glyphs) without breaking cursor movement,
     and saving must not corrupt the bytes
   - add tests: a 1 GB file, `/usr/bin/*`, a random-bytes file, a minified 50 MB JS line
+- [ ] **Hex editor:** "Reopen With → Hex Editor" for any file, and the default for
+  detected binaries. Offset / hex / ASCII columns, goto offset, search for bytes or text,
+  in-place byte editing with undo and save, and selection kept in sync between the hex
+  and ASCII columns. Large files are paged or memory-mapped, not loaded whole; it works
+  over SFTP too
+- [ ] **Toggle the status bar:** View → Toggle Status Bar (palette + settings.toml
+  `status_bar = false`), like VS Code; the monitor strip and layout adapt
 - [ ] **Build, lint and navigation like VS Code**
   - **Build tasks:** a project task file (like `.vscode/tasks.json`: name, command, cwd,
     env, default build task) with Run Build Task (Ctrl+Shift+B) and Run Task… in the
