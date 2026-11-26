@@ -47,6 +47,20 @@ std::string user_name() {
     return "user";
 }
 
+std::vector<std::string> environment() {
+    std::vector<std::string> out;
+    for (char** e = environ; e && *e; e++) out.emplace_back(*e);
+    return out;
+}
+
+void kill_process(long pid) {
+    if (pid > 0) ::kill(static_cast<pid_t>(pid), SIGKILL);
+}
+
+bool process_alive(long pid) {
+    return pid > 0 && (::kill(static_cast<pid_t>(pid), 0) == 0 || errno == EPERM);
+}
+
 std::vector<std::string> default_shell() {
     std::string sh = getenv_str("SHELL");
     return {sh.empty() ? "/bin/bash" : sh};
@@ -155,6 +169,7 @@ int Process::wait() {
 }
 
 bool Process::running() const { return impl_->pid > 0; }
+long Process::pid() const { return impl_->pid > 0 ? impl_->pid : 0; }
 
 // ---------------------------------------------------------------- Pty
 

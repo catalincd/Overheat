@@ -20,7 +20,7 @@ public:
     int ms_until_next(TimePoint now) const;
 
 private:
-    void push_mouse_button(float x, float y, bool down, int clicks);
+    void push_mouse_button(float x, float y, bool down, int clicks, int button = SDL_BUTTON_LEFT);
     void push_motion(float x, float y, bool held);
     void push_key(const std::string& combo);
     void push_text(const std::string& text);

@@ -39,6 +39,17 @@ void KeyMap::init_defaults(const std::string& preset) {
     bind(SDLK_SPACE, KeyMod::Ctrl,                      "trigger_suggest");
     bind(SDLK_F12,   KeyMod::None,                      "goto_definition");
 
+    // Debugging (F11 steps into while debugging, else toggles fullscreen)
+    bind(SDLK_F5,    KeyMod::None,                      "debug_start");
+    bind(SDLK_F5,    KeyMod::Shift,                     "debug_stop");
+    bind(SDLK_F5,    KeyMod::Ctrl | KeyMod::Shift,      "debug_restart");
+    bind(SDLK_F6,    KeyMod::None,                      "debug_pause");
+    bind(SDLK_F9,    KeyMod::None,                      "debug_toggle_breakpoint");
+    bind(SDLK_F10,   KeyMod::None,                      "debug_step_over");
+    bind(SDLK_F11,   KeyMod::None,                      "debug_step_into");
+    bind(SDLK_F11,   KeyMod::Shift,                     "debug_step_out");
+    bind(SDLK_Y,     KeyMod::Ctrl | KeyMod::Shift,      "debug_console");
+
     // Undo/redo
     bind(SDLK_Z,     KeyMod::Ctrl,                      "undo");
     bind(SDLK_Z,     KeyMod::Ctrl | KeyMod::Shift,      "redo");
@@ -109,8 +120,7 @@ void KeyMap::init_defaults(const std::string& preset) {
     bind(SDLK_I,     KeyMod::Ctrl | KeyMod::Shift,      "reindent_selection");
     bind(SDLK_I,     KeyMod::Ctrl | KeyMod::Shift | KeyMod::Alt, "reindent_file");
 
-    // Window
-    bind(SDLK_F11,   KeyMod::None,                      "toggle_fullscreen");
+    // Window (fullscreen: F11 outside a debug session, see debug_step_into)
     bind(SDLK_Q,     KeyMod::Ctrl,                      "quit");
 
     // Zoom

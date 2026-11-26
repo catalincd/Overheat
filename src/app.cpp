@@ -33,6 +33,7 @@ App::~App() {
     llm_.cancel();  // its worker posts to SDL, which is shut down below
     if (vk_.device()) vkDeviceWaitIdle(vk_.device());
     plugins_.shutdown();
+    debugger_.shutdown();  // ends the debuggee and the adapter, joins their threads
 
     if (lsp_.is_running()) lsp_.stop();
     monitor_.shutdown();  // its worker posts redraw events to SDL, shut down below
@@ -193,6 +194,7 @@ bool App::init(int argc, char** argv) {
     setup_scm();
     setup_search();
     setup_chat();
+    setup_debugger();
     tab_bar_.set_on_close_request([this](int i) { request_close_tab(i); });
 
     // ---- Terminal ----
@@ -415,6 +417,7 @@ void App::emit_probe(const std::string& label) {
             std::fprintf(stderr, "  selections=%s\n", all.c_str());
         }
     }
+    debug_probe();
 }
 
 void App::quit() {
@@ -530,7 +533,8 @@ void App::handle_event(const SDL_Event& e) {
                 "toggle_terminal", "command_palette_files", "command_palette_commands",
                 "next_tab", "prev_tab", "quit", "toggle_fullscreen"};
             bool global = std::any_of(std::begin(global_cmds), std::end(global_cmds),
-                                      [&](const char* g) { return cmd == g; });
+                                      [&](const char* g) { return cmd == g; }) ||
+                          (cmd.rfind("debug_", 0) == 0 && cmd != "debug_toggle_breakpoint");
             bool clipboard = (cmd == "copy" || cmd == "paste") && (mods & KeyMod::Shift);
             if (!global && !clipboard) cmd.clear();
         }
@@ -543,6 +547,8 @@ void App::handle_event(const SDL_Event& e) {
         KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
         if (terminal_.focused() && terminal_visible_) {
             terminal_.handle_key(ke);
+        } else if (debug_console_.focused() && terminal_visible_) {
+            debug_console_.handle_key(ke);
         } else {
             editor_view_.handle_key(ke);
         }
@@ -577,6 +583,8 @@ void App::handle_event(const SDL_Event& e) {
             search_.handle_text(text);
         } else if (chat_.input_focused()) {
             chat_.handle_text(text);
+        } else if (debug_console_.focused() && terminal_visible_) {
+            debug_console_.handle_text(text);
         } else if (terminal_.focused() && terminal_visible_) {
             terminal_.handle_text(text);
         } else {
@@ -625,8 +633,8 @@ void App::handle_event(const SDL_Event& e) {
             update_monitor();  // detail samples start right away
         } else if (layout.activity_bar.contains(mx, my)) {
             int slot = static_cast<int>((my - layout.activity_bar.y) / ACTIVITY_BAR_W);
-            SidebarView v = static_cast<SidebarView>(std::clamp(slot, 0, 3));
-            if (slot <= 3) {
+            SidebarView v = static_cast<SidebarView>(std::clamp(slot, 0, 4));
+            if (slot <= 4) {
                 if (sidebar_visible_ && v == sidebar_view_) sidebar_visible_ = false;
                 else show_sidebar_view(v);
             }
@@ -635,11 +643,16 @@ void App::handle_event(const SDL_Event& e) {
             sidebar_panel().handle_mouse(me);
         } else if (layout.terminal_header.contains(mx, my)) {
             if (term_close_btn_.contains(mx, my)) terminal_visible_ = false;
-            else if (term_restart_btn_.contains(mx, my)) restart_terminal();
-            else focus(&terminal_);
+            else if (bottom_tabs_[1].contains(mx, my)) show_debug_console(true);
+            else if (bottom_tabs_[0].contains(mx, my)) bottom_view_ = BottomView::Terminal, focus(&terminal_);
+            else if (term_restart_btn_.contains(mx, my))
+                bottom_view_ == BottomView::DebugConsole ? debugger_.clear_console() : restart_terminal();
+            else focus(&bottom_panel());
         } else if (terminal_visible_ && layout.terminal.contains(mx, my)) {
-            focus(&terminal_);
-            terminal_.handle_mouse(me);
+            focus(&bottom_panel());
+            bottom_panel().handle_mouse(me);
+        } else if (debug_toolbar_.contains(mx, my)) {
+            if (std::string c = debug_toolbar_.hit(mx, my); !c.empty()) handle_command(c);
         } else if (layout.tab_bar.contains(mx, my)) {
             tab_bar_.handle_mouse(me);
         } else if (layout.editor.contains(mx, my) && !welcome_click(mx, my)) {
@@ -691,7 +704,7 @@ void App::handle_event(const SDL_Event& e) {
         if (sidebar_visible_ && layout.sidebar.contains(mx, my)) {
             sidebar_panel().handle_mouse(me);
         } else if (terminal_visible_ && layout.terminal.contains(mx, my)) {
-            terminal_.handle_mouse(me);
+            bottom_panel().handle_mouse(me);
         } else if (layout.editor.contains(mx, my)) {
             editor_view_.handle_mouse(me);
         }
@@ -740,6 +753,7 @@ void App::handle_event(const SDL_Event& e) {
 
 void App::handle_command(const std::string& cmd) {
     if (status_command(cmd)) return;  // status bar / Command Center commands (status_glue.cpp)
+    if (debug_command(cmd)) return;
     if (cmd.rfind("workspace_", 0) == 0 || cmd == "open_folder") {
         workspace_command(cmd);
     } else if (cmd == "save") {
@@ -793,7 +807,9 @@ void App::handle_command(const std::string& cmd) {
         command_palette_.show(CommandPalette::Mode::Commands);
     } else if (cmd == "toggle_terminal") {
         // Like VS Code: show + focus; hide when it already has focus; else just focus it.
-        if (terminal_visible_ && !terminal_.focused()) {
+        bool other_tab = bottom_view_ != BottomView::Terminal;
+        bottom_view_ = BottomView::Terminal;
+        if (terminal_visible_ && (other_tab || !terminal_.focused())) {
             focus(&terminal_);
         } else {
             terminal_visible_ = !terminal_visible_;
@@ -832,7 +848,9 @@ void App::handle_command(const std::string& cmd) {
             SDL_free(raw);
         }
         if (text.empty()) return;
-        if (terminal_.focused() && terminal_visible_) {
+        if (debug_console_.focused() && terminal_visible_) {
+            debug_console_.handle_text(text.substr(0, text.find('\n')));
+        } else if (terminal_.focused() && terminal_visible_) {
             terminal_.paste(text);
         } else if (Editor* ed = current_editor()) {
             ed->paste_text(text, !clipboard_line_text_.empty() && text == clipboard_line_text_);
@@ -1284,6 +1302,7 @@ void App::update(float dt) {
     status_bar_.set_editor(ed);
     editor_view_.set_editor(ed);
     update_status_bar();
+    debug_update();
 }
 
 // ---------------------------------------------------------------------------
@@ -1351,12 +1370,13 @@ void App::render() {
         Color div = theme_.border;
         renderer_.add_rect({layout.group_split_x, layout.tab_bar.y, 1.0f, layout.editor.y + layout.editor.h - layout.tab_bar.y}, div);
     }
+    debug_toolbar_.render(ctx, layout.editor, debugger_);
     if (layout.terminal_header.h > 0) {
         renderer_.push_clip(layout.terminal_header);
         render_terminal_header(ctx, layout.terminal_header);
         renderer_.pop_clip();
     }
-    if (layout.terminal.h > 0) clipped(terminal_, layout.terminal);
+    if (layout.terminal.h > 0) clipped(bottom_panel(), layout.terminal);
     CursorFx::get().render(renderer_);  // in-flight cursor smear and particles
     if (layout.monitor.h > 0) clipped(monitor_bar_, layout.monitor);
     clipped(status_bar_, layout.status_bar);
@@ -1502,6 +1522,8 @@ void App::save_current() {
             disk_mtimes_[ed->buffer().file_path().string()] = t;  // our own write is not an external change
         set_status_message("Saved " + ed->buffer().file_path().filename().string());
         request_git_refresh();
+        // Breakpoints that moved with edits reach the adapter on save (as in VS Code).
+        if (debugger_.active()) debugger_.breakpoints_changed(normalize_path(ed->buffer().file_path()));
 
         // Notify LSP
         if (lsp_.is_running()) {
@@ -1670,7 +1692,8 @@ void App::set_opacity(float o) {
 }
 
 void App::focus(Panel* p) {
-    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_, &search_, &chat_})
+    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_, &search_, &chat_,
+                                                  &debug_panel_, &debug_console_})
         q->set_focused(q == p);
 }
 
@@ -1728,7 +1751,7 @@ bool App::restore_session() {
             ss >> sv >> tv >> view;
             sidebar_visible_ = sv != 0;
             terminal_visible_ = tv != 0;
-            sidebar_view_ = static_cast<SidebarView>(std::clamp(view, 0, 3));
+            sidebar_view_ = static_cast<SidebarView>(std::clamp(view, 0, 4));
             sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
             terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
         } else if (kind == "tab") {
@@ -1936,6 +1959,12 @@ void App::open_settings() {
                           [this] { return local_monitor_; }, "toggle_local_monitor"));
     rows.push_back(toggle("Inline git blame", "Author and commit at the end of the cursor line",
                           [this] { return editor_view_.blame(); }, "toggle_blame"));
+    rows.push_back(toggle("Debug: inline values", "Variable values at line ends while paused",
+                          [this] { return themes_.setting("debug.inline_values") != "false"; },
+                          "debug_toggle_inline_values"));
+    rows.push_back(toggle("Debug: open console on start", "Show the Debug Console when debugging starts",
+                          [this] { return themes_.setting("debug.open_console_on_start") != "false"; },
+                          "debug_toggle_console_on_start"));
     rows.push_back({Row::Toggle, "Auto-close brackets and quotes", "Typing ( [ { \" ' ` inserts the pair",
                     nullptr, [] { return Editor::auto_close_pairs; }, [this](int) {
                         Editor::auto_close_pairs = !Editor::auto_close_pairs;
@@ -2043,15 +2072,22 @@ void App::render_terminal_header(RenderContext& ctx, Rect r) {
     ctx.r->add_rect({r.x, r.y, r.w, 1.0f}, theme_.border);
     float cw = font_.char_width();
     float base = r.y + (r.h - font_.line_height()) * 0.5f + font_.ascender();
-    float x = ctx.r->add_text(r.x + 14.0f, base, "TERMINAL", terminal_.focused() ? theme_.fg : theme_.fg_muted, font_);
+    bool term_tab = bottom_view_ == BottomView::Terminal;
+    float x = ctx.r->add_text(r.x + 14.0f, base, "TERMINAL", term_tab ? theme_.fg : theme_.fg_muted, font_);
     std::string label = remote_active_ ? "ssh: " + remote_target_.alias : "bash";
     if (!remote_active_) label = fs::path(local_shell().front()).stem().string();
-    ctx.r->add_text(x + 2.0f * cw, base, label, theme_.fg_muted, font_);
+    float x2 = ctx.r->add_text(x + 2.0f * cw, base, label, theme_.fg_muted, font_);
+    bottom_tabs_[0] = {r.x + 6.0f, r.y, x2 - r.x, r.h};
+    float cx = x2 + 3.0f * cw;
+    float cx2 = ctx.r->add_text(cx, base, "DEBUG CONSOLE", term_tab ? theme_.fg_muted : theme_.fg, font_);
+    bottom_tabs_[1] = {cx - 6.0f, r.y, cx2 - cx + 12.0f, r.h};
     // Underline the active "tab", like the editor tabs.
-    ctx.r->add_rect({r.x + 10.0f, r.y + r.h - 2.0f, x - r.x - 6.0f, 2.0f}, theme_.accent);
+    if (term_tab) ctx.r->add_rect({r.x + 10.0f, r.y + r.h - 2.0f, x - r.x - 6.0f, 2.0f}, theme_.accent);
+    else ctx.r->add_rect({cx - 4.0f, r.y + r.h - 2.0f, cx2 - cx + 8.0f, 2.0f}, theme_.accent);
     term_close_btn_ = {r.x + r.w - 32.0f, r.y + 2.0f, 24.0f, r.h - 4.0f};
     term_restart_btn_ = {r.x + r.w - 60.0f, r.y + 2.0f, 24.0f, r.h - 4.0f};
-    for (auto [btn, icon] : {std::pair{term_restart_btn_, 0xEB37u}, std::pair{term_close_btn_, 0xEA76u}}) {
+    uint32_t action_icon = term_tab ? 0xEB37u : 0xEA81u;  // restart shell / clear console
+    for (auto [btn, icon] : {std::pair{term_restart_btn_, action_icon}, std::pair{term_close_btn_, 0xEA76u}}) {
         bool hover = btn.contains(ctx.mouse_x, ctx.mouse_y);
         if (hover) ctx.r->add_rect(btn, theme_.surface_hover, 4.0f);
         ctx.r->add_char(btn.x + (btn.w - cw) * 0.5f, base, icon, hover ? theme_.fg : theme_.fg_muted, font_);
@@ -2126,9 +2162,9 @@ void App::render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed) {
 
 void App::render_activity_bar(RenderContext& ctx, Rect r) {
     ctx.r->add_rect(r, theme_.tab_bg);
-    const uint32_t icons[] = {0xEAF0, 0xEA6D, 0xEA68, 0xEAC7};
+    const uint32_t icons[] = {0xEAF0, 0xEA6D, 0xEA68, 0xEAC7, 0xEB91};  // ..., run and debug
     float cw = font_.char_width();
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         Rect slot{r.x, r.y + i * ACTIVITY_BAR_W, ACTIVITY_BAR_W, ACTIVITY_BAR_W};
         bool active = sidebar_visible_ && static_cast<int>(sidebar_view_) == i;
         bool hover = slot.contains(ctx.mouse_x, ctx.mouse_y);
@@ -2449,7 +2485,7 @@ void App::register_commands() {
     add("goto_line",               "Go to Line",                "Ctrl+G");
     add("find",                    "Find",                      "Ctrl+F");
     add("replace",                 "Replace",                   "Ctrl+H");
-    add("toggle_fullscreen",       "Toggle Fullscreen",         "F11");
+    add("toggle_fullscreen",       "Toggle Fullscreen",         "F11 (not debugging)");
     add("zoom_in",                 "Zoom In",                   "Ctrl++");
     add("zoom_out",                "Zoom Out",                  "Ctrl+-");
     add("zoom_reset",              "Reset Zoom",                "Ctrl+0");
@@ -2491,6 +2527,7 @@ void App::register_commands() {
     add("workspace_edit",          "Workspaces: Edit Workspace File", "");
     add("open_folder",             "File: Open Folder...",      "");
     add("quit",                    "Quit",                      "Ctrl+Q");
+    debug_register_commands();
 }
 
 // ---------------------------------------------------------------------------

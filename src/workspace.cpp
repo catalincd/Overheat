@@ -11,12 +11,12 @@ namespace oh {
 namespace {
 
 const char* view_name(int v) {
-    static const char* names[] = {"explorer", "search", "scm", "chat"};
-    return names[std::clamp(v, 0, 3)];
+    static const char* names[] = {"explorer", "search", "scm", "chat", "debug"};
+    return names[std::clamp(v, 0, 4)];
 }
 
 int view_index(const std::string& name) {
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 5; i++)
         if (name == view_name(i)) return i;
     return 0;
 }

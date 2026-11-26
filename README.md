@@ -72,6 +72,8 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 ### 🧠 Code intelligence
 - tree-sitter highlighting (C, C++, Rust)
 - Language Server Protocol: diagnostics, completion, go to definition
+- Debugger over DAP for C, C++ and Rust (gdb, lldb-dap, CodeLLDB): breakpoints, stepping,
+  variables, watch, call stack, inline values, break on Rust panics
 - Breadcrumbs with the enclosing class and function
 - Minimap with a viewport you can drag
 - Squiggly underlines drawn by the shader
@@ -187,7 +189,15 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | Explorer | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> | Word wrap | <kbd>Alt</kbd>+<kbd>Z</kbd> |
 | Source Control | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Zoom in / out / reset | <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd> |
 | AI chat | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd> | Color theme | <kbd>Ctrl</kbd>+<kbd>K</kbd> <kbd>Ctrl</kbd>+<kbd>T</kbd> |
-| Settings | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Fullscreen | <kbd>F11</kbd> |
+| Settings | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Fullscreen (when not debugging) | <kbd>F11</kbd> |
+
+| Debugging | | | |
+|---|---|---|---|
+| Start / continue | <kbd>F5</kbd> | Toggle breakpoint | <kbd>F9</kbd> |
+| Step over | <kbd>F10</kbd> | Stop | <kbd>Shift</kbd>+<kbd>F5</kbd> |
+| Step into | <kbd>F11</kbd> | Restart | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F5</kbd> |
+| Step out | <kbd>Shift</kbd>+<kbd>F11</kbd> | Pause | <kbd>F6</kbd> |
+| Debug Console | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd> | | |
 
 Cursor motion follows the **keymap preset** (`keymap` in `settings.toml`, or *Keymap* in Settings).
 Add <kbd>Shift</kbd> to any motion to extend the selection; every cursor moves on its own.
@@ -204,6 +214,59 @@ Add <kbd>Shift</kbd> to any motion to extend the selection; every cursor moves o
 | Select next / previous sibling node | <kbd>Alt</kbd>+<kbd>N</kbd> / <kbd>P</kbd> | <kbd>Alt</kbd>+<kbd>N</kbd> / <kbd>P</kbd> |
 
 </details>
+
+## 🐞 Debugging
+
+Press <kbd>F5</kbd>. Overheat builds the program, starts it under a debug adapter and stops at
+your breakpoints. C, C++ and Rust use **gdb's built-in DAP server** (`gdb -i dap`, gdb 14 or newer);
+**lldb-dap** and **CodeLLDB** can be chosen per configuration.
+
+- **Breakpoints:** click the lane left of the line numbers or press <kbd>F9</kbd>. Right-click the
+  gutter (or run *Debug: Add Conditional Breakpoint / Add Logpoint / Add Hit Count Breakpoint*) for
+  conditions (`i == 3`), hit counts (`>= 5`) and logpoints (`i = {i}`). Breakpoints follow your
+  edits, persist per project, and show hollow while the adapter cannot bind them. *Debug: Add
+  Function Breakpoint* breaks on a function by name.
+- **Run and Debug view** (activity bar, bug icon): the configuration picker, **Variables**
+  (expand structs, vectors, maps; registers on demand), **Watch**, **Call Stack** (threads and
+  frames; click a frame to inspect it) and **Breakpoints** (enable/disable, exception options:
+  C++ throw/catch and **Rust panics**, on by default in Cargo projects).
+- **Debug Console** (bottom panel): program output and a REPL that evaluates in the selected
+  frame. With gdb, `-exec <command>` runs a gdb command (`-exec info frame`).
+- **Inline values:** while paused, the values of locals and arguments appear at the end of the
+  lines of the current function, as in VS Code and Zed.
+- **Pretty printers:** libstdc++ containers (`std::vector`, `std::map`, `std::string`) and Rust's
+  `Vec`, `String`, `Option`, `HashMap` print as values. Rust runs gdb with the toolchain's printers,
+  like `rust-gdb`, and *Step Into* skips over `core`/`alloc`/`std` glue.
+
+**Where configurations come from** (picker order): `.overheat/launch.toml`, then an imported
+`.vscode/launch.json` (`cppdbg`, `cppvsdbg`, `lldb`, `lldb-dap`, `gdb` types), then auto-detected
+targets: Cargo binaries (`cargo metadata`, built with `cargo build`) and the executables of a
+configured CMake build directory (`build*/`, `cmake-build-*/`, `out/build/*`; built with
+`cmake --build <dir> --target <name>`). *Debug: Open launch.toml* writes a starter file from the
+detected targets.
+
+```toml
+# .overheat/launch.toml
+[[configurations]]
+name = "server"
+program = "${workspaceFolder}/build/server"   # relative paths are relative to the project
+args = ["--port", "8080"]
+cwd = "${workspaceFolder}"
+env = { RUST_LOG = "debug" }                    # added to the inherited environment
+stopAtEntry = false                             # stop at the start of main
+adapter = "gdb"                                 # gdb | rust-gdb | lldb-dap | codelldb | /path/to/adapter
+build = "cmake --build build --target server"  # optional, runs before every launch
+
+[[configurations]]
+name = "attach"
+request = "attach"
+program = "${workspaceFolder}/build/server"
+pid = 0                                         # 0 asks for a process id
+```
+
+Variables: `${workspaceFolder}`, `${workspaceFolderBasename}`, `${file}`, `${fileDirname}`,
+`${fileBasenameNoExtension}`, `${userHome}`, `${env:NAME}`. Debugging runs on the local machine
+(not over Remote-SSH yet).
 
 ## 🛠 Building from source
 
@@ -277,6 +340,14 @@ status_bar_hidden = "encoding,eol"   # status bar items to hide: remote, branch,
 tab_width = 4                        # columns per indent level and per tab
 insert_spaces = true
 indent_mode = "off"                  # "off" | "auto" | "virtual" (see below)
+debug.gdb_path = "gdb"               # debug adapters (gdb >= 14 for its DAP server)
+debug.lldb_dap_path = "lldb-dap"
+debug.codelldb_path = "codelldb"     # plus debug.codelldb_args if your build needs them
+debug.open_console_on_start = true   # show the Debug Console when a session starts
+debug.open_view_on_start = true      # and the Run and Debug view
+debug.inline_values = true
+debug.rust_step_into_std = false     # true: Step Into also enters core/alloc/std
+debug.trace = false                  # log DAP traffic to the Debug Console
 ```
 
 <details>
@@ -399,7 +470,7 @@ SDL3 window ─▶ App (event loop, layout, commands)
                  ├─ Terminal, FileTree, SCM, Search, Chat, Palette, Settings …
                  └─ Renderer2D ─▶ one SSBO of instanced quads ─▶ Vulkan (1 draw / frame)
                                    ▲ FontAtlas: FreeType + HarfBuzz, lazy glyph cache
-platform/ (POSIX · Win32)   lsp/ (JSON-RPC)   git/ (libgit2)   ssh/ (libssh2 + SFTP)
+platform/ (POSIX · Win32)   lsp/ (JSON-RPC)   debug/ (DAP)   git/ (libgit2)   ssh/ (libssh2 + SFTP)
 ```
 
 - **Renderer:** every element is a `Quad` (rect, clip, colour, kind) written into a host-visible
@@ -424,6 +495,7 @@ src/
 ├── ui/                editor view, terminal, panels, palette, settings
 ├── platform/          POSIX + Win32 implementations
 ├── lsp/ git/ ssh/     language servers, libgit2, libssh2
+├── debug/             DAP client, session model, breakpoints, launch configurations
 shaders/               quad.vert / quad.frag (GLSL → SPIR-V, embedded)
 assets/icons/          file-icon font and its generator (embedded at build time)
 packaging/             windows/ (NSIS, MinGW toolchain), linux/, arch/

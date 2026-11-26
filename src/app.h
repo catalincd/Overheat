@@ -15,6 +15,10 @@
 #include "ui/chat_panel.h"
 #include "ui/monitor_bar.h"
 #include "ui/command_center.h"
+#include "ui/debug_panel.h"
+#include "ui/debug_console.h"
+#include "ui/debug_toolbar.h"
+#include "debug/debugger.h"
 #include "llm.h"
 #include "git/repository.h"
 #include "ssh/session.h"
@@ -87,13 +91,14 @@ private:
     void setup_chat();
     void pick_llm_backend();
     void apply_llm_backend(const std::string& kind, const std::string& endpoint);
-    enum class SidebarView { Explorer, Search, SourceControl, Chat };  // activity bar order
+    enum class SidebarView { Explorer, Search, SourceControl, Chat, Debug };  // activity bar order
     SidebarView sidebar_view_ = SidebarView::Explorer;
     Panel& sidebar_panel() {
         switch (sidebar_view_) {
             case SidebarView::Search: return search_;
             case SidebarView::SourceControl: return scm_;
             case SidebarView::Chat: return chat_;
+            case SidebarView::Debug: return debug_panel_;
             default: return file_tree_;
         }
     }
@@ -221,6 +226,31 @@ private:
     size_t lsp_col_to_byte(const fs::path& path, size_t line, size_t col);
     Position lsp_position(Editor& ed);
     PluginManager plugins_;
+
+    // Debugger (debug_glue.cpp; session model in debug/debugger.h)
+    Debugger debugger_;
+    DebugPanel debug_panel_;
+    DebugConsole debug_console_;
+    DebugToolbar debug_toolbar_;
+    enum class BottomView { Terminal, DebugConsole };
+    BottomView bottom_view_ = BottomView::Terminal;
+    Rect bottom_tabs_[2]{};  // TERMINAL / DEBUG CONSOLE in the panel header
+    struct CachedMarks {
+        bool valid = false;
+        uint64_t bp_gen = 0, dbg_gen = 0, buf_ver = 0;
+        DebugMarks marks;
+    };
+    std::unordered_map<std::string, CachedMarks> debug_marks_;  // by file
+    Panel& bottom_panel();
+    void show_debug_console(bool focus_it);
+    void setup_debugger();
+    void debug_register_commands();
+    void debug_update();
+    void debug_probe();
+    bool debug_command(const std::string& cmd);
+    void debug_breakpoint_menu(const fs::path& path, size_t line);
+    void debug_edit_breakpoint(const fs::path& path, size_t line, const std::string& what);
+    const DebugMarks* debug_marks_for(Editor* ed);
 
     // Workspaces (workspace.cpp). Never opened on their own: only from the
     // switcher (Ctrl+R) or the welcome screen. Autosaved only once opened or saved.

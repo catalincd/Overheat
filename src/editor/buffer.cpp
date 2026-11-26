@@ -144,6 +144,7 @@ void TextBuffer::record_change(size_t start, const std::string& removed, const s
     }
     dirty_.resize(out + 1);
     if (dirty_.size() > 64) dirty_ = {{dirty_.front().first, dirty_.back().second}};
+    if (on_change) on_change(*this, changes_.back());
 }
 
 void TextBuffer::insert(size_t offset, const std::string& text) {

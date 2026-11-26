@@ -56,6 +56,8 @@ public:
     bool resume_undo_group();
     // Increments on every load_string (a reload is not an edit; dirty ranges restart).
     uint64_t loads() const { return loads_; }
+    // Optional observer of every change as it happens (breakpoints follow edits).
+    std::function<void(const TextBuffer&, const Change&)> on_change;
     // Increments on every mutation; cheap change detection for derived data.
     uint64_t version() const { return version_; }
     // Smallest byte offset touched by any mutation after `since` (SIZE_MAX if none,

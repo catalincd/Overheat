@@ -142,6 +142,16 @@ set(OVERHEAT_SOURCES
     src/workspace_store.cpp
     src/lsp_glue.cpp
     src/status_glue.cpp
+    src/debug_glue.cpp
+    src/debug/json.cpp
+    src/debug/dap_client.cpp
+    src/debug/breakpoints.cpp
+    src/debug/launch_config.cpp
+    src/debug/debugger.cpp
+    src/ui/debug_panel.cpp
+    src/ui/debug_console.cpp
+    src/ui/debug_toolbar.cpp
+    src/ui/debug_editor.cpp
     src/platform/platform_posix.cpp
     src/platform/platform_win.cpp
 )
@@ -292,3 +302,10 @@ target_link_libraries(indent_test PRIVATE PkgConfig::FREETYPE tree_sitter ts_gra
 target_compile_options(indent_test PRIVATE -fsanitize=address,undefined)
 target_link_options(indent_test PRIVATE -fsanitize=address,undefined)
 add_test(NAME indent_test COMMAND indent_test)
+add_executable(debug_test tests/debug_test.cpp src/debug/json.cpp src/debug/dap_client.cpp
+               src/debug/breakpoints.cpp src/debug/launch_config.cpp src/platform/platform_posix.cpp)
+target_include_directories(debug_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(debug_test PRIVATE PkgConfig::FREETYPE pthread util dl)
+target_compile_options(debug_test PRIVATE -fsanitize=address,undefined)
+target_link_options(debug_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME debug_test COMMAND debug_test ${CMAKE_BINARY_DIR}/debug_test_dir)

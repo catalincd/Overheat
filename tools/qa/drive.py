@@ -23,9 +23,10 @@ def find_window(pid):
 
 import re
 src = open(script).read()
-# {{ and }} are literal braces (for typing code); a lone {expr} is evaluated.
+# {{ and }} are literal braces (for typing code). Only {..} expressions using W or H
+# are evaluated, so logpoint text like {i} passes through.
 src = src.replace("{{", "\x01").replace("}}", "\x02")
-src = re.sub(r"\{([^}]+)\}", lambda m: str(int(eval(m.group(1), {"W": W, "H": H}))), src)
+src = re.sub(r"\{([^}]*[WH][^}]*)\}", lambda m: str(int(eval(m.group(1), {"W": W, "H": H}))), src)
 src = src.replace("\x01", "{").replace("\x02", "}")
 script = os.path.join(outdir, "script.txt")
 open(script, "w").write(src)
