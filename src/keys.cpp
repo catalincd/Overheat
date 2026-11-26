@@ -5,7 +5,7 @@
 
 namespace oh {
 
-void KeyMap::init_defaults() {
+void KeyMap::init_defaults(const std::string& preset) {
     // File operations
     bind(SDLK_S,     KeyMod::Ctrl,                      "save");
     bind(SDLK_S,     KeyMod::Ctrl | KeyMod::Shift,      "save_as");
@@ -63,6 +63,42 @@ void KeyMap::init_defaults() {
     bind(SDLK_UP,    KeyMod::Alt,                       "move_line_up");
     bind(SDLK_DOWN,  KeyMod::Alt,                       "move_line_down");
     bind(SDLK_D,     KeyMod::Ctrl | KeyMod::Shift,      "duplicate_line");
+
+    // Cursor motion and syntax-aware selection: the part that differs per preset.
+    // Every motion has a "_select" twin on the same chord plus Shift.
+    auto motion = [this](SDL_Keycode key, KeyMod mods, const std::string& cmd) {
+        bind(key, mods, cmd);
+        bind(key, mods | KeyMod::Shift, cmd + "_select");
+    };
+    if (preset == "vscode") {
+        // VS Code: word motion on Ctrl; Ctrl+Up/Down stay plain line moves (Ctrl+Shift+Up/Down
+        // moves lines, handled by the editor view); smart select on Shift+Alt+Left/Right.
+        motion(SDLK_LEFT,  KeyMod::Ctrl,                "cursor_word_left");
+        motion(SDLK_RIGHT, KeyMod::Ctrl,                "cursor_word_right");
+        bind(SDLK_RIGHT, KeyMod::Alt | KeyMod::Shift,   "expand_selection");
+        bind(SDLK_LEFT,  KeyMod::Alt | KeyMod::Shift,   "shrink_selection");
+    } else {
+        // Overheat, after 4coder's default map (custom/4coder_default_map.cpp): Ctrl hops
+        // alphanumeric words in code (its code map) and whitespace-separated tokens in plain
+        // text (its file map); Alt hops camelCase parts (we also split snake_case);
+        // Ctrl+Up/Down hop blank lines. Ctrl+Alt (ours) hops whole tokens like `foo.bar()`
+        // in code too. 4coder has no Shift selection (it uses a mark); Shift extends here. Alt+Up/Down (move line) and
+        // Ctrl+Alt+Up/Down (add cursor) match 4coder already and stay. Smart select takes
+        // Helix's Alt+Up/Down with Shift, since Shift+Alt+Left/Right now select subwords.
+        motion(SDLK_LEFT,  KeyMod::Ctrl,                "cursor_boundary_left");
+        motion(SDLK_RIGHT, KeyMod::Ctrl,                "cursor_boundary_right");
+        motion(SDLK_LEFT,  KeyMod::Alt,                 "cursor_subword_left");
+        motion(SDLK_RIGHT, KeyMod::Alt,                 "cursor_subword_right");
+        motion(SDLK_LEFT,  KeyMod::Ctrl | KeyMod::Alt,  "cursor_token_left");
+        motion(SDLK_RIGHT, KeyMod::Ctrl | KeyMod::Alt,  "cursor_token_right");
+        motion(SDLK_UP,    KeyMod::Ctrl,                "cursor_blank_line_up");
+        motion(SDLK_DOWN,  KeyMod::Ctrl,                "cursor_blank_line_down");
+        bind(SDLK_UP,    KeyMod::Alt | KeyMod::Shift,   "expand_selection");
+        bind(SDLK_DOWN,  KeyMod::Alt | KeyMod::Shift,   "shrink_selection");
+    }
+    // Sibling nodes (Helix's Alt+N / Alt+P; VS Code has no default for these).
+    bind(SDLK_N,     KeyMod::Alt,                       "select_next_sibling");
+    bind(SDLK_P,     KeyMod::Alt,                       "select_prev_sibling");
 
     // Navigation
     bind(SDLK_G,     KeyMod::Ctrl,                      "goto_line");

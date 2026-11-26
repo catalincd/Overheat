@@ -34,13 +34,6 @@ the git log; keep this file short and current.
 - [ ] **4coder-style underlines**: underline the token under the cursor and its other
   occurrences, and the lines of the current jump/compile-error location. Make the style
   (underline, box, background) configurable per theme
-- [ ] **4coder-style Ctrl/Alt + arrows** (changes current bindings; make the old ones a
-  "VS Code" keymap preset):
-  - Ctrl+Left/Right: jump by whitespace boundaries (whole tokens like `foo.bar()`)
-  - Alt+Left/Right: finer steps by alphanumeric / camelCase / snake_case boundaries
-  - Ctrl+Up/Down: jump to the previous/next blank line (paragraph / function hops);
-    today Ctrl+Alt+Up/Down add cursors and Alt+Up/Down move lines, so decide where those go
-  - Shift with any of these extends the selection
 - [ ] **Bug: opening large / binary files.** There is no binary detection today: the
   file is read whole into the piece table and then highlighted, sent to the LSP and shown
   in the minimap. Fix it like VS Code:
@@ -106,8 +99,9 @@ the git log; keep this file short and current.
   - **Go to definition:** F12 exists. Add Ctrl+click and hover underline on symbols,
     Peek Definition (Alt+F12) inline, Go to Declaration / Type Definition /
     Implementation, a picker when there are several results, and back/forward
-    navigation history (Alt+Left/Right in VS Code; reconcile with the 4coder arrows
-    item). It must work for remote files too.
+    navigation history. Alt+Left/Right in the `vscode` keymap preset; the default preset
+    uses Alt+Left/Right for subword motion, so bind VS Code's Linux keys there
+    (Ctrl+Alt+- back, Ctrl+Shift+- forward). It must work for remote files too.
 
 ## Follow-ups from the 2026-11-26 batch
 
@@ -130,9 +124,6 @@ the git log; keep this file short and current.
 - [ ] **Multibuffers** (Zed): search results, references and diagnostics shown as one
   *editable* document of excerpts, with edits written back to the source files. One
   mechanism for the search results, find references and the Problems panel
-- [ ] **Syntax-aware selection** (Helix/Kakoune): expand/shrink the selection to the
-  enclosing tree-sitter node, and select the next/previous sibling node with multiple
-  cursors. The selection model only, not modal editing
 - [ ] **True portable mode** (SciTE/Notepad++): when a marker file (e.g. `portable.txt`)
   sits next to the exe, keep settings, themes and workspaces next to it instead of
   `%APPDATA%` / `~/.config`; ship the Windows portable zip with the marker
@@ -153,6 +144,9 @@ the git log; keep this file short and current.
 ## Editor
 
 - [ ] Cursor up/down by visual row when word wrap is on
+- [ ] 4coder-style deletes: Ctrl+Backspace/Delete by alphanumeric boundary, Alt+Backspace/Delete
+  "snipe" (whitespace or token boundary) in the `overheat` keymap preset
+- [ ] Syntax selection: an "inside the brackets" step between a node and its parent (VS Code)
 - [ ] Word wrap for files over 2 MB (incremental wrap map)
 - [ ] Configurable tab width and "insert spaces" (currently 4 / spaces)
 - [ ] Bold / italic font faces for syntax styles

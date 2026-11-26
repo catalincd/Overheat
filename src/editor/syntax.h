@@ -41,6 +41,8 @@ public:
     static std::string detect_language(const fs::path& path);
     // True when a tree-sitter grammar is built in for this language id.
     static bool has_grammar(const std::string& lang_id);
+    // Current tree (null without a grammar or before the first parse lands).
+    const TSTree* tree() const { return tree_; }
 
     struct Grammar;  // one entry of the language table in syntax.cpp
 

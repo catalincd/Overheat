@@ -53,6 +53,8 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 
 ### ✍️ Editing
 - Multi-cursor: <kbd>Ctrl</kbd>+<kbd>D</kbd>, <kbd>Alt</kbd>+click, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>
+- 4coder-style <kbd>Ctrl</kbd>/<kbd>Alt</kbd>+arrow motion (words, camelCase parts, blank lines)
+- Syntax-aware selection: expand / shrink to the enclosing tree-sitter node, hop between siblings
 - Auto-closing brackets and quotes
 - Bracket matching, indent guides
 - Word wrap (<kbd>Alt</kbd>+<kbd>Z</kbd>)
@@ -176,6 +178,20 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | AI chat | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd> | Color theme | <kbd>Ctrl</kbd>+<kbd>K</kbd> <kbd>Ctrl</kbd>+<kbd>T</kbd> |
 | Settings | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Fullscreen | <kbd>F11</kbd> |
 
+Cursor motion follows the **keymap preset** (`keymap` in `settings.toml`, or *Keymap* in Settings).
+Add <kbd>Shift</kbd> to any motion to extend the selection; every cursor moves on its own.
+
+| Cursor & selection | `"overheat"` (default, 4coder) | `"vscode"` |
+|---|---|---|
+| Word left / right | <kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>→</kbd> (letters, digits, `_`; whitespace-separated in plain text) | <kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>→</kbd> |
+| camelCase / snake_case part | <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | |
+| Whole token (`foo.bar()`) | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | |
+| Previous / next blank line | <kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> | |
+| Move line up / down | <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> | <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> |
+| Add cursor above / below | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> |
+| Expand / shrink selection (syntax) | <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> | <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>→</kbd> / <kbd>←</kbd> |
+| Select next / previous sibling node | <kbd>Alt</kbd>+<kbd>N</kbd> / <kbd>P</kbd> | <kbd>Alt</kbd>+<kbd>N</kbd> / <kbd>P</kbd> |
+
 </details>
 
 ## 🛠 Building from source
@@ -235,6 +251,7 @@ cursor_trail = 0.8                   # 0 = rigid glide .. 1 = longest smear
 cursor_vfx = "none"                  # railgun | torpedo | pixiedust | sonicboom | ripple | wireframe
 scroll_animation_ms = 250            # smooth-scroll spring; 0 = instant
 wobbly = false                       # elastic pop for the palette and settings page
+keymap = "overheat"                  # or "vscode": Ctrl+arrows move by VS Code words
 opacity = 1.0                        # 0.5-1.0: translucent background, opaque text
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
 remote_monitor = true                # host stats strip while on Remote-SSH

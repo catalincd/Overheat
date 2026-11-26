@@ -1028,6 +1028,145 @@ void Editor::reload() {
     scroll_y_ = sy;
 }
 
+// ---------------------------------------------------------------------------
+// 4coder-style motion and syntax-aware selection
+// ---------------------------------------------------------------------------
+
+bool Editor::is_code() const {
+    std::string lang = syntax_.language_id();
+    return !lang.empty() && lang != "markdown";
+}
+
+void Editor::move_word_4coder(int dir, bool select) {
+    cursors_.move_boundary(buffer_, dir, is_code() ? motion::Boundary::AlphaNumeric : motion::Boundary::Whitespace, select);
+}
+
+namespace {
+
+bool same_selections(const std::vector<Selection>& a, const std::vector<Selection>& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); i++)
+        if (!(a[i].anchor == b[i].anchor) || !(a[i].head == b[i].head)) return false;
+    return true;
+}
+
+bool same_range(TSNode n, size_t a, size_t b) { return ts_node_start_byte(n) == a && ts_node_end_byte(n) == b; }
+
+// The named node a selection stands for: the smallest named node covering it, raised
+// to the outermost ancestor with the same range (an identifier that is a whole
+// expression statement's operand stays itself, but a lone child spanning its parent
+// moves up to the parent, which is the level that has siblings).
+TSNode node_for(TSNode root, size_t a, size_t b) {
+    TSNode n = ts_node_named_descendant_for_byte_range(root, static_cast<uint32_t>(a), static_cast<uint32_t>(b));
+    if (ts_node_is_null(n)) return n;
+    for (TSNode p = ts_node_parent(n); !ts_node_is_null(p) && same_range(p, ts_node_start_byte(n), ts_node_end_byte(n));
+         p = ts_node_parent(p))
+        n = p;
+    return n;
+}
+
+}  // namespace
+
+bool Editor::expand_selection() {
+    sync_syntax();
+    const TSTree* tree = syntax_.tree();
+    if (!tree) return false;
+    TSNode root = ts_tree_root_node(tree);
+    std::vector<Selection> before = cursors_.selections();
+    if (!same_selections(before, expanded_)) expand_history_.clear();
+
+    std::vector<Selection> out;
+    for (const Selection& sel : before) {
+        size_t a = buffer_.offset_of(sel.min().line, sel.min().col);
+        size_t b = buffer_.offset_of(sel.max().line, sel.max().col);
+        TSNode n = ts_node_named_descendant_for_byte_range(root, static_cast<uint32_t>(a), static_cast<uint32_t>(b));
+        if (sel.empty() && a > 0) {
+            // A caret right after a token (`foo|(`, `x;|`) means that token, as in VS Code.
+            TSNode left = ts_node_named_descendant_for_byte_range(root, static_cast<uint32_t>(a - 1), static_cast<uint32_t>(a));
+            auto span = [](TSNode x) { return ts_node_end_byte(x) - ts_node_start_byte(x); };
+            if (!ts_node_is_null(left) && ts_node_end_byte(left) == a && (ts_node_is_null(n) || span(left) < span(n))) n = left;
+        }
+        // Climb until the node is strictly larger than the selection (a cursor at a
+        // spot no named node covers lands on the first enclosing one).
+        while (!ts_node_is_null(n) && !sel.empty() && ts_node_start_byte(n) >= a && ts_node_end_byte(n) <= b)
+            n = ts_node_parent(n);
+        if (ts_node_is_null(n)) {
+            out.push_back(sel);
+            continue;
+        }
+        out.push_back({buffer_.position_of(ts_node_start_byte(n)), buffer_.position_of(ts_node_end_byte(n))});
+    }
+    cursors_.set_selections(std::move(out));
+    if (same_selections(cursors_.selections(), before)) return true;  // already the whole file
+    expand_history_.push_back(std::move(before));
+    expanded_ = cursors_.selections();
+    return true;
+}
+
+bool Editor::shrink_selection() {
+    if (!expand_history_.empty() && same_selections(cursors_.selections(), expanded_)) {
+        cursors_.set_selections(expand_history_.back());
+        expand_history_.pop_back();
+        expanded_ = cursors_.selections();
+        return true;
+    }
+    expand_history_.clear();
+    sync_syntax();
+    const TSTree* tree = syntax_.tree();
+    if (!tree) return false;
+    TSNode root = ts_tree_root_node(tree);
+    // No history (the selection came from elsewhere): step into the named child on
+    // the head's side of a selection that is exactly one node.
+    std::vector<Selection> out;
+    for (const Selection& sel : cursors_.selections()) {
+        size_t a = buffer_.offset_of(sel.min().line, sel.min().col);
+        size_t b = buffer_.offset_of(sel.max().line, sel.max().col);
+        TSNode n = sel.empty() ? TSNode{} : node_for(root, a, b);
+        if (ts_node_is_null(n) || !same_range(n, a, b)) {
+            out.push_back(sel);
+            continue;
+        }
+        bool head_first = sel.head < sel.anchor;
+        while (ts_node_named_child_count(n) > 0 && same_range(n, a, b))
+            n = ts_node_named_child(n, head_first ? 0 : ts_node_named_child_count(n) - 1);
+        if (same_range(n, a, b)) {
+            out.push_back(sel);  // a leaf: nothing smaller
+            continue;
+        }
+        out.push_back({buffer_.position_of(ts_node_start_byte(n)), buffer_.position_of(ts_node_end_byte(n))});
+    }
+    cursors_.set_selections(std::move(out));
+    return true;
+}
+
+bool Editor::select_sibling(int dir) {
+    sync_syntax();
+    const TSTree* tree = syntax_.tree();
+    if (!tree) return false;
+    TSNode root = ts_tree_root_node(tree);
+    expand_history_.clear();
+    std::vector<Selection> out;
+    for (const Selection& sel : cursors_.selections()) {
+        size_t a = buffer_.offset_of(sel.min().line, sel.min().col);
+        size_t b = buffer_.offset_of(sel.max().line, sel.max().col);
+        TSNode n = node_for(root, a, b);
+        if (ts_node_is_null(n) || ts_node_eq(n, root)) {
+            out.push_back(sel);
+            continue;
+        }
+        TSNode s = dir > 0 ? ts_node_next_named_sibling(n) : ts_node_prev_named_sibling(n);
+        if (ts_node_is_null(s)) {
+            out.push_back(sel);  // first / last child: stay
+            continue;
+        }
+        Position s0 = buffer_.position_of(ts_node_start_byte(s)), s1 = buffer_.position_of(ts_node_end_byte(s));
+        // The head leads in the direction of travel, so repeated presses keep it in view.
+        out.push_back(dir > 0 ? Selection{s0, s1} : Selection{s1, s0});
+    }
+    cursors_.set_selections(std::move(out));
+    return true;
+}
+
 void Editor::sync_syntax() {
     if (!syntax_.poll()) return;  // background parse running; edits stay queued
     syntax_.apply_changes(buffer_, buffer_.take_changes());

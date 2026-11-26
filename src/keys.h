@@ -16,7 +16,8 @@ struct KeyBinding {
 
 class KeyMap {
 public:
-    void init_defaults();
+    // preset: "overheat" (default, 4coder-style motion) or "vscode" (the 0.2 bindings).
+    void init_defaults(const std::string& preset = "overheat");
     void bind(SDL_Keycode key, KeyMod mods, const std::string& command);
     std::string lookup(SDL_Keycode key, KeyMod mods) const;
 

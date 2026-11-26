@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include "editor/motion.h"
 #include <cstdint>
 #include <vector>
 
@@ -25,6 +26,10 @@ public:
     void move_page_down(const TextBuffer& buf, size_t page_lines, bool select = false);
     void move_to_start(const TextBuffer& buf, bool select = false);
     void move_to_end(const TextBuffer& buf, bool select = false);
+    // 4coder-style motions: by `motion::Boundary` runs (dir -1 / +1), and to the
+    // previous / next blank line (Ctrl+Up/Down).
+    void move_boundary(const TextBuffer& buf, int dir, motion::Boundary b, bool select = false);
+    void move_blank_line(const TextBuffer& buf, int dir, bool select = false);
 
     void select_all(const TextBuffer& buf);
     void select_word(const TextBuffer& buf);
@@ -32,6 +37,8 @@ public:
     // Moves the primary head, keeping its anchor (mouse drag selection).
     void extend_primary(Position pos);
     void add_selection(Selection s);
+    // Replaces every selection (index 0 stays primary until merging reorders them).
+    void set_selections(std::vector<Selection> sels);
 
     const std::vector<Selection>& selections() const { return selections_; }
     const Selection& primary() const { return selections_[0]; }
