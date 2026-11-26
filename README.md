@@ -253,7 +253,6 @@ cursor_vfx = "none"                  # railgun | torpedo | pixiedust | sonicboom
 scroll_animation_ms = 250            # smooth-scroll spring; 0 = instant
 wobbly = false                       # elastic pop for the palette and settings page
 keymap = "overheat"                  # or "vscode": Ctrl+arrows move by VS Code words
-animations = true
 file_icons = "overheat"              # "overheat" | "minimal" | "none"
 opacity = 1.0                        # 0.5-1.0: translucent background, opaque text
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
