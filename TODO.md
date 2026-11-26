@@ -18,9 +18,6 @@ the git log; keep this file short and current.
   during a drag-resize Windows runs a modal loop, no frames were drawn, and DWM stretched
   the stale frame. Fixed in b4b5532 by redrawing from SDL's live-resize EXPOSED event
   watch; untested on Windows hardware
-- [ ] Layout at small sizes (seen at 520x380): the sidebar and terminal keep their size and
-  the editor collapses to nothing. Give the editor a minimum size and shrink or auto-hide
-  the sidebar and terminal first, like VS Code
 - [ ] **4coder-style indentation**: indentation computed from the code structure
   (tree-sitter scopes, brackets, continued statements) instead of typed. Every edit
   re-indents the affected lines automatically. Optionally "virtual whitespace": leading
@@ -49,18 +46,6 @@ the git log; keep this file short and current.
   - spring-based smooth scrolling for page/jump scrolls, and animated window/split resizes
   - each one configurable (duration, trail length, effect) and covered by the existing
     animations off switch; must stay within the frame budget
-- [ ] **Bug: opening large / binary files.** There is no binary detection today: the
-  file is read whole into the piece table and then highlighted, sent to the LSP and shown
-  in the minimap. Fix it like VS Code:
-  - detect binaries the way search does (NUL byte in the first 8 KiB) and show a
-    "binary file, open anyway?" card instead of the text; optionally a read-only hex view
-  - check the size before reading, also over SFTP: above about 50 MB ask first, above
-    a hard cap refuse or open read-only
-  - large text files: no tree-sitter, LSP, minimap, word wrap or git blame above a
-    threshold (status-bar note "large file mode"); consider mmap / lazy line indexing
-  - invalid UTF-8 must render (replacement glyphs) without breaking cursor movement,
-    and saving must not corrupt the bytes
-  - add tests: a 1 GB file, `/usr/bin/*`, a random-bytes file, a minified 50 MB JS line
 - [ ] **Build, lint and navigation like VS Code**
   - **Build tasks:** a project task file (like `.vscode/tasks.json`: name, command, cwd,
     env, default build task) with Run Build Task (Ctrl+Shift+B) and Run Task… in the
@@ -84,13 +69,12 @@ the git log; keep this file short and current.
 - [ ] Search: multi-threaded local search (no-match scan of 41k files takes ~2 s)
 - [ ] Workspaces: test Remote-SSH workspaces against a real host; mixed local + remote
   folders; apply edits to a workspace's `[settings]` live; git for non-primary roots
-- [ ] Transparency: opaque popups / palette option; background blur (KDE, Windows mica)
+- [ ] Transparency: background blur (KDE, Windows mica)
 - [ ] Transparency on Windows: test on real drivers. Per-pixel needs PRE/POST_MULTIPLIED
   `compositeAlpha` (rare on Windows); reliable per-pixel needs presenting via
   DirectComposition (Vulkan → D3D11 interop)
 - [ ] Fonts: bold / italic faces; consider dropping Iosevka (8 MB of the 10.6 MB)
 - [ ] Themes: Tokyo Night Day; string-escape and namespace colours
-- [ ] Ctrl+K Ctrl+T (theme picker chord) doesn't fire in `--script` mode
 
 ## From the editor survey (2026-11-26)
 
@@ -124,6 +108,9 @@ the git log; keep this file short and current.
 
 - [ ] Cursor up/down by visual row when word wrap is on
 - [ ] Word wrap for files over 2 MB (incremental wrap map)
+- [ ] Large files: read-only hex view for binaries; mmap / lazy line indexing instead of
+  reading the whole file (today: card above 50 MB, refused above 256 MB)
+- [ ] Remote-SSH: test the binary / large-file checks against a real SFTP server
 - [ ] Configurable tab width and "insert spaces" (currently 4 / spaces)
 - [ ] Bold / italic font faces for syntax styles
 - [ ] Column (box) selection with Alt+Shift+drag
@@ -146,6 +133,8 @@ the git log; keep this file short and current.
 
 - Ligatures are on by default; JetBrains Mono turns `/=` into `≠` (toggle in Settings)
 - The terminal does not reflow old output when resized
+- Lines over 64 KiB (minified files) are drawn only up to 64 KiB ("long line truncated");
+  the cursor and edits still reach the whole line
 - Split editors support two groups only
 - Remote search briefly blocks the UI while `grep` runs on the host (needs a thread-safe
   SSH channel; local search already streams on a worker thread)
