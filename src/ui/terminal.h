@@ -1,6 +1,8 @@
 #pragma once
 #include "ui/panel.h"
 #include "platform/platform.h"
+#include "tasks/links.h"
+#include <functional>
 #include <string>
 #include <vector>
 #include <thread>
@@ -35,10 +37,29 @@ public:
     Terminal();
     ~Terminal();
 
-    // Empty argv runs $SHELL. cwd empty = inherit.
-    bool spawn(const std::vector<std::string>& argv = {}, const fs::path& cwd = {});
+    // Empty argv runs $SHELL. cwd empty = inherit. `env` adds environment variables;
+    // keep_screen continues below the existing output (task chains) instead of clearing.
+    bool spawn(const std::vector<std::string>& argv = {}, const fs::path& cwd = {},
+               const std::vector<std::pair<std::string, std::string>>& env = {}, bool keep_screen = false);
     void kill();
     bool is_alive() const { return alive_; }
+    // Exit status of the last child once it has exited, else -1.
+    int exit_code() { return pty_.exit_code(); }
+    const fs::path& cwd() const { return cwd_; }
+
+    // Build tasks (tasks/runner.h): rewrites output before it is drawn (cargo JSON ->
+    // rendered diagnostics) and sees everything; runs on the reader thread.
+    using OutputFilter = std::function<std::string(const std::string& chunk)>;
+    void set_output_filter(OutputFilter f);
+    // Shows text as if the program printed it (task banners); "\n" becomes CR LF.
+    void feed(const std::string& text);
+    // Clears the screen and the scrollback.
+    void clear_all();
+
+    // Ctrl+click on file:line:col. The handler resolves the link and, when `open`,
+    // opens it; it returns false for links that do not point at a file (no underline).
+    using LinkHandler = std::function<bool(const TextLink& link, bool open)>;
+    void set_link_handler(LinkHandler h) { link_handler_ = std::move(h); }
 
     void write(const std::string& data);
     bool handle_mouse(const MouseEvent& e) override;
@@ -57,6 +78,16 @@ public:
 
 private:
     platform::Pty pty_;
+    fs::path cwd_;
+    OutputFilter filter_;
+    std::mutex filter_mutex_;
+    LinkHandler link_handler_;
+    // Hover cache: (absolute line, text) -> resolved link, so the file system is asked once.
+    int64_t link_line_ = -1;
+    std::string link_text_;
+    std::vector<std::pair<TextLink, bool>> link_cache_;
+    bool link_under(float x, float y, TextLink& out, int64_t& line);
+    static std::string row_text(const std::vector<TermCell>& row, std::vector<int>& byte_col);
     std::atomic<bool> alive_{false};
     std::thread reader_thread_;
 

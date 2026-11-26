@@ -1,0 +1,58 @@
+# Rust (Cargo) at 1400x900; set up with tests/projects/qa_setup.sh, open src/main.rs.
+# Broken build (cargo JSON) -> Problems; cargo clippy from Run Task -> warnings; clippy
+# quick fix (Ctrl+.); format on save through rust-analyzer (rustfmt); Ctrl+F5 runs.
+wait 6000
+key Ctrl+Shift+B
+wait 9000
+probe shot:r_build_output
+wait 100
+key Ctrl+Shift+M
+wait 400
+probe shot:r_problems
+wait 100
+key Ctrl+Shift+P
+type Tasks: Run Task
+key Return
+wait 400
+type cargo clippy
+wait 200
+probe shot:r_task_picker
+wait 100
+key Return
+wait 9000
+key Ctrl+Shift+M
+wait 400
+probe shot:r_clippy_problems
+wait 100
+key Ctrl+G
+type 6
+key Return
+wait 200
+key Ctrl+.
+wait 3000
+probe shot:r_code_actions
+wait 100
+key Return
+wait 600
+probe r_after_fix
+wait 100
+key Ctrl+Shift+P
+type Toggle Format on Save
+key Return
+wait 300
+key Ctrl+G
+type 18
+key Return
+key End
+key Return
+type let   spaced   =   1  ;
+wait 100
+key Ctrl+S
+wait 3000
+probe shot:r_format_on_save
+wait 100
+key Ctrl+F5
+wait 8000
+probe shot:r_run
+wait 100
+quit

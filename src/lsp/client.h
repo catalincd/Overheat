@@ -18,6 +18,8 @@ struct LSPDiagnostic {
     Position start, end;
     std::string message;
     int severity; // 1=error, 2=warning, 3=info, 4=hint
+    std::string code, source;  // e.g. "-Wunused-variable" / "clang", "E0308" / "rustc"
+    std::string raw;           // the diagnostic's JSON as received (code action context)
 };
 
 struct LSPCompletion {
@@ -72,6 +74,20 @@ public:
     using ReferencesCallback = std::function<void(std::vector<LSPLocation>)>;
     void references(const fs::path& path, Position pos, ReferencesCallback cb);
 
+    // Quick fixes / refactorings for a range (textDocument/codeAction). `diagnostics_json`
+    // is a JSON array of the diagnostics there (their `raw` text). The callback gets the
+    // whole response JSON (tasks_glue.cpp parses it).
+    using RawCallback = std::function<void(const std::string& response)>;
+    void code_action(const fs::path& path, Position start, Position end, const std::string& diagnostics_json,
+                     RawCallback cb);
+    void formatting(const fs::path& path, int tab_size, bool insert_spaces, RawCallback cb);
+    void execute_command(const std::string& command_json, RawCallback cb);  // a Command object
+    // Requests from the server (workspace/applyEdit, ...): the handler returns the
+    // result JSON to send back, or "" to leave the request unanswered. Reader thread.
+    using ServerRequestHandler = std::function<std::string(const std::string& method, const std::string& json)>;
+    void set_on_server_request(ServerRequestHandler h) { on_server_request_ = std::move(h); }
+    std::string uri(const fs::path& path) const { return uri_from_path(path); }
+
     // Diagnostics
     using DiagnosticsCallback = std::function<void(const fs::path&, std::vector<LSPDiagnostic>)>;
     void set_on_diagnostics(DiagnosticsCallback cb) { on_diagnostics_ = cb; }
@@ -90,18 +106,22 @@ private:
     std::mutex outbox_mutex_;
     std::condition_variable outbox_cv_;
     std::vector<std::string> outbox_;
+    // Messages sent before the initialize handshake finished: the protocol allows
+    // nothing but `initialize` until then (rust-analyzer exits on an early didOpen).
+    std::vector<std::string> held_;
     void writer_loop();
 
     int next_id_ = 1;
     std::mutex pending_mutex_;
     std::unordered_map<int, std::function<void(const std::string&)>> pending_requests_;
     DiagnosticsCallback on_diagnostics_;
+    ServerRequestHandler on_server_request_;
     std::atomic<bool> utf8_positions_{false};
     std::atomic<bool> ready_{false};
     std::unordered_map<std::string, int> versions_;  // document versions (UI thread only)
     std::unordered_set<std::string> open_docs_;
 
-    void send_message(const std::string& json);
+    void send_message(const std::string& json, bool handshake = false);
     void send_request(const std::string& method, const std::string& params,
                       std::function<void(const std::string&)> callback = {});
     void send_notification(const std::string& method, const std::string& params);

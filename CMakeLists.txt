@@ -152,6 +152,13 @@ set(OVERHEAT_SOURCES
     src/ui/debug_console.cpp
     src/ui/debug_toolbar.cpp
     src/ui/debug_editor.cpp
+    src/tasks_glue.cpp
+    src/tasks/json.cpp
+    src/tasks/matchers.cpp
+    src/tasks/links.cpp
+    src/tasks/tasks.cpp
+    src/tasks/runner.cpp
+    src/ui/problems_panel.cpp
     src/platform/platform_posix.cpp
     src/platform/platform_win.cpp
 )
@@ -309,3 +316,12 @@ target_link_libraries(debug_test PRIVATE PkgConfig::FREETYPE pthread util dl)
 target_compile_options(debug_test PRIVATE -fsanitize=address,undefined)
 target_link_options(debug_test PRIVATE -fsanitize=address,undefined)
 add_test(NAME debug_test COMMAND debug_test ${CMAKE_BINARY_DIR}/debug_test_dir)
+
+# Problem matchers, terminal links and task files against captured compiler output
+# (tests/fixtures/matchers, recorded by tests/projects/capture.sh).
+add_executable(problem_matcher_test tests/problem_matcher_test.cpp src/tasks/json.cpp src/tasks/matchers.cpp
+               src/tasks/links.cpp src/tasks/tasks.cpp)
+target_include_directories(problem_matcher_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(problem_matcher_test PRIVATE -fsanitize=address,undefined)
+target_link_options(problem_matcher_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME problem_matcher_test COMMAND problem_matcher_test ${CMAKE_SOURCE_DIR}/tests)

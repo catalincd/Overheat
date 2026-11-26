@@ -14,6 +14,8 @@
 #include "ui/settings_page.h"
 #include "ui/chat_panel.h"
 #include "ui/monitor_bar.h"
+#include "ui/problems_panel.h"
+#include "tasks/runner.h"
 #include "ui/command_center.h"
 #include "ui/debug_panel.h"
 #include "ui/debug_console.h"
@@ -114,7 +116,6 @@ private:
     void show_sidebar_view(SidebarView v);
     void render_activity_bar(RenderContext& ctx, Rect r);
     void render_breadcrumbs(RenderContext& ctx, Rect r, Editor* ed);
-    void render_terminal_header(RenderContext& ctx, Rect r);
     void restart_terminal();
     std::vector<std::string> terminal_argv_;  // empty = local shell (local_shell())
     std::vector<std::string> local_shell() const;
@@ -232,16 +233,12 @@ private:
     DebugPanel debug_panel_;
     DebugConsole debug_console_;
     DebugToolbar debug_toolbar_;
-    enum class BottomView { Terminal, DebugConsole };
-    BottomView bottom_view_ = BottomView::Terminal;
-    Rect bottom_tabs_[2]{};  // TERMINAL / DEBUG CONSOLE in the panel header
     struct CachedMarks {
         bool valid = false;
         uint64_t bp_gen = 0, dbg_gen = 0, buf_ver = 0;
         DebugMarks marks;
     };
     std::unordered_map<std::string, CachedMarks> debug_marks_;  // by file
-    Panel& bottom_panel();
     void show_debug_console(bool focus_it);
     void setup_debugger();
     void debug_register_commands();
@@ -251,6 +248,51 @@ private:
     void debug_breakpoint_menu(const fs::path& path, size_t line);
     void debug_edit_breakpoint(const fs::path& path, size_t line, const std::string& what);
     const DebugMarks* debug_marks_for(Editor* ed);
+    // Build tasks, the Problems panel, terminal links, quick fixes and formatting
+    // (tasks_glue.cpp). The bottom panel shows Problems, the shell or the task terminal.
+    enum class BottomView { Problems, Terminal, Task, DebugConsole };
+    BottomView bottom_view_ = BottomView::Terminal;
+    TaskRunner tasks_;
+    Terminal task_term_;  // after tasks_: its reader thread (the task filter) stops first
+    bool task_term_used_ = false;
+    ProblemsPanel problems_;
+    std::vector<Problem> task_problems_;  // the last run's, absolute paths, byte columns
+    uint64_t task_problems_version_ = UINT64_MAX;
+    std::unordered_map<std::string, std::vector<LSPDiagnostic>> merged_diags_;  // LSP + build, per file
+    uint64_t problems_dirty_ = 1;
+    bool format_on_save_ = false;
+    std::optional<TaskDef> last_task_;
+    std::vector<std::pair<Rect, BottomView>> panel_tabs_;
+    void setup_tasks();
+    void tasks_update();
+    bool tasks_command(const std::string& cmd);  // true when handled
+    void pick_task(const std::string& group);    // "" = all tasks
+    void run_task(const TaskDef& t);
+    void run_default_task(const std::string& group);
+    TaskContext task_context();
+    Panel& bottom_panel();
+    Terminal* bottom_terminal();  // nullptr while Problems shows
+    void show_bottom(BottomView v, bool take_focus);
+    void render_panel_header(RenderContext& ctx, Rect r);
+    bool panel_header_click(float x, float y);
+    bool open_link(const TextLink& link, const fs::path& cwd, bool open);
+    fs::path resolve_path(const std::string& p, const fs::path& cwd) const;
+    void refresh_problems();
+    void goto_problem(int dir);
+    void code_actions();
+    void format_document(std::function<void()> then);
+    // Applies text edits (one undo step per open file; other files are rewritten on
+    // disk). Columns are bytes (EDIT_BYTES), UTF-16 units or characters.
+    enum { EDIT_BYTES, EDIT_UTF16, EDIT_CHARS };
+    bool apply_edits(const std::vector<ProblemEdit>& edits, int unit, std::string* summary);
+    int lsp_edit_unit() const { return lsp_.utf8_positions() ? EDIT_BYTES : EDIT_UTF16; }
+    struct PendingFormat {
+        uint64_t id = 0;
+        TimePoint deadline{};
+        std::function<void()> then;
+    };
+    std::optional<PendingFormat> pending_format_;  // format on save waits for the server, briefly
+    uint64_t format_request_ = 0;
 
     // Workspaces (workspace.cpp). Never opened on their own: only from the
     // switcher (Ctrl+R) or the welcome screen. Autosaved only once opened or saved.
@@ -295,6 +337,7 @@ private:
     std::string own_clipboard_;        // what we last put on the clipboard
     std::string clipboard_line_text_;  // last whole-line copy, to paste as lines
     float last_click_x_ = -1, last_click_y_ = -1;
+    float script_mouse_x_ = -1, script_mouse_y_ = -1;  // --script: synthetic motion moves no real pointer
     TimePoint start_time_ = Clock::now();
     bool first_paint_done_ = false;
     uint64_t frame_count_ = 0;

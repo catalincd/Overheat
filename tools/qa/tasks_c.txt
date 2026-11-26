@@ -1,0 +1,62 @@
+# C (Make) build tasks at 1400x900; set up with tests/projects/qa_setup.sh, open main.c.
+# Build with errors -> Problems -> click jumps; Ctrl+hover/click in the task output; F8;
+# clang-tidy quick fix (Ctrl+.); Format Document; cancel a running task.
+wait 3500
+key Ctrl+Shift+B
+wait 3000
+probe shot:c_task_output
+wait 100
+mods ctrl
+move 330 736
+wait 300
+probe shot:c_ctrl_hover
+wait 100
+click 330 736
+wait 500
+mods none
+probe c_after_ctrl_click
+key Ctrl+Shift+M
+wait 400
+probe shot:c_problems
+wait 100
+click 600 824
+wait 500
+probe shot:c_problem_click
+wait 100
+key F8
+wait 400
+probe c_f8
+wait 100
+key Ctrl+P
+type main.c
+wait 200
+key Return
+wait 300
+key Ctrl+G
+type 11
+key Return
+wait 300
+key Ctrl+.
+wait 1500
+probe shot:c_code_actions
+wait 100
+key Return
+wait 800
+probe shot:c_after_fix
+wait 100
+key Shift+Alt+F
+wait 1500
+probe shot:c_formatted
+wait 100
+key Ctrl+Shift+P
+type Tasks: Run Task
+key Return
+wait 300
+type slow
+key Return
+wait 1500
+key Ctrl+Pause
+wait 2500
+probe shot:c_cancelled
+wait 100
+quit

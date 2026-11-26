@@ -27,25 +27,35 @@ Terminal::~Terminal() {
 // PTY spawning
 // ---------------------------------------------------------------------------
 
-bool Terminal::spawn(const std::vector<std::string>& argv, const fs::path& cwd) {
+bool Terminal::spawn(const std::vector<std::string>& argv, const fs::path& cwd,
+                     const std::vector<std::pair<std::string, std::string>>& env, bool keep_screen) {
     kill();  // also reaps a previous session that ended by itself
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
-        for (auto& row : screen_) std::fill(row.begin(), row.end(), TermCell{});
-        cursor_x_ = cursor_y_ = 0;
+        if (!keep_screen) {
+            for (auto& row : screen_) std::fill(row.begin(), row.end(), TermCell{});
+            cursor_x_ = cursor_y_ = 0;
+        }
         current_fg_ = current_bg_ = termcolor::DEFAULT;
         parse_state_ = ParseState::Normal;
         bracketed_paste_ = false;
     }
 
-    if (!pty_.spawn(argv, cwd, cols_, rows_)) return false;
+    cwd_ = cwd;
+    if (!pty_.spawn(argv, cwd, cols_, rows_, env)) return false;
     alive_ = true;
     reader_thread_ = std::thread([this]() {
         char buf[4096];
         while (alive_) {
             long n = pty_.read(buf, sizeof(buf), 20);  // short timeout so kill() can join promptly
             if (n > 0) {
-                process_output(buf, static_cast<size_t>(n));
+                std::lock_guard<std::mutex> flock(filter_mutex_);
+                if (filter_) {
+                    std::string shown = filter_(std::string(buf, static_cast<size_t>(n)));
+                    process_output(shown.data(), shown.size());
+                } else {
+                    process_output(buf, static_cast<size_t>(n));
+                }
                 request_redraw();
             } else if (n < 0) {
                 alive_ = false;  // the shell exited
@@ -61,6 +71,33 @@ void Terminal::kill() {
     // Join before closing: the reader must not touch a closed (or reused) handle.
     if (reader_thread_.joinable()) reader_thread_.join();
     pty_.kill();
+}
+
+void Terminal::set_output_filter(OutputFilter f) {
+    std::lock_guard<std::mutex> lock(filter_mutex_);
+    filter_ = std::move(f);
+}
+
+void Terminal::feed(const std::string& text) {
+    std::string data;
+    data.reserve(text.size() + 16);
+    for (char c : text) {
+        if (c == '\n') data += '\r';
+        data += c;
+    }
+    process_output(data.data(), data.size());
+    request_redraw();
+}
+
+void Terminal::clear_all() {
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    for (auto& row : screen_) std::fill(row.begin(), row.end(), TermCell{});
+    scrollback_.clear();
+    dropped_ = 0;
+    scroll_y_ = 0;
+    cursor_x_ = cursor_y_ = 0;
+    has_selection_ = false;
+    link_line_ = -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -641,6 +678,21 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
         }
     }
 
+    // Ctrl+hover over a file location: underline it (Ctrl+click opens it).
+    TextLink hover;
+    int64_t hover_line = 0;
+    if ((SDL_GetModState() & SDL_KMOD_CTRL) && link_under(ctx.mouse_x, ctx.mouse_y, hover, hover_line)) {
+        int64_t first = static_cast<int64_t>(dropped_ + scrollback_.size()) - scroll_lines;
+        float uy = bounds.y + static_cast<float>(hover_line - first + 1) * lh - 2.0f;
+        std::vector<int> cols;
+        if (const auto* row = row_at(hover_line)) {
+            row_text(*row, cols);
+            int c0 = hover.begin < cols.size() ? cols[hover.begin] : 0;
+            int c1 = hover.end < cols.size() ? cols[hover.end] : static_cast<int>(row->size());
+            ctx.r->add_rect({bounds.x + c0 * cw, uy, (c1 - c0) * cw, 1.0f}, ctx.theme->accent);
+        }
+    }
+
     // Cursor (inverted block)
     if (scroll_lines == 0 && focused_ && alive_) {
         float cx = bounds.x + cursor_x_ * cw;
@@ -744,6 +796,50 @@ bool Terminal::handle_key(const KeyEvent& e) {
     return false;
 }
 
+std::string Terminal::row_text(const std::vector<TermCell>& row, std::vector<int>& byte_col) {
+    std::string out;
+    byte_col.clear();
+    for (size_t c = 0; c < row.size(); c++) {
+        uint32_t cp = row[c].ch < ' ' ? ' ' : row[c].ch;
+        size_t before = out.size();
+        if (cp < 0x80) out += static_cast<char>(cp);
+        else if (cp < 0x800) { out += static_cast<char>(0xC0 | (cp >> 6)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) { out += static_cast<char>(0xE0 | (cp >> 12)); out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+        else { out += static_cast<char>(0xF0 | (cp >> 18)); out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F)); out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+        for (size_t b = before; b < out.size(); b++) byte_col.push_back(static_cast<int>(c));
+    }
+    byte_col.push_back(static_cast<int>(row.size()));
+    return out;
+}
+
+// The file location under the pointer (buffer_mutex_ held).
+bool Terminal::link_under(float x, float y, TextLink& out, int64_t& line) {
+    if (!link_handler_ || !inner_.contains(x, y)) return false;
+    int scroll_lines = std::clamp(static_cast<int>(scroll_y_), 0, static_cast<int>(scrollback_.size()));
+    int vy = static_cast<int>((y - inner_.y) / cell_h_);
+    int col = static_cast<int>((x - inner_.x) / cell_w_);
+    line = static_cast<int64_t>(dropped_ + scrollback_.size()) + vy - scroll_lines;
+    const auto* row = row_at(line);
+    if (!row || col < 0 || col >= static_cast<int>(row->size())) return false;
+    std::vector<int> cols;
+    std::string text = row_text(*row, cols);
+    if (line != link_line_ || text != link_text_) {  // resolve each candidate once per line
+        link_line_ = line;
+        link_text_ = text;
+        link_cache_.clear();
+        for (auto& l : find_links(text)) link_cache_.push_back({l, link_handler_(l, false)});
+    }
+    for (auto& [l, ok] : link_cache_) {
+        if (!ok) continue;
+        int c0 = cols[std::min(l.begin, cols.size() - 1)], c1 = cols[std::min(l.end, cols.size() - 1)];
+        if (col >= c0 && col < c1) {
+            out = l;
+            return true;
+        }
+    }
+    return false;
+}
+
 Terminal::CellPos Terminal::cell_at(float x, float y) const {
     int scroll_lines = std::clamp(static_cast<int>(scroll_y_), 0, static_cast<int>(scrollback_.size()));
     int vy = std::clamp(static_cast<int>((y - inner_.y) / cell_h_), 0, rows_ - 1);
@@ -785,6 +881,16 @@ bool Terminal::handle_mouse(const MouseEvent& e) {
     if (!e.pressed) {
         selecting_ = false;
         return true;
+    }
+    if (SDL_GetModState() & SDL_KMOD_CTRL) {  // Ctrl+click opens a file:line:col
+        TextLink link;
+        int64_t line;
+        if (link_under(e.x, e.y, link, line)) {
+            LinkHandler h = link_handler_;
+            link_line_ = -1;  // the file system may change; resolve again next time
+            h(link, true);
+            return true;
+        }
     }
     CellPos p = cell_at(e.x, e.y);
     if (e.double_click) {  // select the word under the pointer

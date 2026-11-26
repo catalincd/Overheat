@@ -1,0 +1,28 @@
+gcc -Wall -Wextra -g -DBROKEN -o app main.c util.c broken.c
+broken.c: In function ‘broken_entry’:
+broken.c:8:24: error: passing argument 2 of ‘add’ makes integer from pointer without a cast [-Wint-conversion]
+    8 |     int total = add(1, "two");
+      |                        ^~~~~
+      |                        |
+      |                        char *
+In file included from broken.c:2:
+util.h:4:20: note: expected ‘int’ but argument is of type ‘char *’
+    4 | int add(int a, int b);
+      |                ~~~~^
+broken.c:9:5: error: implicit declaration of function ‘undeclared_function’ [-Wimplicit-function-declaration]
+    9 |     undeclared_function(total);
+      |     ^~~~~~~~~~~~~~~~~~~
+broken.c:10:17: error: expected ‘;’ before ‘}’ token
+   10 |     return total
+      |                 ^
+      |                 ;
+   11 | }
+      | ~                
+broken.c:7:9: warning: unused variable ‘unused’ [-Wunused-variable]
+    7 |     int unused;
+      |         ^~~~~~
+broken.c: At top level:
+broken.c:4:12: warning: ‘unused_helper’ defined but not used [-Wunused-function]
+    4 | static int unused_helper(int x) { return x * 2; }
+      |            ^~~~~~~~~~~~~
+make: *** [Makefile:12: app] Error 1

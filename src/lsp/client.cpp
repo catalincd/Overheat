@@ -302,6 +302,7 @@ void LSPClient::stop() {
         std::lock_guard<std::mutex> lock(outbox_mutex_);
         running_ = false;
         outbox_.clear();
+        held_.clear();
     }
     outbox_cv_.notify_all();
 
@@ -318,12 +319,16 @@ void LSPClient::stop() {
     pending_requests_.clear();
 }
 
-void LSPClient::send_message(const std::string& json) {
+void LSPClient::send_message(const std::string& json, bool handshake) {
     if (!process_) return;
     std::string message = "Content-Length: " + std::to_string(json.size()) + "\r\n\r\n" + json;
     {
         std::lock_guard<std::mutex> lock(outbox_mutex_);
         if (!running_) return;
+        if (!ready_ && !handshake) {
+            held_.push_back(std::move(message));
+            return;
+        }
         outbox_.push_back(std::move(message));
     }
     outbox_cv_.notify_one();
@@ -357,7 +362,7 @@ void LSPClient::send_request(const std::string& method, const std::string& param
 
     std::string json = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
                        ",\"method\":\"" + method + "\",\"params\":" + params + "}";
-    send_message(json);
+    send_message(json, method == "initialize");
 }
 
 void LSPClient::send_notification(const std::string& method, const std::string& params) {
@@ -506,12 +511,33 @@ void LSPClient::handle_message(const std::string& json) {
                     diag.end.col = static_cast<size_t>(find_int_value(end_obj, "character"));
                     diag.message = find_string_value(item, "message");
                     diag.severity = find_int_value(item, "severity", 1);
+                    diag.source = find_string_value(item, "source");
+                    diag.code = find_string_value(item, "code");
+                    if (diag.code.empty() && item.find("\"code\":") != std::string::npos)
+                        diag.code = std::to_string(find_int_value(item, "code"));
+                    diag.raw = item;
 
                     diagnostics.push_back(std::move(diag));
                 }
             }
 
             on_diagnostics_(file_path, std::move(diagnostics));
+        } else if (json.find("\"id\":") != std::string::npos && on_server_request_) {
+            // A request from the server (workspace/applyEdit, ...): answer with the handler's result.
+            std::string result = on_server_request_(method, json);
+            if (!result.empty()) {
+                size_t at = json.find("\"id\":");
+                size_t st = at + 5;
+                while (st < json.size() && json[st] == ' ') st++;
+                size_t en = st;
+                if (en < json.size() && json[en] == '"') {
+                    en = json.find('"', en + 1);
+                    en = en == std::string::npos ? json.size() : en + 1;
+                } else {
+                    while (en < json.size() && json[en] != ',' && json[en] != '}') en++;
+                }
+                send_message("{\"jsonrpc\":\"2.0\",\"id\":" + json.substr(st, en - st) + ",\"result\":" + result + "}");
+            }
         }
     }
 }
@@ -525,21 +551,33 @@ void LSPClient::initialize(const fs::path& root_uri) {
         ",\"rootUri\":\"" + escape_json(uri) + "\""
         ",\"capabilities\":{"
             "\"general\":{\"positionEncodings\":[\"utf-8\",\"utf-16\"]},"
+            "\"workspace\":{\"applyEdit\":true,\"workspaceEdit\":{\"documentChanges\":true}},"
             "\"textDocument\":{"
                 "\"synchronization\":{\"didSave\":true,\"didOpen\":true,\"didClose\":true},"
                 "\"publishDiagnostics\":{},"
                 "\"completion\":{\"completionItem\":{\"snippetSupport\":false}},"
                 "\"hover\":{},"
                 "\"definition\":{},"
-                "\"references\":{}"
+                "\"references\":{},"
+                "\"formatting\":{},"
+                "\"codeAction\":{\"codeActionLiteralSupport\":{\"codeActionKind\":{\"valueSet\":"
+                    "[\"\",\"quickfix\",\"refactor\",\"refactor.extract\",\"refactor.inline\","
+                    "\"refactor.rewrite\",\"source\",\"source.organizeImports\",\"source.fixAll\"]}}}"
             "}"
         "}}";
 
     send_request("initialize", params, [this](const std::string& response) {
         // LSP 3.17 position encoding negotiation; servers that ignore it use UTF-16.
         utf8_positions_ = find_string_value(response, "positionEncoding") == "utf-8";
-        send_notification("initialized", "{}");
-        ready_ = true;
+        send_message("{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}", true);
+        {
+            // Then everything queued meanwhile (didOpen, ...), in order.
+            std::lock_guard<std::mutex> lock(outbox_mutex_);
+            ready_ = true;
+            for (auto& m : held_) outbox_.push_back(std::move(m));
+            held_.clear();
+        }
+        outbox_cv_.notify_one();
         request_redraw();
     });
 }
@@ -680,6 +718,34 @@ void LSPClient::definition(const fs::path& path, Position pos, DefinitionCallbac
             auto locations = parse_locations(result);
             if (cb) cb(std::move(locations));
         });
+}
+
+void LSPClient::code_action(const fs::path& path, Position start, Position end, const std::string& diagnostics_json,
+                            RawCallback cb) {
+    auto pos = [](Position p) {
+        return "{\"line\":" + std::to_string(p.line) + ",\"character\":" + std::to_string(p.col) + "}";
+    };
+    std::string params = "{\"textDocument\":{\"uri\":\"" + escape_json(uri_from_path(path)) + "\"},"
+                         "\"range\":{\"start\":" + pos(start) + ",\"end\":" + pos(end) + "},"
+                         "\"context\":{\"diagnostics\":" + (diagnostics_json.empty() ? "[]" : diagnostics_json) +
+                         ",\"triggerKind\":1}}";
+    send_request("textDocument/codeAction", params, std::move(cb));
+}
+
+void LSPClient::formatting(const fs::path& path, int tab_size, bool insert_spaces, RawCallback cb) {
+    std::string params = "{\"textDocument\":{\"uri\":\"" + escape_json(uri_from_path(path)) + "\"},"
+                         "\"options\":{\"tabSize\":" + std::to_string(tab_size) +
+                         ",\"insertSpaces\":" + (insert_spaces ? "true" : "false") + "}}";
+    send_request("textDocument/formatting", params, std::move(cb));
+}
+
+void LSPClient::execute_command(const std::string& command_json, RawCallback cb) {
+    // Command {title, command, arguments} -> ExecuteCommandParams {command, arguments}.
+    std::string params = "{\"command\":\"" + escape_json(find_string_value(command_json, "command")) + "\"";
+    std::string args = find_array(command_json, "arguments");
+    if (!args.empty()) params += ",\"arguments\":" + args;
+    params += "}";
+    send_request("workspace/executeCommand", params, std::move(cb));
 }
 
 void LSPClient::references(const fs::path& path, Position pos, ReferencesCallback cb) {

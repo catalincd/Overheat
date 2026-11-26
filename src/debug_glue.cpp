@@ -19,16 +19,9 @@ std::string clip(std::string s, size_t n) {
 }
 } // namespace
 
-Panel& App::bottom_panel() {
-    if (bottom_view_ == BottomView::DebugConsole) return debug_console_;
-    return terminal_;
-}
-
 void App::show_debug_console(bool focus_it) {
-    bottom_view_ = BottomView::DebugConsole;
-    terminal_visible_ = true;
     debug_console_.scroll_to_end();
-    if (focus_it) focus(&debug_console_);
+    show_bottom(BottomView::DebugConsole, focus_it);
 }
 
 void App::setup_debugger() {

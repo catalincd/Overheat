@@ -60,13 +60,16 @@ public:
     Pty(const Pty&) = delete;
     Pty& operator=(const Pty&) = delete;
 
-    // Empty argv runs default_shell().
-    bool spawn(const std::vector<std::string>& argv, const fs::path& cwd, int cols, int rows);
+    // Empty argv runs default_shell(). `env` adds or overrides environment variables.
+    bool spawn(const std::vector<std::string>& argv, const fs::path& cwd, int cols, int rows,
+               const std::vector<std::pair<std::string, std::string>>& env = {});
     // Waits up to timeout_ms: >0 bytes read, 0 timeout, <0 when the child is gone.
     long read(char* buf, size_t n, int timeout_ms);
     bool write(const char* data, size_t n);
     void resize(int cols, int rows);
     bool exited();  // non-blocking check; reaps the child
+    // The child's exit status once it has exited (128 + signal when killed), else -1.
+    int exit_code();
     void kill();    // stop the child and release everything
 
 private:

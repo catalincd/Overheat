@@ -49,6 +49,14 @@ void KeyMap::init_defaults(const std::string& preset) {
     bind(SDLK_F11,   KeyMod::None,                      "debug_step_into");
     bind(SDLK_F11,   KeyMod::Shift,                     "debug_step_out");
     bind(SDLK_Y,     KeyMod::Ctrl | KeyMod::Shift,      "debug_console");
+    // Build tasks, problems, quick fixes, formatting (tasks_glue.cpp). F5 belongs to the debugger.
+    bind(SDLK_B,     KeyMod::Ctrl | KeyMod::Shift,      "run_build_task");
+    bind(SDLK_F5,    KeyMod::Ctrl,                      "run_program");
+    bind(SDLK_PAUSE, KeyMod::Ctrl,                      "task_terminate");  // Ctrl+Break
+    bind(SDLK_M,     KeyMod::Ctrl | KeyMod::Shift,      "problems");
+    bind(SDLK_F8,    KeyMod::Shift,                     "prev_problem");
+    bind(SDLK_PERIOD, KeyMod::Ctrl,                     "code_action");
+    bind(SDLK_F,     KeyMod::Shift | KeyMod::Alt,       "format_document");
 
     // Undo/redo
     bind(SDLK_Z,     KeyMod::Ctrl,                      "undo");

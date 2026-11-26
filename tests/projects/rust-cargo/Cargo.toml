@@ -1,0 +1,11 @@
+[package]
+name = "sample"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+# `cargo build --features broken` compiles src/broken.rs: intentional errors for
+# Overheat's problem matchers.
+broken = []
+
+[dependencies]

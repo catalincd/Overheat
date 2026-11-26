@@ -1,0 +1,21 @@
+[1/4] Building CXX object CMakeFiles/sample.dir/src/broken.cpp.o
+FAILED: [code=1] CMakeFiles/sample.dir/src/broken.cpp.o 
+/usr/bin/g++   -std=gnu++20 -Wall -Wextra -MD -MT CMakeFiles/sample.dir/src/broken.cpp.o -MF CMakeFiles/sample.dir/src/broken.cpp.o.d -o CMakeFiles/sample.dir/src/broken.cpp.o -c @ROOT@/cpp-cmake/src/broken.cpp
+@ROOT@/cpp-cmake/src/broken.cpp: In function ‘int broken_unused(int)’:
+@ROOT@/cpp-cmake/src/broken.cpp:12:24: error: ‘missing_name’ was not declared in this scope
+   12 |     return value + a + missing_name;
+      |                        ^~~~~~~~~~~~
+@ROOT@/cpp-cmake/src/broken.cpp:9:9: warning: unused variable ‘unused’ [-Wunused-variable]
+    9 |     int unused = 0;
+      |         ^~~~~~
+In file included from @ROOT@/cpp-cmake/src/broken.cpp:2:
+@ROOT@/cpp-cmake/src/shapes.h: In instantiation of ‘double total_area(const std::vector<T>&) [with T = Label]’:
+@ROOT@/cpp-cmake/src/broken.cpp:11:26:   required from here
+   11 |     double a = total_area(labels);
+      |                ~~~~~~~~~~^~~~~~~~
+@ROOT@/cpp-cmake/src/shapes.h:15:44: error: ‘const struct Label’ has no member named ‘area’
+   15 |     for (const auto& it : items) sum += it.area;
+      |                                         ~~~^~~~
+[2/4] Building CXX object CMakeFiles/sample.dir/src/main.cpp.o
+[3/4] Building CXX object CMakeFiles/sample.dir/src/shapes.cpp.o
+ninja: build stopped: subcommand failed.

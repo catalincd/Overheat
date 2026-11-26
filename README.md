@@ -74,6 +74,10 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 - Language Server Protocol: diagnostics, completion, go to definition
 - Debugger over DAP for C, C++ and Rust (gdb, lldb-dap, CodeLLDB): breakpoints, stepping,
   variables, watch, call stack, inline values, break on Rust panics
+- Quick fixes and code actions (<kbd>Ctrl</kbd>+<kbd>.</kbd>) from the server and from rustc/clippy
+  suggestions; Format Document (<kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd>) and format on save
+  (clang-format / rustfmt through clangd / rust-analyzer)
+- clang-tidy findings through clangd (add a `.clang-tidy`)
 - Breadcrumbs with the enclosing class and function
 - Minimap with a viewport you can drag
 - Squiggly underlines drawn by the shader
@@ -94,7 +98,14 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 <td valign="top">
 
 ### 🖥️ Workbench
-- Integrated terminal (PTY on Linux, ConPTY on Windows)
+- Integrated terminal (PTY on Linux, ConPTY on Windows); <kbd>Ctrl</kbd>+click any
+  `file:line:col`, `file(line,col)` or rustc `--> file:line:col` to open it
+- Build tasks: CMake (with presets), Make and Cargo detected, plus `.overheat/tasks.toml` and
+  `.vscode/tasks.json`. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> builds, output runs in a
+  task terminal, and gcc/clang, MSVC, CMake and rustc errors land in the Problems panel and as
+  squiggles
+- Problems panel: language-server and build problems for all files, grouped by file, with a
+  filter and severity toggles; <kbd>F8</kbd> / <kbd>Shift</kbd>+<kbd>F8</kbd> step through them
 - Split editors (<kbd>Ctrl</kbd>+<kbd>\\</kbd>), draggable tabs
 - <kbd>Ctrl</kbd>+<kbd>Tab</kbd> through recent files
 - Command Center: a search box above the tabs showing `file — workspace`; click it for
@@ -176,7 +187,9 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | Next / previous tab | <kbd>Ctrl</kbd>+<kbd>PgDn</kbd> / <kbd>PgUp</kbd> | Duplicate line | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> |
 | Go to line | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Delete line | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> |
 | Go to definition | <kbd>F12</kbd> | Toggle comment | <kbd>Ctrl</kbd>+<kbd>/</kbd> |
-| Next problem | <kbd>F8</kbd> | | |
+| Next / previous problem | <kbd>F8</kbd> / <kbd>Shift</kbd>+<kbd>F8</kbd> | Quick fix (code actions) | <kbd>Ctrl</kbd>+<kbd>.</kbd> |
+| Run build task | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> | Format document | <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd> |
+| Run program (run task) | <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Terminate task | <kbd>Ctrl</kbd>+<kbd>Break</kbd> |
 | Find / Replace | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Select line | <kbd>Ctrl</kbd>+<kbd>L</kbd> |
 | Find in files | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Trigger suggestions | <kbd>Ctrl</kbd>+<kbd>Space</kbd> |
 | Save / Save As | <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Undo / Redo | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> |
@@ -190,6 +203,7 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | Source Control | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Zoom in / out / reset | <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd> |
 | AI chat | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd> | Color theme | <kbd>Ctrl</kbd>+<kbd>K</kbd> <kbd>Ctrl</kbd>+<kbd>T</kbd> |
 | Settings | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Fullscreen (when not debugging) | <kbd>F11</kbd> |
+| Problems | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> | Open file:line in terminal output | <kbd>Ctrl</kbd>+click |
 
 | Debugging | | | |
 |---|---|---|---|
@@ -336,7 +350,7 @@ remote_monitor = true                # host stats strip while on Remote-SSH
 local_monitor = false                # the same strip for this computer
 command_center = true                # search box above the tabs; false for a minimal look
 status_bar_hidden = "encoding,eol"   # status bar items to hide: remote, branch, sync, problems,
-                                     # tasks, position, indent, encoding, eol, language, lsp, bell
+                                     # tasks, task, position, indent, encoding, eol, language, lsp, bell
 tab_width = 4                        # columns per indent level and per tab
 insert_spaces = true
 indent_mode = "off"                  # "off" | "auto" | "virtual" (see below)
@@ -348,6 +362,7 @@ debug.open_view_on_start = true      # and the Run and Debug view
 debug.inline_values = true
 debug.rust_step_into_std = false     # true: Step Into also enters core/alloc/std
 debug.trace = false                  # log DAP traffic to the Debug Console
+format_on_save = false               # format with the language server (clang-format, rustfmt)
 ```
 
 <details>
@@ -438,6 +453,63 @@ word_wrap = true    # also: font_family, font_size, minimap, breadcrumbs, ligatu
 </details>
 
 <details>
+<summary><b>Build tasks, problems and linting</b></summary>
+
+<br>
+
+*Tasks: Run Task...* lists every task; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> runs the
+default build task and <kbd>Ctrl</kbd>+<kbd>F5</kbd> the default run task (<kbd>F5</kbd> is left
+for the debugger). Output goes to the **TASK** tab of the bottom panel, next to **PROBLEMS** and
+**TERMINAL**; the status bar shows a spinner while it runs and the error/warning counts after.
+<kbd>Ctrl</kbd>+<kbd>Break</kbd> (or the stop button, or <kbd>Ctrl</kbd>+<kbd>C</kbd> in the task
+terminal) cancels. Open files are saved first, like VS Code's `task.saveBeforeRun`.
+
+- **Detected:** CMake (`CMakePresets.json` / `CMakeUserPresets.json` configure, build and test
+  presets, otherwise `cmake -S . -B build` + `cmake --build build`; a build whose folder is not
+  configured yet runs its configure step first), Make (`make` plus the Makefile's targets; `run`,
+  `test` and `check` targets join those groups) and Cargo (`build`, `check`, `clippy`, `test`,
+  `run`, `clean`, with `--message-format=json-diagnostic-rendered-ansi` so problems are exact
+  and rustc's machine-applicable suggestions become quick fixes).
+- **`.vscode/tasks.json`** is imported too: `label`, `type` (`shell`, `process`, `cargo`),
+  `command`, `args`, `options.cwd` / `options.env`, the `linux` / `windows` / `osx` overrides,
+  `group` (`build` / `test`, `isDefault`), `dependsOn` and `problemMatcher` (`$gcc`, `$rustc`,
+  `$msCompile`, or an object with a `base`). Comments and trailing commas are fine.
+- **`.overheat/tasks.toml`** (*Tasks: Configure Tasks* creates it, listing the detected tasks):
+
+```toml
+[[task]]
+label = "build"                  # shown in Run Task...; a detected task with this label is replaced
+command = "make -j8"             # a shell command line (sh -c, cmd /c on Windows), or
+# program = "cargo"              # a program run directly,
+# args = ["build", "--release"]  #   with its arguments
+cwd = "${workspaceFolder}"       # default: the project folder
+env = { CFLAGS = "-O2" }
+group = "build"                  # build | test | run
+default = true                   # Ctrl+Shift+B (build) / Ctrl+F5 (run) pick it
+matcher = ["gcc"]                # gcc, msvc, cmake, rustc, cargo-json, generic; or VS Code's $gcc, ...
+depends_on = ["configure"]       # labels run first, in order; the chain stops at the first failure
+```
+
+  Variables: `${workspaceFolder}`, `${workspaceFolderBasename}`, `${file}`, `${fileDirname}`,
+  `${fileBasename}`, `${fileBasenameNoExtension}`, `${relativeFile}`, `${lineNumber}`,
+  `${env:NAME}`.
+- **Problem matchers:** `gcc` (gcc and clang, with "In file included from" chains and template
+  instantiation notes kept with the error they explain), `msvc` (`file(line,col): error C1234:`),
+  `cmake` (`CMake Error at file:line`), `rustc` (`error[E0308]` + `--> file:line:col`, and
+  panics), `cargo-json` (cargo's JSON messages) and `generic` (`file:line[:col]: message`).
+  Build problems show in the Problems panel and as squiggles in open files until the next run.
+- **Linting:** clangd runs clang-tidy when the project has a `.clang-tidy` (see
+  `tests/projects/c/.clang-tidy`); its findings and quick fixes appear like any other diagnostic.
+  `cargo clippy` is a detected task. <kbd>Ctrl</kbd>+<kbd>.</kbd> lists the language server's code
+  actions for the cursor plus the build's suggestions on that line, and applies the edit
+  (several files at once when needed).
+- **Terminal links:** <kbd>Ctrl</kbd>+hover underlines `file:line:col`, `file:line`,
+  `file(line,col)`, `--> file:line:col` and `File "x.py", line 3`; <kbd>Ctrl</kbd>+click opens
+  them. Relative paths resolve against the terminal's (or task's) folder, then the project roots.
+
+</details>
+
+<details>
 <summary><b>Key bindings, language servers, AI chat</b></summary>
 
 <br>
@@ -492,7 +564,8 @@ src/
 ├── app.cpp            workbench: layout, commands, sessions, settings
 ├── renderer/          Vulkan context, quad renderer, font atlas
 ├── editor/            buffer, cursors, editor ops, tree-sitter syntax, indentation
-├── ui/                editor view, terminal, panels, palette, settings
+├── ui/                editor view, terminal, panels, palette, settings, problems
+├── tasks/             build tasks, problem matchers, terminal links (tasks_glue.cpp wires them)
 ├── platform/          POSIX + Win32 implementations
 ├── lsp/ git/ ssh/     language servers, libgit2, libssh2
 ├── debug/             DAP client, session model, breakpoints, launch configurations
@@ -504,7 +577,7 @@ third_party/           tree-sitter core + C/C++/Rust grammars (MIT)
 
 ## 🗺 Roadmap
 
-Next up: hover tooltips, rename and format, symbol search, a Problems panel, Git and language
+Next up: hover tooltips, rename, symbol search, a debugger, builds, Git and language
 servers over Remote-SSH, more grammars, and tool use in the AI chat. See
 **[TODO.md](TODO.md)** for the full list and known limitations.
 

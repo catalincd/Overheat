@@ -10,20 +10,19 @@ first, then over Remote-SSH. Language servers: clangd (C/C++) and rust-analyzer 
 Builds: CMake, Make and Cargo. Debugging: gdb's built-in DAP (`gdb -i dap`, gdb >= 14)
 for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
 
-- [ ] **Build tasks:** auto-detect CMake (configure, build, presets), Make and Cargo
-  (build, run, test, check, clippy), plus a project task file and an import of
-  `.vscode/tasks.json`. Ctrl+Shift+B builds, F5 runs, and Run Task… lists the rest.
-  Output goes to a task terminal; Ctrl+Break cancels.
-- [ ] **Problem matchers and Problems panel:** parse gcc/clang (`file:line:col: error:`),
-  MSVC (`file(line,col): error`), CMake and rustc/cargo output (`--> file:line:col`, or
-  `--message-format=json`), including notes and "in expansion of" chains. A Problems panel
-  lists LSP diagnostics and build errors together, with severity filters; F8 /
-  Shift+F8 step through them, and the jump line highlights the location.
-- [ ] **Clickable `file:line:col`** in the terminal and task output (Ctrl+click), with
-  paths resolved against the task's cwd.
-- [ ] **Linting:** clang-tidy through clangd (`.clang-tidy`), `cargo clippy` as a task
-  with its own matcher, quick fixes / code actions (Ctrl+.) from both, and format on save
-  with clang-format / rustfmt (via the LSP).
+- [ ] **Tasks, problems and linting follow-ups** (build tasks, matchers, the Problems panel,
+  terminal links, quick fixes and formatting are in):
+  - tasks over Remote-SSH (detect on the host, run through the SSH terminal, map paths)
+  - external linters run on save with matchers (ruff, eslint, shellcheck), npm scripts
+    detection, a `tsc` matcher
+  - code actions: `codeAction/resolve` for servers that compute edits lazily, file
+    create/rename/delete operations in workspace edits, a lightbulb in the gutter, Format
+    Selection; quick fixes from clang-tidy's `--fix` output when run as a task
+  - Problems panel: keep the filter and collapsed files in the session; a "current file
+    only" toggle; move build problems along when lines are inserted above them
+  - the task terminal is one reused tab; per-task terminals come with multiple terminals
+  - CMake: pick the build target / preset in the status bar, and a run task for the
+    chosen executable (today Ctrl+F5 needs a `run` group task for CMake projects)
 - [ ] **LSP navigation:** hover tooltips with a small markdown renderer; Ctrl+click and
   hover-underline go-to-definition; Peek Definition (Alt+F12); Go to Declaration / Type
   Definition / Implementation; Find All References with a peek view; rename (F2) with a
@@ -43,10 +42,10 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
   editable list of excerpts (see "From the editor survey").
 - [ ] **Remote:** run clangd / rust-analyzer, builds and gdb on the Remote-SSH host
   (stdio over an SSH channel), with path mapping between remote and local paths.
-- [ ] Tests: a small C, C++ (CMake) and Rust (Cargo) sample project in `tests/projects/`
-  driving all of the above in `--script` mode. On this machine clangd, clang-tidy, gdb 18,
-  cargo and rustc are installed; rust-analyzer and lldb-dap are not (install rust-analyzer
-  to test Rust LSP).
+- [ ] Tests: `tests/projects/` has small C (Make), C++ (CMake + presets) and Rust (Cargo)
+  projects with broken variants, and `tools/qa/tasks_*.txt` drive builds, problems, links,
+  quick fixes and formatting in `--script` mode; extend them to the debugger. clangd,
+  clang-tidy, gdb 18, cargo, rustc and rust-analyzer are installed here; lldb-dap is not.
 
 ## Requested (2026-11-26)
 
@@ -98,17 +97,8 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
   - local and remote terminals can coexist; terminals restore in sessions and
     workspaces (cwd and profile, not the process)
   - task runs (see build tasks) get their own terminal
-- [ ] **Build, lint and navigation like VS Code**
-  - **Build tasks:** a project task file (like `.vscode/tasks.json`: name, command, cwd,
-    env, default build task) with Run Build Task (Ctrl+Shift+B) and Run Task… in the
-    palette. Output goes to a task terminal, and problem matchers (gcc/clang, MSVC, rustc,
-    tsc, generic `file:line:col`) feed the Problems panel. Auto-detect CMake, Make, Cargo
-    and npm scripts. Also import `.vscode/tasks.json` when present. Works over Remote-SSH.
-    Builds on the clickable-errors item below.
-  - **Linting:** today only the language server's diagnostics show (clangd). Add
-    clang-tidy through clangd (`.clang-tidy`), external linters per language (ruff,
-    eslint, shellcheck…) run on save with problem matchers, quick fixes / code actions
-    (Ctrl+.), and a Problems panel listing all diagnostics with severity filters.
+- [ ] **Navigation like VS Code** (build tasks and linting are done; follow-ups under
+  "C, C++ and Rust IDE core")
   - **Go to definition:** F12 exists. Add Ctrl+click and hover underline on symbols,
     Peek Definition (Alt+F12) inline, Go to Declaration / Type Definition /
     Implementation, a picker when there are several results, and back/forward
@@ -145,9 +135,6 @@ The DAP debugger (gdb, lldb-dap, CodeLLDB; README "Debugging") is in. Still open
 
 ## From the editor survey (2026-11-26)
 
-- [ ] **Clickable `file:line:col`** in the terminal and build output (Acme/Geany): Ctrl+click
-  opens the file at that position. Also a one-key **build/run task** (configurable command,
-  e.g. F5/Ctrl+B) whose compiler errors land in the Problems panel
 - [ ] **Multibuffers** (Zed): search results, references and diagnostics shown as one
   *editable* document of excerpts, with edits written back to the source files. One
   mechanism for the search results, find references and the Problems panel

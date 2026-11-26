@@ -1,0 +1,17 @@
+[1/4] Building CXX object CMakeFiles/sample.dir/src/shapes.cpp.o
+[2/4] Building CXX object CMakeFiles/sample.dir/src/broken.cpp.o
+FAILED: [code=1] CMakeFiles/sample.dir/src/broken.cpp.o 
+/usr/bin/clang++   -std=gnu++20 -Wall -Wextra -MD -MT CMakeFiles/sample.dir/src/broken.cpp.o -MF CMakeFiles/sample.dir/src/broken.cpp.o.d -o CMakeFiles/sample.dir/src/broken.cpp.o -c @ROOT@/cpp-cmake/src/broken.cpp
+@ROOT@/cpp-cmake/src/broken.cpp:12:24: error: use of undeclared identifier 'missing_name'
+   12 |     return value + a + missing_name;
+      |                        ^~~~~~~~~~~~
+In file included from @ROOT@/cpp-cmake/src/broken.cpp:2:
+@ROOT@/cpp-cmake/src/shapes.h:15:44: error: no member named 'area' in 'Label'
+   15 |     for (const auto& it : items) sum += it.area;
+      |                                         ~~ ^
+@ROOT@/cpp-cmake/src/broken.cpp:11:16: note: in instantiation of function template specialization 'total_area<Label>' requested here
+   11 |     double a = total_area(labels);
+      |                ^
+2 errors generated.
+[3/4] Building CXX object CMakeFiles/sample.dir/src/main.cpp.o
+ninja: build stopped: subcommand failed.

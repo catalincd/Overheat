@@ -179,6 +179,7 @@ bool App::init(int argc, char** argv) {
     register_commands();
     load_keymap();
     setup_status_bar();
+    setup_tasks();
     refresh_command_keys();
 
     // ---- Git ----
@@ -254,7 +255,10 @@ void App::run() {
             float x = ev.motion.x, y = ev.motion.y;
             bool in_chrome = l.activity_bar.contains(x, y) || l.sidebar.contains(x, y) || l.tab_bar.contains(x, y) ||
                              l.terminal_header.contains(x, y) || (welcome_visible_ && l.editor.contains(x, y)) ||
-                             l.status_bar.contains(x, y) || l.title_bar.contains(x, y);
+                             l.status_bar.contains(x, y) || l.title_bar.contains(x, y) ||
+                             // Problems rows hover; Ctrl+hover underlines file:line links in terminals.
+                             (l.terminal.contains(x, y) && (bottom_view_ == BottomView::Problems ||
+                                                            (SDL_GetModState() & SDL_KMOD_CTRL)));
             bool changed = in_chrome || hover_was_chrome_;  // one more frame to clear the highlight
             hover_was_chrome_ = in_chrome;
             return changed;
@@ -395,6 +399,8 @@ void App::emit_probe(const std::string& label) {
                  editor_view_.last_gutter_width(), font_.char_width(), font_.line_height(),
                  last_click_x_, last_click_y_);
     const char* focus = terminal_.focused() ? "terminal"
+                      : task_term_.focused() ? "task"
+                      : problems_.focused() ? "problems"
                       : file_tree_.focused() ? "tree"
                       : editor_view_.focused() ? "editor" : "none";
     if (Editor* ed = current_editor()) {
@@ -499,7 +505,8 @@ void App::handle_event(const SDL_Event& e) {
         }
 
         // Chords (Ctrl+K Ctrl+T): the prefix arms the next key; modifiers alone keep it armed.
-        bool in_terminal = terminal_.focused() && terminal_visible_;
+        Terminal* bottom_term = terminal_visible_ ? bottom_terminal() : nullptr;
+        bool in_terminal = bottom_term && bottom_term->focused();
         chord_eat_text_ = false;
         if (chord_prefix_) {
             bool modifier_only = kc == SDLK_LCTRL || kc == SDLK_RCTRL || kc == SDLK_LSHIFT || kc == SDLK_RSHIFT ||
@@ -531,7 +538,8 @@ void App::handle_event(const SDL_Event& e) {
         if (!cmd.empty() && in_terminal) {
             static const char* global_cmds[] = {
                 "toggle_terminal", "command_palette_files", "command_palette_commands",
-                "next_tab", "prev_tab", "quit", "toggle_fullscreen"};
+                "next_tab", "prev_tab", "quit", "toggle_fullscreen", "run_build_task", "run_program",
+                "task_terminate", "problems", "next_problem", "prev_problem"};
             bool global = std::any_of(std::begin(global_cmds), std::end(global_cmds),
                                       [&](const char* g) { return cmd == g; }) ||
                           (cmd.rfind("debug_", 0) == 0 && cmd != "debug_toggle_breakpoint");
@@ -545,10 +553,8 @@ void App::handle_event(const SDL_Event& e) {
 
         // Forward to focused panel
         KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
-        if (terminal_.focused() && terminal_visible_) {
-            terminal_.handle_key(ke);
-        } else if (debug_console_.focused() && terminal_visible_) {
-            debug_console_.handle_key(ke);
+        if (terminal_visible_ && bottom_panel().focused()) {
+            if (!bottom_panel().handle_key(ke) && kc == SDLK_ESCAPE && problems_.focused()) focus_editor();
         } else {
             editor_view_.handle_key(ke);
         }
@@ -563,8 +569,8 @@ void App::handle_event(const SDL_Event& e) {
             break;
         }
         KeyEvent ke{static_cast<uint32_t>(e.key.key), sdl_mods(e.key.mod), false};
-        if (terminal_.focused() && terminal_visible_) {
-            terminal_.handle_key(ke);
+        if (terminal_visible_ && bottom_panel().focused()) {
+            bottom_panel().handle_key(ke);
         } else {
             editor_view_.handle_key(ke);
         }
@@ -583,10 +589,8 @@ void App::handle_event(const SDL_Event& e) {
             search_.handle_text(text);
         } else if (chat_.input_focused()) {
             chat_.handle_text(text);
-        } else if (debug_console_.focused() && terminal_visible_) {
-            debug_console_.handle_text(text);
-        } else if (terminal_.focused() && terminal_visible_) {
-            terminal_.handle_text(text);
+        } else if (terminal_visible_ && bottom_panel().focused()) {
+            bottom_panel().handle_text(text);
         } else {
             editor_view_.handle_text(text);
             lsp_maybe_complete(text, false);
@@ -642,12 +646,7 @@ void App::handle_event(const SDL_Event& e) {
             focus(&sidebar_panel());
             sidebar_panel().handle_mouse(me);
         } else if (layout.terminal_header.contains(mx, my)) {
-            if (term_close_btn_.contains(mx, my)) terminal_visible_ = false;
-            else if (bottom_tabs_[1].contains(mx, my)) show_debug_console(true);
-            else if (bottom_tabs_[0].contains(mx, my)) bottom_view_ = BottomView::Terminal, focus(&terminal_);
-            else if (term_restart_btn_.contains(mx, my))
-                bottom_view_ == BottomView::DebugConsole ? debugger_.clear_console() : restart_terminal();
-            else focus(&bottom_panel());
+            panel_header_click(mx, my);
         } else if (terminal_visible_ && layout.terminal.contains(mx, my)) {
             focus(&bottom_panel());
             bottom_panel().handle_mouse(me);
@@ -682,7 +681,7 @@ void App::handle_event(const SDL_Event& e) {
             break;
         }
         editor_view_.handle_mouse(me);
-        terminal_.handle_mouse(me);
+        bottom_panel().handle_mouse(me);
         break;
     }
 
@@ -712,6 +711,7 @@ void App::handle_event(const SDL_Event& e) {
     }
 
     case SDL_EVENT_MOUSE_MOTION: {
+        if (scripted_) script_mouse_x_ = e.motion.x, script_mouse_y_ = e.motion.y;
         if (splitter_drag_ != Splitter::None) {
             Layout l = compute_layout();
             if (splitter_drag_ == Splitter::Groups) {
@@ -736,7 +736,7 @@ void App::handle_event(const SDL_Event& e) {
         if (e.motion.state & SDL_BUTTON_LMASK) {
             MouseEvent me{e.motion.x, e.motion.y, 1, true, false, 0, 0, true};
             if (tab_bar_.dragging()) tab_bar_.handle_mouse(me);
-            else if (terminal_.focused()) terminal_.handle_mouse(me);
+            else if (bottom_terminal() && bottom_terminal()->focused()) bottom_terminal()->handle_mouse(me);
             else editor_view_.handle_mouse(me);
         }
         break;
@@ -754,6 +754,7 @@ void App::handle_event(const SDL_Event& e) {
 void App::handle_command(const std::string& cmd) {
     if (status_command(cmd)) return;  // status bar / Command Center commands (status_glue.cpp)
     if (debug_command(cmd)) return;
+    if (tasks_command(cmd)) return;   // build tasks, problems, quick fixes, formatting (tasks_glue.cpp)
     if (cmd.rfind("workspace_", 0) == 0 || cmd == "open_folder") {
         workspace_command(cmd);
     } else if (cmd == "save") {
@@ -823,9 +824,9 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "toggle_sidebar") {
         sidebar_visible_ = !sidebar_visible_;
     } else if (cmd == "copy" || cmd == "cut") {
-        if (terminal_.focused() && terminal_visible_) {
-            if (terminal_.has_selection()) {
-                own_clipboard_ = terminal_.selection_text();
+        if (Terminal* t = terminal_visible_ ? bottom_terminal() : nullptr; t && t->focused()) {
+            if (t->has_selection()) {
+                own_clipboard_ = t->selection_text();
                 SDL_SetClipboardText(own_clipboard_.c_str());
                 clipboard_line_text_.clear();
             }
@@ -850,8 +851,8 @@ void App::handle_command(const std::string& cmd) {
         if (text.empty()) return;
         if (debug_console_.focused() && terminal_visible_) {
             debug_console_.handle_text(text.substr(0, text.find('\n')));
-        } else if (terminal_.focused() && terminal_visible_) {
-            terminal_.paste(text);
+        } else if (Terminal* t = terminal_visible_ ? bottom_terminal() : nullptr; t && t->focused()) {
+            t->paste(text);
         } else if (Editor* ed = current_editor()) {
             ed->paste_text(text, !clipboard_line_text_.empty() && text == clipboard_line_text_);
             editor_view_.reveal_cursor();
@@ -1269,9 +1270,10 @@ void App::update(float dt) {
     terminal_open_.follow(terminal_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     split_open_.follow(split_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     // A terminal auto-hidden by a small window must not keep the keyboard.
-    if (terminal_visible_ && terminal_.focused() && terminal_open_.value > 0.99f && compute_layout().terminal_header.h <= 0)
+    if (terminal_visible_ && bottom_panel().focused() && terminal_open_.value > 0.99f && compute_layout().terminal_header.h <= 0)
         focus_editor();
     lsp_update();
+    tasks_update();
     poll_remote_connect();
     update_monitor();
     search_.tick(dt);
@@ -1321,6 +1323,7 @@ void App::render() {
     ctx.theme = &theme_;
     ctx.dt    = anim::dt;
     SDL_GetMouseState(&ctx.mouse_x, &ctx.mouse_y);
+    if (scripted_ && script_mouse_x_ >= 0) ctx.mouse_x = script_mouse_x_, ctx.mouse_y = script_mouse_y_;
 
     // One ordered quad stream for the whole frame
     renderer_.begin(extent);
@@ -1373,7 +1376,7 @@ void App::render() {
     debug_toolbar_.render(ctx, layout.editor, debugger_);
     if (layout.terminal_header.h > 0) {
         renderer_.push_clip(layout.terminal_header);
-        render_terminal_header(ctx, layout.terminal_header);
+        render_panel_header(ctx, layout.terminal_header);
         renderer_.pop_clip();
     }
     if (layout.terminal.h > 0) clipped(bottom_panel(), layout.terminal);
@@ -1692,8 +1695,8 @@ void App::set_opacity(float o) {
 }
 
 void App::focus(Panel* p) {
-    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &file_tree_, &scm_, &search_, &chat_,
-                                                  &debug_panel_, &debug_console_})
+    for (Panel* q : std::initializer_list<Panel*>{&editor_view_, &terminal_, &task_term_, &problems_, &file_tree_, &scm_,
+                                                  &search_, &chat_, &debug_panel_, &debug_console_})
         q->set_focused(q == p);
 }
 
@@ -1965,6 +1968,8 @@ void App::open_settings() {
     rows.push_back(toggle("Debug: open console on start", "Show the Debug Console when debugging starts",
                           [this] { return themes_.setting("debug.open_console_on_start") != "false"; },
                           "debug_toggle_console_on_start"));
+    rows.push_back(toggle("Format on save", "clang-format / rustfmt through the language server",
+                          [this] { return format_on_save_; }, "toggle_format_on_save"));
     rows.push_back({Row::Toggle, "Auto-close brackets and quotes", "Typing ( [ { \" ' ` inserts the pair",
                     nullptr, [] { return Editor::auto_close_pairs; }, [this](int) {
                         Editor::auto_close_pairs = !Editor::auto_close_pairs;
@@ -2067,33 +2072,6 @@ void App::watch_open_files() {
     }
 }
 
-void App::render_terminal_header(RenderContext& ctx, Rect r) {
-    ctx.r->add_rect(r, theme_.terminal_bg);
-    ctx.r->add_rect({r.x, r.y, r.w, 1.0f}, theme_.border);
-    float cw = font_.char_width();
-    float base = r.y + (r.h - font_.line_height()) * 0.5f + font_.ascender();
-    bool term_tab = bottom_view_ == BottomView::Terminal;
-    float x = ctx.r->add_text(r.x + 14.0f, base, "TERMINAL", term_tab ? theme_.fg : theme_.fg_muted, font_);
-    std::string label = remote_active_ ? "ssh: " + remote_target_.alias : "bash";
-    if (!remote_active_) label = fs::path(local_shell().front()).stem().string();
-    float x2 = ctx.r->add_text(x + 2.0f * cw, base, label, theme_.fg_muted, font_);
-    bottom_tabs_[0] = {r.x + 6.0f, r.y, x2 - r.x, r.h};
-    float cx = x2 + 3.0f * cw;
-    float cx2 = ctx.r->add_text(cx, base, "DEBUG CONSOLE", term_tab ? theme_.fg_muted : theme_.fg, font_);
-    bottom_tabs_[1] = {cx - 6.0f, r.y, cx2 - cx + 12.0f, r.h};
-    // Underline the active "tab", like the editor tabs.
-    if (term_tab) ctx.r->add_rect({r.x + 10.0f, r.y + r.h - 2.0f, x - r.x - 6.0f, 2.0f}, theme_.accent);
-    else ctx.r->add_rect({cx - 4.0f, r.y + r.h - 2.0f, cx2 - cx + 8.0f, 2.0f}, theme_.accent);
-    term_close_btn_ = {r.x + r.w - 32.0f, r.y + 2.0f, 24.0f, r.h - 4.0f};
-    term_restart_btn_ = {r.x + r.w - 60.0f, r.y + 2.0f, 24.0f, r.h - 4.0f};
-    uint32_t action_icon = term_tab ? 0xEB37u : 0xEA81u;  // restart shell / clear console
-    for (auto [btn, icon] : {std::pair{term_restart_btn_, action_icon}, std::pair{term_close_btn_, 0xEA76u}}) {
-        bool hover = btn.contains(ctx.mouse_x, ctx.mouse_y);
-        if (hover) ctx.r->add_rect(btn, theme_.surface_hover, 4.0f);
-        ctx.r->add_char(btn.x + (btn.w - cw) * 0.5f, base, icon, hover ? theme_.fg : theme_.fg_muted, font_);
-    }
-}
-
 std::vector<std::string> App::local_shell() const {
     // settings: terminal_shell = "pwsh -NoLogo" / "cmd.exe" / "C:\\Program Files\\Git\\bin\\bash.exe --login"
     // Words split on spaces; double quotes group a path with spaces.
@@ -2119,6 +2097,7 @@ std::vector<std::string> App::local_shell() const {
 void App::restart_terminal() {
     if (terminal_argv_.empty()) terminal_.spawn(local_shell(), project_root_);
     else terminal_.spawn(terminal_argv_);
+    bottom_view_ = BottomView::Terminal;
     focus(&terminal_);
 }
 
