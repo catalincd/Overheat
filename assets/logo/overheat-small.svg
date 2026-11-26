@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Overheat flame for 16 and 24 px: overheat.svg's outline with one plane per side,
+       so the facets stay readable at icon sizes. -->
+  <g transform="translate(4 1)" stroke-width="1.5" stroke-linejoin="round">
+    <polygon fill="#d42414" stroke="#d42414" points="148,138 110,300 176,410 168,268 200,236"/>
+    <polygon fill="#ff8a00" stroke="#ff8a00" points="300,36 218,150 168,268 176,410 262,474 264,400 276,270"/>
+    <polygon fill="#ff2d1a" stroke="#ff2d1a" points="300,36 276,270 264,400 262,474 364,398 394,276 354,150"/>
+    <polygon fill="#fff3c4" stroke="#fff3c4" points="277,218 224,338 262,436"/>
+    <polygon fill="#ffd54a" stroke="#ffd54a" points="277,218 262,436 316,330"/>
+  </g>
+</svg>
