@@ -131,6 +131,21 @@ the git log; keep this file short and current.
 - [ ] Themes: Tokyo Night Day; string-escape and namespace colours
 - [ ] Ctrl+K Ctrl+T (theme picker chord) doesn't fire in `--script` mode
 
+## Debugger follow-ups
+
+The DAP debugger (gdb, lldb-dap, CodeLLDB; README "Debugging") is in. Still open:
+
+- [ ] Pre-launch build through the task system once it lands (`Debugger::set_build_hook`),
+  and launch.json `preLaunchTask` mapped to a task
+- [ ] Test lldb-dap and CodeLLDB (not installed on the dev machine); CodeLLDB builds that only
+  speak TCP (`--port`) need a socket transport
+- [ ] `runInTerminal` is implemented (a PTY feeding the Debug Console) but untested: gdb never
+  asks for it. Debuggee stdin is not connected
+- [ ] Debug over Remote-SSH (gdb on the host, path mapping)
+- [ ] Hover to evaluate, set variable values, run to cursor, data breakpoints, disassembly
+- [ ] Load children past the first 500 of a large array ("... N more" row)
+- [ ] Windows: MSYS2 gdb / lldb-dap untested (the code compiles and keeps paths portable)
+
 ## From the editor survey (2026-11-26)
 
 - [ ] **Clickable `file:line:col`** in the terminal and build output (Acme/Geany): Ctrl+click
