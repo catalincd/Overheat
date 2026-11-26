@@ -9,3 +9,4 @@ build-linux/
 build-arch/
 build-docker/
 .claude/worktrees/
+build-dbg/
