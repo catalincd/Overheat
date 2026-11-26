@@ -39,7 +39,19 @@ public:
     void end_frame(uint32_t image_index);
     void recreate_swapchain();
     // Writes the next presented frame to `path` as binary PPM (works off-screen/locked).
+    // In translucent mode it writes a PAM (RGBA, straight alpha) next to it instead.
     void request_capture(const std::string& path) { capture_path_ = path; }
+
+    // Per-pixel window translucency. Needs a window created with SDL_WINDOW_TRANSPARENT,
+    // a surface that composites alpha (PRE_ or POST_MULTIPLIED) and dualSrcBlend.
+    // Frames are then drawn into an offscreen image whose alpha channel is the window
+    // mask, and resolved to the swapchain (see shaders/resolve.frag.glsl).
+    // Returns whether translucency is active afterwards; recreates the swapchain on change.
+    bool set_translucent(bool on);
+    bool translucent() const { return translucent_; }
+    bool dual_source_blend() const { return dual_src_blend_; }
+    // Render pass the frame's 2D pipeline must be compatible with in translucent mode.
+    VkRenderPass offscreen_render_pass() const { return offscreen_pass_; }
 
     // Resource creation helpers
     Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props);
@@ -60,7 +72,9 @@ public:
         VkPipelineLayout layout,
         const std::vector<VkVertexInputBindingDescription>& bindings,
         const std::vector<VkVertexInputAttributeDescription>& attributes,
-        bool alpha_blend = true
+        bool alpha_blend = true,
+        VkRenderPass pass = VK_NULL_HANDLE,  // default: the swapchain render pass
+        bool dual_source = false             // colour/alpha weighted by output index 1's alpha
     );
 
     uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags props);
@@ -105,6 +119,24 @@ private:
     bool framebuffer_resized_ = false;
     std::string capture_path_;
     void write_capture(const Buffer& buf) const;
+
+    // Translucent window
+    bool dual_src_blend_ = false;
+    bool want_translucent_ = false;
+    bool translucent_ = false;
+    VkCompositeAlphaFlagBitsKHR composite_alpha_ = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    static constexpr VkFormat OFFSCREEN_FORMAT = VK_FORMAT_R8G8B8A8_SRGB;
+    VkRenderPass offscreen_pass_ = VK_NULL_HANDLE;
+    Image offscreen_{};
+    VkFramebuffer offscreen_fb_ = VK_NULL_HANDLE;
+    VkSampler resolve_sampler_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout resolve_dsl_ = VK_NULL_HANDLE;
+    VkDescriptorSet resolve_set_ = VK_NULL_HANDLE;
+    VkPipelineLayout resolve_layout_ = VK_NULL_HANDLE;
+    VkPipeline resolve_pipeline_ = VK_NULL_HANDLE;
+    bool create_translucency_objects();
+    bool create_offscreen_target();
+    void destroy_offscreen_target();
 
     bool create_instance();
     bool create_surface();

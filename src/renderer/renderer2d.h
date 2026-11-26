@@ -26,6 +26,10 @@ public:
     void set_fade(float start_x, float end_x) { fade_start_ = start_x; fade_end_ = end_x; }
     // Opacity multiplier for subsequent quads (fade-in animations).
     void set_alpha(float a) { alpha_ = a; }
+    // Window background opacity, used when the VulkanContext is translucent: filled
+    // rects reach the desktop at this alpha, text and squiggles stay opaque.
+    void set_window_opacity(float o) { opacity_ = o; }
+    bool can_translucent() const { return pipeline_mask_ != VK_NULL_HANDLE; }
 
     void add_rect(Rect rect, Color color, float corner_radius = 0.0f,
                   float border_width = 0.0f, Color border_color = {0, 0, 0, 0});
@@ -56,6 +60,7 @@ private:
 
     VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
+    VkPipeline pipeline_mask_ = VK_NULL_HANDLE;  // translucent-window variant
     VkDescriptorSetLayout desc_layout_ = VK_NULL_HANDLE;
     VkDescriptorSet desc_sets_[VulkanContext::MAX_FRAMES]{};
     Buffer quad_buffers_[VulkanContext::MAX_FRAMES];
@@ -66,6 +71,7 @@ private:
     VkExtent2D extent_{};
     float fade_start_ = 0, fade_end_ = 0;
     float alpha_ = 1.0f;
+    float opacity_ = 1.0f;
     bool overflow_warned_ = false;
 };
 

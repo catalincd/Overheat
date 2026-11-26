@@ -73,7 +73,7 @@ for line in proc.stdout:
         proc.stdin.write("\n"); proc.stdin.flush()
 proc.wait(timeout=10)
 for f in sorted(os.listdir(outdir)):
-    if f.endswith(".ppm"):
+    if f.endswith(".ppm") or f.endswith(".pam"):  # .pam: translucent frame, RGBA
         src = os.path.join(outdir, f)
         subprocess.run(["magick", src, src[:-4] + ".png"])
         os.remove(src)

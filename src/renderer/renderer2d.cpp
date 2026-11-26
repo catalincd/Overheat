@@ -14,6 +14,7 @@ struct Globals {
     glm::vec2 viewport;
     float time;
     float text_gamma;
+    float opacity;
 };
 
 uint32_t decode_utf8(std::string_view s, size_t& i) {
@@ -59,6 +60,16 @@ bool Renderer2D::init(VulkanContext& vk, FontAtlas& font) {
     VkShaderModule frag = vk.load_shader(spirv_quad_frag, sizeof spirv_quad_frag);
     if (!vert || !frag) return false;
     pipeline_ = vk.create_graphics_pipeline(vert, frag, pipeline_layout_, {}, {}, true);
+    // Translucent windows: same quads into the offscreen target, with the alpha
+    // channel tracking window opacity instead of coverage (shaders/quad_frag.glsl.inc).
+    if (vk.dual_source_blend() && vk.offscreen_render_pass()) {
+        VkShaderModule mask = vk.load_shader(spirv_quad_mask_frag, sizeof spirv_quad_mask_frag);
+        if (mask) {
+            pipeline_mask_ = vk.create_graphics_pipeline(vert, mask, pipeline_layout_, {}, {}, true,
+                                                         vk.offscreen_render_pass(), true);
+            vkDestroyShaderModule(vk.device(), mask, nullptr);
+        }
+    }
     vkDestroyShaderModule(vk.device(), vert, nullptr);
     vkDestroyShaderModule(vk.device(), frag, nullptr);
     if (!pipeline_) return false;
@@ -123,6 +134,8 @@ void Renderer2D::cleanup(VulkanContext& vk) {
         vk.destroy_buffer(uniform_buffers_[i]);
     }
     if (pipeline_)        vkDestroyPipeline(vk.device(), pipeline_, nullptr);
+    if (pipeline_mask_)   vkDestroyPipeline(vk.device(), pipeline_mask_, nullptr);
+    pipeline_mask_ = VK_NULL_HANDLE;
     if (pipeline_layout_) vkDestroyPipelineLayout(vk.device(), pipeline_layout_, nullptr);
     if (desc_layout_)     vkDestroyDescriptorSetLayout(vk.device(), desc_layout_, nullptr);
     pipeline_ = VK_NULL_HANDLE;
@@ -243,10 +256,12 @@ void Renderer2D::flush(VulkanContext& vk, VkCommandBuffer cmd) {
     glob.viewport   = {static_cast<float>(extent_.width), static_cast<float>(extent_.height)};
     glob.time       = 0;
     glob.text_gamma = 1.45f;
+    glob.opacity    = opacity_;
     std::memcpy(uniform_buffers_[fi].mapped, &glob, sizeof(glob));
     std::memcpy(quad_buffers_[fi].mapped, quads_.data(), quads_.size() * sizeof(GpuQuad));
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      vk.translucent() && pipeline_mask_ ? pipeline_mask_ : pipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1,
                             &desc_sets_[fi], 0, nullptr);
     vkCmdDraw(cmd, 6, static_cast<uint32_t>(quads_.size()), 0, 0);

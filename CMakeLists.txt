@@ -54,7 +54,7 @@ foreach(SHADER ${SHADER_SOURCES})
     add_custom_command(
         OUTPUT ${SPIRV_FILE}
         COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} -O ${SHADER} -o ${SPIRV_FILE}
-        DEPENDS ${SHADER} ${CMAKE_SOURCE_DIR}/shaders/quad_common.glsl.inc
+        DEPENDS ${SHADER} ${CMAKE_SOURCE_DIR}/shaders/quad_common.glsl.inc ${CMAKE_SOURCE_DIR}/shaders/quad_frag.glsl.inc
         COMMENT "Compiling ${SHADER_FULL} -> ${SPIRV_NAME}"
     )
     list(APPEND SPIRV_FILES ${SPIRV_FILE})
