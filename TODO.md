@@ -41,6 +41,14 @@ the git log; keep this file short and current.
   - Ctrl+Up/Down: jump to the previous/next blank line (paragraph / function hops);
     today Ctrl+Alt+Up/Down add cursors and Alt+Up/Down move lines, so decide where those go
   - Shift with any of these extends the selection
+- [ ] **Neovim-style animations** (Neovide, smear-cursor.nvim, mini.animate):
+  - cursor smear/trail: the caret stretches toward its destination on jumps and settles
+    with a spring, including across splits and into the terminal
+  - optional cursor particle effects on typing/moving (Neovide's railgun, torpedo,
+    pixiedust, sonic boom, ripple, wireframe)
+  - spring-based smooth scrolling for page/jump scrolls, and animated window/split resizes
+  - each one configurable (duration, trail length, effect) and covered by the existing
+    animations off switch; must stay within the frame budget
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
 
 ## Follow-ups from the 2026-11-26 batch
