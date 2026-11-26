@@ -986,7 +986,11 @@ App::Layout App::compute_layout() const {
     // Activity bar (always visible), then the sidebar view.
     float ab_w = ACTIVITY_BAR_W;
     l.activity_bar = {0, 0, ab_w, content_h};
-    float sb_w = std::floor(std::min(sidebar_width_, (fw - ab_w) * 0.5f) * sidebar_open_.value);
+    // Small windows (like VS Code): the editor keeps a minimum size; the sidebar
+    // and terminal shrink first and hide below their own minimum.
+    float sb_max = std::min(sidebar_width_, std::min((fw - ab_w) * 0.5f, fw - ab_w - MIN_EDITOR_W));
+    if (sb_max < MIN_SIDEBAR_W) sb_max = 0;
+    float sb_w = std::floor(sb_max * sidebar_open_.value);
     l.sidebar = {ab_w, 0, sb_w, content_h};
 
     float right_x = ab_w + sb_w;
@@ -1011,7 +1015,9 @@ App::Layout App::compute_layout() const {
     tab_h += crumbs_h;
 
     // Terminal: at bottom of right region (above status bar)
-    float term_h = std::floor(std::min(terminal_height_, (content_h - tab_h) * 0.8f) * terminal_open_.value);
+    float term_max = std::min(terminal_height_, std::min((content_h - tab_h) * 0.8f, content_h - tab_h - MIN_EDITOR_H));
+    if (term_max < MIN_TERMINAL_H) term_max = 0;
+    float term_h = std::floor(term_max * terminal_open_.value);
     // A header strip sits on top of the terminal.
     float header_h = std::min(term_h, 28.0f);
     l.terminal_header = {right_x, content_h - term_h, right_w, header_h};
@@ -1158,6 +1164,9 @@ void App::update(float dt) {
     // Panels slide open/closed instead of popping.
     sidebar_open_.follow(sidebar_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     terminal_open_.follow(terminal_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
+    // A terminal auto-hidden by a small window must not keep the keyboard.
+    if (terminal_visible_ && terminal_.focused() && terminal_open_.value > 0.99f && compute_layout().terminal_header.h <= 0)
+        focus_editor();
     lsp_update();
     poll_remote_connect();
     update_monitor();
@@ -1212,7 +1221,7 @@ void App::render() {
 
     // Flat layout: panels separate by tone; only a hairline above the terminal.
     renderer_.add_rect({0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)}, theme_.bg);
-    if (terminal_visible_)
+    if (terminal_visible_ && layout.terminal_header.h > 0)
         renderer_.add_rect({layout.terminal.x, layout.terminal.y, layout.terminal.w, 1}, theme_.border);
 
     // All panels add their UI rects (selections, highlights, gutter bg)
@@ -1442,9 +1451,9 @@ void App::focus_editor() { focus(&editor_view_); }
 App::Splitter App::splitter_at(float x, float y) const {
     Layout l = compute_layout();
     constexpr float GRAB = 4.0f;
-    if (sidebar_visible_ && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y < l.sidebar.h)
+    if (sidebar_visible_ && l.sidebar.w > 0 && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y < l.sidebar.h)
         return Splitter::Sidebar;
-    if (terminal_visible_ && std::abs(y - l.terminal_header.y) <= GRAB && x >= l.terminal.x)
+    if (terminal_visible_ && l.terminal_header.h > 0 && std::abs(y - l.terminal_header.y) <= GRAB && x >= l.terminal.x)
         return Splitter::Terminal;
     if (split_ && std::abs(x - l.group_split_x) <= GRAB && y < l.editor.y + l.editor.h)
         return Splitter::Groups;

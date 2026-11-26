@@ -243,6 +243,9 @@ private:
     bool hover_was_chrome_ = false;
     static constexpr float ACTIVITY_BAR_W = 48.0f;
     float terminal_height_ = 200.0f;
+    // compute_layout(): below these the sidebar / terminal hide so the editor keeps its minimum.
+    static constexpr float MIN_EDITOR_W = 280.0f, MIN_EDITOR_H = 150.0f;
+    static constexpr float MIN_SIDEBAR_W = 170.0f, MIN_TERMINAL_H = 100.0f;
 
     fs::path project_root_;
     std::vector<Command> commands_;
