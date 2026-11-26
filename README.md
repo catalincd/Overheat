@@ -142,9 +142,9 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 
 > [!NOTE]
 > **Requirements:** a GPU with a Vulkan 1.2 driver, x86-64-v2 CPU (2009+).
-> The prebuilt Linux AppImage, tarball and .deb are built on a rolling distro and need
-> **glibc 2.43 or newer**. On older distros (Ubuntu 24.04, Debian 13, ...) build them yourself
-> with `docker/build.sh linux` (see [Docker builds](docs/BUILDING.md#docker--podman)).
+> The prebuilt Linux AppImage, tarball and .deb are built on Ubuntu 24.04 and need
+> **glibc 2.38 or newer** (Ubuntu 24.04+, Debian 13+, Fedora 39+, any rolling distro). For
+> older systems, see [Docker builds](docs/BUILDING.md#docker--podman).
 
 ## ⌨️ Keyboard shortcuts
 

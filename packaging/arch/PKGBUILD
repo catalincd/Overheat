@@ -1,7 +1,7 @@
 # Maintainer: catalincd <https://github.com/catalincd>
 # Built from a source tarball of this repository; see packaging/arch/build.sh.
 pkgname=overheat
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Fast GPU-accelerated code editor (Vulkan, tree-sitter, LSP, Git, Remote-SSH)"
 arch=('x86_64')
