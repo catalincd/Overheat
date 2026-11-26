@@ -44,7 +44,7 @@ private:
     bool cursor_visible_ = true;
     bool mouse_selecting_ = false;
     bool show_blame_ = true;
-    anim::Smooth smooth_x_, smooth_y_, caret_x_, caret_y_;
+    anim::Spring smooth_x_, smooth_y_;
     float view_x_ = 0, view_y_ = 0;  // rendered (animated) scroll
     const Editor* anim_editor_ = nullptr;
     FindBar find_;

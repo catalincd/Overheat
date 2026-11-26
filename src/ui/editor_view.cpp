@@ -1,4 +1,5 @@
 #include "ui/editor_view.h"
+#include "ui/cursor_fx.h"
 #include "editor/utf8.h"
 #include "renderer/font_atlas.h"
 #include "renderer/renderer2d.h"
@@ -36,15 +37,17 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
 
     cached_line_h_ = ctx.font->line_height();
     cached_char_w_ = ctx.font->char_width();
-    // Smooth scrolling: the view eases toward the editor's scroll target; switching
-    // files or jumping far snaps instead of sweeping through the whole document.
-    if (editor_.get() != anim_editor_ || std::abs(editor_->scroll_y() - smooth_y_.value) > bounds.h * 3.0f) {
+    // Smooth scrolling on a spring that keeps its velocity, so chained page/jump
+    // scrolls flow; switching files snaps, and a far jump starts one screen away.
+    if (editor_.get() != anim_editor_) {
         smooth_y_.snap(editor_->scroll_y());
         smooth_x_.snap(editor_->scroll_x());
         anim_editor_ = editor_.get();
+    } else if (float d = editor_->scroll_y() - smooth_y_.value; std::abs(d) > bounds.h * 3.0f) {
+        smooth_y_.snap(editor_->scroll_y() - std::copysign(bounds.h, d));
     }
-    view_y_ = smooth_y_.follow(editor_->scroll_y(), anim::NORMAL, 0.5f);
-    view_x_ = smooth_x_.follow(editor_->scroll_x(), anim::NORMAL, 0.5f);
+    view_y_ = smooth_y_.follow(editor_->scroll_y(), anim::scroll_duration, 0.5f);
+    view_x_ = smooth_x_.follow(editor_->scroll_x(), anim::scroll_duration, 0.5f);
     if (shape_font_ != ctx.font || shape_font_size_ != cached_line_h_ ||
         shape_ligatures_ != ctx.font->ligatures() || ctx.font->generation() != shape_generation_) {
         shape_cache_.clear();
@@ -569,25 +572,32 @@ void EditorView::render_find_matches(RenderContext& ctx, Rect text_rect) {
 }
 
 void EditorView::render_cursors(RenderContext& ctx, Rect text_rect) {
-    if (!cursor_visible_ || !focused_) return;
+    if (!focused_) return;
     auto& buf = editor_->buffer();
     auto [first, end] = visible_lines(text_rect);
-    for (auto& sel : editor_->cursors().selections()) {
-        Position pos = sel.head;
-        if (pos.line < first || pos.line >= end) continue;
+    auto& sels = editor_->cursors().selections();
+    // Animated carets (cursor_fx.cpp) aim at where they will be once the scroll
+    // settles, like Neovide; with very many cursors only the primary animates.
+    auto& fx = CursorFx::get();
+    bool animated = fx.enabled();
+    size_t limit = sels.size() <= static_cast<size_t>(CursorFx::MAX_SLOTS) ? sels.size() : 1;
+    float off_x = wrapping() ? 0.0f : view_x_ - editor_->scroll_x(), off_y = view_y_ - editor_->scroll_y();
+    for (size_t i = 0; i < sels.size(); i++) {
+        Position pos = sels[i].head;
+        bool fx_slot = animated && i < limit;
+        if (!fx_slot && (pos.line < first || pos.line >= end)) continue;
         Pt pt = point(buf.line_text(pos.line), pos.line, pos.col, text_rect);
-        float x = pt.x, y = pt.y;
-        if (&sel == &editor_->cursors().selections().front()) {
-            // Glide in document space so scrolling doesn't make the caret lag behind the text.
-            float doc_x = x + view_x_, doc_y = y + view_y_;
-            if (std::abs(doc_y - caret_y_.target) > cached_line_h_ * 8.0f) {
-                caret_x_.snap(doc_x);
-                caret_y_.snap(doc_y);
-            }
-            x = caret_x_.follow(doc_x, anim::FAST, 0.3f) - view_x_;
-            y = caret_y_.follow(doc_y, anim::FAST, 0.3f) - view_y_;
+        Rect caret{pt.x, pt.y, 2.0f, cached_line_h_};
+        bool draw_self = true;
+        if (fx_slot) {
+            caret.x += off_x;
+            caret.y += off_y;
+            if (caret.y + caret.h <= text_rect.y || caret.y >= text_rect.y + text_rect.h) continue;
+            draw_self = fx.report(static_cast<int>(i), editor_.get(), caret, text_rect,
+                                  text_rect.x - view_x_ + off_x, text_rect.y - view_y_ + off_y,
+                                  ctx.theme->cursor_color, cached_char_w_);
         }
-        ctx.r->add_rect({x, y, 2.0f, cached_line_h_}, ctx.theme->cursor_color);
+        if (draw_self && cursor_visible_) ctx.r->add_rect(caret, ctx.theme->cursor_color);
     }
 }
 

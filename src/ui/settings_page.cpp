@@ -23,9 +23,11 @@ void SettingsPage::render(RenderContext& ctx, Rect bounds) {
     ctx.r->add_rect(bounds, dim);
 
     float row_h = std::round(lh * 2.0f + 18.0f);
-    float w = std::min(760.0f, bounds.w - 48.0f);
+    float wob = wobble_.step();  // elastic pop when wobbly = true
+    float w = std::min(760.0f, bounds.w - 48.0f) * (1.0f + 0.03f * wob);
     float h = std::min(bounds.h - 80.0f, 64.0f + row_h * static_cast<float>(rows_.size()));
-    card_ = {std::floor(bounds.x + (bounds.w - w) * 0.5f), std::floor(bounds.y + (bounds.h - h) * 0.5f) - (1 - t) * 10.0f, w, h};
+    card_ = {std::floor(bounds.x + (bounds.w - w) * 0.5f),
+             std::floor(bounds.y + (bounds.h - h) * 0.5f) - (1 - t) * 10.0f - std::round(wob * 12.0f), w, h};
     ctx.r->add_rect({card_.x - 3, card_.y + 4, card_.w + 6, card_.h + 6}, th.shadow, 14.0f);
     ctx.r->add_rect(card_, th.surface, 12.0f);
     float base = card_.y + 22.0f + ctx.font->ascender();

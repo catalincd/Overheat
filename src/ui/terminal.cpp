@@ -1,5 +1,6 @@
 #include "ui/terminal.h"
 #include "renderer/font_atlas.h"
+#include "ui/cursor_fx.h"
 #include "renderer/renderer2d.h"
 #include "renderer/vulkan_context.h"
 
@@ -644,10 +645,13 @@ void Terminal::render(RenderContext& ctx, Rect bounds) {
     if (scroll_lines == 0 && focused_ && alive_) {
         float cx = bounds.x + cursor_x_ * cw;
         float cy = bounds.y + cursor_y_ * lh;
-        ctx.r->add_rect({cx, cy, cw, lh}, ctx.theme->cursor_color);
+        // While the animated cursor (cursor_fx.cpp) is in flight it draws the block.
+        bool draw_self = CursorFx::get().report(0, this, {cx, cy, cw, lh}, bounds, bounds.x, bounds.y,
+                                                ctx.theme->cursor_color, cw);
+        if (draw_self) ctx.r->add_rect({cx, cy, cw, lh}, ctx.theme->cursor_color);
 
         // Draw the character under cursor with inverted color
-        if (cursor_y_ >= 0 && cursor_y_ < rows_ &&
+        if (draw_self && cursor_y_ >= 0 && cursor_y_ < rows_ &&
             cursor_x_ >= 0 && cursor_x_ < cols_) {
             auto& cell = screen_[cursor_y_][cursor_x_];
             if (cell.ch > ' ') {

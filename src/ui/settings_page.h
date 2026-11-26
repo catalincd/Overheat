@@ -17,7 +17,7 @@ public:
         std::function<bool()> on;               // Toggle state
         std::function<void(int)> change;        // Toggle: 0, Stepper: -1/+1, Choice/Button: 0
     };
-    void open(std::vector<Row> rows) { rows_ = std::move(rows); visible_ = true; selected_ = 0; appear_.snap(0); }
+    void open(std::vector<Row> rows) { rows_ = std::move(rows); visible_ = true; selected_ = 0; appear_.snap(0); wobble_.kick(); }
     void close() { visible_ = false; }
     bool visible() const { return visible_; }
 
@@ -33,6 +33,7 @@ private:
     int selected_ = 0;
     float scroll_ = 0;
     anim::Smooth appear_;
+    anim::Wobble wobble_;
     void activate(int i, int delta);
 };
 
