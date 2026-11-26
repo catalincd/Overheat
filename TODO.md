@@ -29,15 +29,6 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
   preview; document symbols (Ctrl+Shift+O) and workspace symbols (Ctrl+T); clangd's
   switch header/source (Alt+O); inlay hints (parameter names, types) for rust-analyzer
   and clangd; back/forward navigation history (Ctrl+Alt+- / Ctrl+Shift+-).
-- [ ] **Debugger (DAP):**
-  - launch and attach configurations: the CMake target or Cargo binary, args, env,
-    cwd; `.vscode/launch.json` import
-  - breakpoints (gutter click, F9), conditional breakpoints and logpoints
-  - stepping: continue (F5), step over/into/out (F10/F11/Shift+F11), restart, stop
-  - panels for call stack, threads, variables / watch with expandable structs and
-    pretty printers (libstdc++ and Rust's gdb printers), and a debug console
-  - inline values next to the code, and the current line highlighted
-  - Rust: `rust-gdb` printers; Rust panics break automatically
 - [ ] **Multibuffers** (Zed): references, search results and the Problems panel as one
   editable list of excerpts (see "From the editor survey").
 - [ ] **Remote:** run clangd / rust-analyzer, builds and gdb on the Remote-SSH host
@@ -105,6 +96,12 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
     navigation history. Alt+Left/Right in the `vscode` keymap preset; the default preset
     uses Alt+Left/Right for subword motion, so bind VS Code's Linux keys there
     (Ctrl+Alt+- back, Ctrl+Shift+- forward). It must work for remote files too.
+
+## Cleanup
+
+- [ ] One JSON library: `src/debug/json` (reader + writer, `oh::Json`) and `src/tasks/json`
+  (JSONC reader, `oh::json::Value`) were written in parallel; merge them (keep JSONC
+  comments/trailing commas and source-ordered members) and move it to `src/json.{h,cpp}`
 
 ## Follow-ups from the 2026-11-26 batch
 
