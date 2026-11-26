@@ -887,6 +887,8 @@ void Editor::type_text(const std::string& text) {
         return;
     }
     char close = auto_close_pairs ? closer_for(c) : 0;
+    // Rust: ' mostly starts a lifetime ('a, 'static), so don't pair it (as VS Code).
+    if (c == '\'' && syntax_.language_id() == "rust") close = 0;
     if (!close) {
         insert_text(text);
         return;
