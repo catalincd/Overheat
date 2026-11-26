@@ -126,6 +126,7 @@ set(OVERHEAT_SOURCES
     src/ui/rename_box.cpp
     src/ui/settings_page.cpp
     src/ui/chat_panel.cpp
+    src/ui/pets.cpp
     src/llm.cpp
     src/search.cpp
     src/git/repository.cpp
@@ -295,6 +296,14 @@ target_include_directories(nav_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(nav_test PRIVATE -fsanitize=address,undefined)
 target_link_options(nav_test PRIVATE -fsanitize=address,undefined)
 add_test(NAME nav_test COMMAND nav_test)
+
+add_executable(pets_test tests/pets_test.cpp src/ui/pets.cpp)
+target_include_directories(pets_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(pets_test PRIVATE -fsanitize=address,undefined)
+target_link_options(pets_test PRIVATE -fsanitize=address,undefined)
+foreach(seed 1 2 3)
+    add_test(NAME pets_test_${seed} COMMAND pets_test ${seed})
+endforeach()
 
 add_executable(file_icon_test tests/file_icon_test.cpp src/ui/file_icon_map.cpp)
 target_include_directories(file_icon_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
