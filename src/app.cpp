@@ -128,6 +128,9 @@ bool App::init(int argc, char** argv) {
     local_monitor_ = themes_.setting("local_monitor") == "true";
     editor_view_.set_minimap(themes_.setting("minimap") != "false");
     Editor::auto_close_pairs = themes_.setting("auto_close_brackets") != "false";
+    ScopeHighlight::bracket_colors = themes_.setting("bracket_colors") != "false";
+    ScopeHighlight::scopes = themes_.setting("scope_highlight") != "false";
+    ScopeHighlight::occurrences = themes_.setting("occurrence_underline") != "false";
     editor_view_.set_wrap(themes_.setting("word_wrap") == "true");
     editor_view2_.set_wrap(themes_.setting("word_wrap") == "true");
     sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
@@ -1786,6 +1789,19 @@ void App::open_settings() {
                         load_keymap();
                         set_status_message(std::string("Keymap: ") + (next == "vscode" ? "VS Code" : "Overheat"));
                     }});
+    auto flag = [this](std::string label, std::string desc, bool* v, std::string key) {
+        return Row{Row::Toggle, std::move(label), std::move(desc), nullptr, [v] { return *v; },
+                   [this, v, key](int) {
+                       *v = !*v;
+                       themes_.set_setting(key, *v ? "true" : "false");
+                   }};
+    };
+    rows.push_back(flag("Bracket colours", "Colour ( [ { by nesting depth (4coder style)",
+                        &ScopeHighlight::bracket_colors, "bracket_colors"));
+    rows.push_back(flag("Scope highlighting", "Tint the scopes around the cursor and box the bracket pair",
+                        &ScopeHighlight::scopes, "scope_highlight"));
+    rows.push_back(flag("Occurrence underlines", "Mark the identifier under the cursor wherever it is visible",
+                        &ScopeHighlight::occurrences, "occurrence_underline"));
     rows.push_back({Row::Button, "Keyboard shortcuts", "Search commands and assign new key chords",
                     [] { return std::string("Edit"); }, nullptr, [this](int) { settings_page_.close(); open_keybindings(); }});
     rows.push_back({Row::Button, "Settings file", (config_dir_ / "settings.toml").string(),
@@ -2059,6 +2075,7 @@ void App::open_at(const fs::path& path, size_t line, size_t col, size_t len) {
         line = std::min(line, ed->buffer().line_count() - 1);
         ed->cursors().set_primary({line, col});
         ed->cursors().extend_primary({line, col + len});
+        ed->set_jump_line(line);
         focus_editor();
         editor_view_.reveal_cursor();
     }

@@ -86,10 +86,12 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
         }
     }
     render_indent_guides(ctx, text_rect);
+    bool drew_pair = false;
+    render_scope_highlight(ctx, text_rect, drew_pair);
     render_find_matches(ctx, text_rect);
     {   // Matching bracket outline
         Position a, b;
-        if (editor_->cursors().selections().size() == 1 && editor_->find_bracket_pair(a, b)) {
+        if (!drew_pair && editor_->cursors().selections().size() == 1 && editor_->find_bracket_pair(a, b)) {
             Color c = ctx.theme->bracket_match;
             auto [first, end] = visible_lines(text_rect);
             for (Position p : {a, b}) {
@@ -298,6 +300,7 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
             for (size_t j = tok.start; j < tok.start + tok.length && j < line_len; j++)
                 byte_colors[j] = c;
         }
+        scope_.color_line(line_idx, byte_colors, *ctx.theme);
 
         float x_base = text_rect.x + TEXT_PAD - view_x_;
         float baseline = y + ctx.font->ascender();
@@ -357,6 +360,18 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
             }
         }
     }
+}
+
+void EditorView::render_scope_highlight(RenderContext& ctx, Rect text_rect, bool& drew_pair) {
+    auto [first, end] = visible_lines(text_rect);
+    scope_.update(*editor_, first, end);
+    ScopeHighlight::Geometry g{text_rect, cached_line_h_, cached_char_w_,
+        [&](size_t line, size_t byte) {
+            Pt p = point(editor_->buffer().line_text(line), line, byte, text_rect);
+            return std::pair{p.x, p.y};
+        },
+        [&](size_t line) { return row_y(line, text_rect); }};
+    drew_pair = scope_.render(ctx, *editor_, g);
 }
 
 void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {

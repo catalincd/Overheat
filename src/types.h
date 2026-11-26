@@ -79,6 +79,26 @@ struct Theme {
     Color find_match_active = Color::hex(0xe5b350, 0.5f);
     Color indent_guide  = Color::hex(0x4d5058, 0.35f);
 
+    // Brackets and scopes (4coder-style). Bracket colours cycle by nesting depth;
+    // each enclosing { } scope around the cursor stacks one scope_tint layer.
+    Color bracket1      = Color::hex(0xe6c06a);
+    Color bracket2      = Color::hex(0xc792ea);
+    Color bracket3      = Color::hex(0x6cb6ff);
+    Color bracket4      = Color::hex(0x6fd0c5);
+    Color bracket5      = Color::hex(0x9ccf8a);
+    Color bracket6      = Color::hex(0xf2a07b);
+    Color scope_tint    = Color::hex(0xffffff, 0.022f);
+    Color scope_boundary = Color::hex(0x5b9cff, 0.55f);  // bar beside the innermost scope
+    Color occurrence    = Color::hex(0xd6d7db, 0.55f);   // identifier under the cursor + its occurrences
+    Color jump_line     = Color::hex(0x5b9cff, 0.13f);   // line of the last jump (search hit, definition)
+    enum class Mark : uint8_t { Underline, Box, Background };
+    Mark occurrence_style = Mark::Underline;
+    Mark jump_line_style  = Mark::Background;
+    const Color& bracket(size_t depth) const {
+        const Color* c[6] = {&bracket1, &bracket2, &bracket3, &bracket4, &bracket5, &bracket6};
+        return *c[depth % 6];
+    }
+
     // Syntax
     Color comment       = Color::hex(0x6b6f78);
     Color keyword       = Color::hex(0xb392f0);
