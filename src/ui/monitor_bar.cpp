@@ -66,7 +66,13 @@ void MonitorBar::render(RenderContext& ctx, Rect bounds) {
     float cw = font.char_width();
     float baseline = bounds.y + (bounds.h - font.line_height()) * 0.5f + font.ascender();
     bool hover = bounds.contains(ctx.mouse_x, ctx.mouse_y);
-    r.add_rect(bounds, hover || detail_ ? th.surface : th.status_bg);
+    // A coloured status bar (Dark+/Light+ blue) stays a single accent line: the strip
+    // above it then takes the neutral panel colours instead of repeating the blue.
+    Color sb = th.status_bg;
+    bool coloured = std::max({sb.r, sb.g, sb.b}) - std::min({sb.r, sb.g, sb.b}) >= 0.15f;
+    Color strip_bg = coloured ? th.sidebar_bg : th.status_bg;
+    Color label_fg = coloured ? th.fg_muted : th.status_fg;
+    r.add_rect(bounds, hover || detail_ ? th.surface : strip_bg);
     r.add_rect({bounds.x, bounds.y, bounds.w, 1.0f}, th.border);
 
     const SysStats& s = snap_.stats;
@@ -85,7 +91,7 @@ void MonitorBar::render(RenderContext& ctx, Rect bounds) {
         float w = static_cast<float>(cp_count(label)) * cw + (label.empty() ? 0 : 6.0f) +
                   (pct >= 0 ? GW + 6.0f : 0) + static_cast<float>(cp_count(value)) * cw;
         segs.push_back({prio, w, [&, label, pct, value, vc](float x) {
-                            if (!label.empty()) x = r.add_text(x, baseline, label, th.status_fg, font) + 6.0f;
+                            if (!label.empty()) x = r.add_text(x, baseline, label, label_fg, font) + 6.0f;
                             if (pct >= 0) {
                                 gauge(r, {x, gy, GW, GH}, pct, level_color(th, pct), th);
                                 x += GW + 6.0f;
@@ -105,11 +111,11 @@ void MonitorBar::render(RenderContext& ctx, Rect bounds) {
         segs.push_back({0, w, [&, host, note, dot](float x) {
                             r.add_rect({x, std::round(bounds.y + bounds.h * 0.5f - 4.0f), 8.0f, 8.0f}, dot, 4.0f);
                             x = r.add_text(x + 14.0f, baseline, host, th.fg, font);
-                            if (!note.empty()) r.add_text(x + cw, baseline, note, th.status_fg, font);
+                            if (!note.empty()) r.add_text(x + cw, baseline, note, label_fg, font);
                         }});
     }
     if (s.valid) {
-        Color vc = live ? th.fg : th.status_fg;
+        Color vc = live ? th.fg : label_fg;
         if (s.has_cpu) metric(1, "CPU", s.cpu, pct_str(s.cpu), vc);
         if (s.has_mem) {
             float p = s.mem_total ? 100.0f * static_cast<float>(s.mem_used) / static_cast<float>(s.mem_total) : 0;
@@ -130,7 +136,7 @@ void MonitorBar::render(RenderContext& ctx, Rect bounds) {
         if (s.has_load) metric(5, "load", -1, load_str(s), vc);
         if (s.has_uptime) metric(6, "up", -1, sysfmt::duration(s.uptime), vc);
     } else if (!snap_.error.empty() && snap_.state == SysMonitor::State::Lost) {
-        metric(9, "", -1, snap_.error, th.status_fg);
+        metric(9, "", -1, snap_.error, label_fg);
     }
 
     // Drop the least important segments until the rest fit.

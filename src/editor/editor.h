@@ -112,6 +112,25 @@ public:
     // Re-reads the file from disk keeping cursor and scroll (e.g. after checkout).
     void reload();
 
+    // Indentation used by Tab / indent / unindent: detected on load, changed from the
+    // status bar.
+    struct IndentStyle {
+        bool tabs = false;
+        int size = 4;
+    };
+    IndentStyle indent_style() const { return indent_style_; }
+    void set_indent_style(IndentStyle s) { indent_style_ = s; }
+    std::string indent_unit() const;
+    // Rewrites every line's leading whitespace from the current style to `to` (one undo step).
+    void convert_indentation(IndentStyle to);
+    // Line endings and BOM as stored in the buffer; conversions are one undo step.
+    bool uses_crlf() const;
+    void set_line_endings(bool crlf);
+    bool has_bom() const;
+    void set_bom(bool on);
+    // Language mode override (syntax highlighting); "" = plain text.
+    void set_language(const std::string& lang_id);
+
     // State
     bool is_modified() const { return buffer_.is_modified(); }
     std::string title() const;
@@ -127,6 +146,9 @@ private:
     std::future<std::vector<GitBlame>> blame_job_;
     std::vector<GitBlame> blame_;  // index = HEAD line - 1
     std::optional<std::pair<size_t, size_t>> jump_;  // (line, line count when set)
+    IndentStyle indent_style_;
+    void detect_indentation();
+    void replace_all_text(const std::string& text);
 
     void on_text_changed();
 

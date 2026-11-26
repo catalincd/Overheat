@@ -93,7 +93,11 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 - Integrated terminal (PTY on Linux, ConPTY on Windows)
 - Split editors (<kbd>Ctrl</kbd>+<kbd>\\</kbd>), draggable tabs
 - <kbd>Ctrl</kbd>+<kbd>Tab</kbd> through recent files
-- Quick Open and Command Palette
+- Command Center: a search box above the tabs showing `file — workspace`; click it for
+  Quick Open (recently opened files first), or type `>` for the Command Palette
+- Status bar with clickable items: remote host, branch, sync/pull/push, problems,
+  background tasks, cursor position, indentation, encoding, line endings (convert),
+  language mode, language server state and notifications. Right-click it to hide items
 - Panels you can resize, and your session restored on start
 - Workspaces: named sets of local or Remote-SSH folders with their tabs, splits and
   panels. Never opened on their own; switch with <kbd>Ctrl</kbd>+<kbd>R</kbd>
@@ -168,6 +172,7 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | Next / previous tab | <kbd>Ctrl</kbd>+<kbd>PgDn</kbd> / <kbd>PgUp</kbd> | Duplicate line | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> |
 | Go to line | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Delete line | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> |
 | Go to definition | <kbd>F12</kbd> | Toggle comment | <kbd>Ctrl</kbd>+<kbd>/</kbd> |
+| Next problem | <kbd>F8</kbd> | | |
 | Find / Replace | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Select line | <kbd>Ctrl</kbd>+<kbd>L</kbd> |
 | Find in files | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Trigger suggestions | <kbd>Ctrl</kbd>+<kbd>Space</kbd> |
 | Save / Save As | <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Undo / Redo | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> |
@@ -263,6 +268,9 @@ opacity = 1.0                        # 0.5-1.0: translucent background, opaque t
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
 remote_monitor = true                # host stats strip while on Remote-SSH
 local_monitor = false                # the same strip for this computer
+command_center = true                # search box above the tabs; false for a minimal look
+status_bar_hidden = "encoding,eol"   # status bar items to hide: remote, branch, sync, problems,
+                                     # tasks, position, indent, encoding, eol, language, lsp, bell
 ```
 
 <details>

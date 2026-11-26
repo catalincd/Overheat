@@ -107,6 +107,7 @@ set(OVERHEAT_SOURCES
     src/ui/file_tree.cpp
     src/ui/terminal.cpp
     src/ui/status_bar.cpp
+    src/ui/command_center.cpp
     src/ui/monitor_bar.cpp
     src/ui/tab_bar.cpp
     src/ui/file_icons.cpp
@@ -137,6 +138,7 @@ set(OVERHEAT_SOURCES
     src/workspace.cpp
     src/workspace_store.cpp
     src/lsp_glue.cpp
+    src/status_glue.cpp
     src/platform/platform_posix.cpp
     src/platform/platform_win.cpp
 )

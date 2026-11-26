@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <unordered_set>
 
 namespace oh {
 
@@ -15,7 +16,18 @@ void CommandPalette::show(Mode mode) {
     mode_ = mode;
     query_.clear();
     selected_index_ = 0;
+    if (mode == Mode::Files) build_files_view();
     update_filter();
+}
+
+void CommandPalette::build_files_view() {
+    files_view_.clear();
+    std::unordered_set<std::string> seen;
+    for (auto& p : recent_)
+        if (seen.insert(p.string()).second) files_view_.push_back(p);
+    recent_count_ = files_view_.size();
+    for (auto& p : file_list_)
+        if (!seen.count(p.string())) files_view_.push_back(p);
 }
 
 void CommandPalette::pick(PickOptions opts) {
@@ -111,7 +123,7 @@ void CommandPalette::update_filter() {
             int score = fuzzy_score(query_, pick_.items[i]);
             if (score >= 0)
                 filtered_.push_back({static_cast<int>(i), query_.empty() ? 0 : score, pick_.items[i],
-                                     i < pick_.details.size() ? pick_.details[i] : std::string(), true});
+                                     i < pick_.details.size() ? pick_.details[i] : std::string(), true, {}});
         }
         if (!query_.empty())
             std::stable_sort(filtered_.begin(), filtered_.end(),
@@ -124,14 +136,14 @@ void CommandPalette::update_filter() {
             int score = fuzzy_score(query_, commands_[i].label);
             if (score >= 0)
                 filtered_.push_back({static_cast<int>(i), score, commands_[i].label,
-                                     commands_[i].keybinding, true});
+                                     commands_[i].keybinding, true, {}});
         }
     } else if (mode_ == Mode::Files) {
-        for (size_t i = 0; i < file_list_.size(); i++) {
-            std::string filename = file_list_[i].filename().string();
-            std::string full_path = root_.empty()
-                ? file_list_[i].string()
-                : file_list_[i].lexically_relative(root_).string();
+        for (size_t i = 0; i < files_view_.size(); i++) {
+            const fs::path& f = files_view_[i];
+            std::string filename = f.filename().string();
+            std::string rel = root_.empty() ? f.string() : f.lexically_relative(root_).string();
+            std::string full_path = rel.empty() || rel.rfind("..", 0) == 0 ? f.string() : rel;
 
             // Score against filename primarily, with path as tiebreaker
             int score = fuzzy_score(query_, filename);
@@ -139,8 +151,13 @@ void CommandPalette::update_filter() {
                 score = fuzzy_score(query_, full_path);
             }
             if (score >= 0) {
+                bool recent = i < recent_count_;
+                if (recent && !query_.empty()) score += 15;  // recently opened files rank higher
                 std::string dir = fs::path(full_path).parent_path().string();
-                filtered_.push_back({static_cast<int>(i), score, filename, dir, false});
+                MatchResult m{static_cast<int>(i), query_.empty() ? 0 : score, filename, dir, false, {}};
+                if (query_.empty() && (i == 0 || i == recent_count_) && recent_count_ > 0)
+                    m.section = recent ? "recently opened" : "files";
+                filtered_.push_back(std::move(m));
             }
         }
     }
@@ -172,7 +189,8 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
     float wob = wobble_.step();  // elastic drop-in when wobbly = true
     float palette_w = std::min(640.0f, bounds.w - 32.0f) * (1.0f + 0.04f * wob);
     float palette_x = std::floor(bounds.x + (bounds.w - palette_w) * 0.5f);
-    float palette_y = bounds.y + std::min(48.0f, bounds.h * 0.08f) - std::round((1.0f - t) * 10.0f + wob * 14.0f);
+    float palette_y = (top_ >= 0 ? bounds.y + top_ : bounds.y + std::min(48.0f, bounds.h * 0.08f)) -
+                      std::round((1.0f - t) * 10.0f + wob * 14.0f);
     float input_h = line_h + 16.0f;
     int max_visible = std::max(1, std::min(12, static_cast<int>((bounds.h - palette_y - input_h - 3 * pad) / row_h)));
     int count = static_cast<int>(filtered_.size());
@@ -207,7 +225,7 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
     if (query_.empty() && mode_ == Mode::Pick && !pick_.placeholder.empty()) {
         ctx.r->add_text(text_x, baseline, pick_.placeholder, th.fg_muted, *ctx.font);
     } else if (query_.empty() && mode_ == Mode::Files) {
-        ctx.r->add_text(text_x, baseline, "Search files by name", th.fg_muted, *ctx.font);
+        ctx.r->add_text(text_x, baseline, "Search files by name (type > for commands)", th.fg_muted, *ctx.font);
     }
     float caret_x = ctx.r->add_text(text_x, baseline, shown, th.fg, *ctx.font);
     ctx.r->add_rect({caret_x, input_rect.y + 6.0f, 2.0f, input_h - 12.0f}, th.accent);
@@ -224,6 +242,11 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
         float by = y + (row_h - line_h) * 0.5f + ctx.font->ascender();
         float right = palette_x + palette_w - pad - 8.0f;
         float detail_w = static_cast<float>(m.detail.size()) * char_w;
+        if (!m.section.empty()) {
+            float sw = static_cast<float>(m.section.size()) * char_w;
+            ctx.r->add_text(right - sw, by, m.section, th.fg_muted, *ctx.font);
+            right -= sw + 16.0f;
+        }
         if (m.detail_right && !m.detail.empty()) {
             ctx.r->add_text(right - detail_w, by, m.detail, th.fg_muted, *ctx.font);
             right -= detail_w + 16.0f;
@@ -299,8 +322,8 @@ bool CommandPalette::handle_key(const KeyEvent& e) {
                     }
                 } else if (mode_ == Mode::Files) {
                     if (match.index >= 0 &&
-                        match.index < static_cast<int>(file_list_.size())) {
-                        auto path = file_list_[static_cast<size_t>(match.index)];
+                        match.index < static_cast<int>(files_view_.size())) {
+                        auto path = files_view_[static_cast<size_t>(match.index)];
                         hide();
                         if (on_file_open_) on_file_open_(path);
                     }
@@ -310,7 +333,13 @@ bool CommandPalette::handle_key(const KeyEvent& e) {
         }
 
         case SDLK_BACKSPACE:
-            if (!query_.empty()) {
+            if (query_.empty() && mode_ == Mode::Commands) {
+                // Deleting the ">" goes back to Quick Open, as in VS Code.
+                mode_ = Mode::Files;
+                build_files_view();
+                update_filter();
+                select(0);
+            } else if (!query_.empty()) {
                 if (e.mods & KeyMod::Ctrl) {
                     // Delete whole word
                     while (!query_.empty() && query_.back() == ' ')
@@ -340,6 +369,14 @@ bool CommandPalette::handle_key(const KeyEvent& e) {
 bool CommandPalette::handle_text(const std::string& text) {
     if (!visible_) return false;
 
+    if (mode_ == Mode::Files && query_.empty() && !text.empty() && text[0] == '>') {
+        // Typing ">" in Quick Open switches to commands, as in VS Code.
+        mode_ = Mode::Commands;
+        query_ = text.substr(1);
+        update_filter();
+        select(0);
+        return true;
+    }
     query_ += text;
     update_filter();
     select(0);

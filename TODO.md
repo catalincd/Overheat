@@ -5,14 +5,9 @@ the git log; keep this file short and current.
 
 ## Requested (2026-11-26)
 
-- [ ] Full-featured status bar (keep reading `status.background`; Dark+/Light+ use a blue bar)
 - [ ] **New logo/icon:** a flat but 3D-looking flame in the style of Obsidian's logo,
   centred, with no background. Keep the current colours, using contrast between them for
   shading. No drop light
-- [ ] **Command Center** like VS Code's: a search-box strip at the top centre showing the
-  open file / workspace name (e.g. `app.cpp — Overheat`). Clicking it opens Quick Open
-  (Ctrl+P); Ctrl+Shift+P opens the same box in `>` command mode, and recently opened files
-  are listed first
 - [ ] **Verify on real Windows: text no longer scales while resizing the window.** Cause:
   during a drag-resize Windows runs a modal loop, no frames were drawn, and DWM stretched
   the stale frame. Fixed in b4b5532 by redrawing from SDL's live-resize EXPOSED event
