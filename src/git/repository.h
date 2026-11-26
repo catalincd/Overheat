@@ -62,6 +62,7 @@ public:
 
     std::vector<GitBlame> blame(const fs::path& path) const;
     std::vector<std::string> branches() const;
+    bool has_remote() const;  // at least one remote is configured
     bool checkout(const std::string& branch);
     bool create_branch(const std::string& name);  // from HEAD, then checks it out
     // Blame of the committed file, one entry per line (1-based line numbers),

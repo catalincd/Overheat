@@ -34,6 +34,10 @@ public:
     void set_commands(std::vector<Command> cmds) { commands_ = std::move(cmds); }
     void set_file_list(std::vector<fs::path> files) { file_list_ = std::move(files); }
     void set_root(fs::path root) { root_ = std::move(root); }
+    // Recently opened files, newest first: listed first in Quick Open.
+    void set_recent(std::vector<fs::path> files) { recent_ = std::move(files); }
+    // Top edge of the box (e.g. over the Command Center); < 0 = default placement.
+    void set_top(float y) { top_ = y; }
 
     using FileOpenCallback = std::function<void(const fs::path&)>;
     void set_on_file_open(FileOpenCallback cb) { on_file_open_ = cb; }
@@ -51,7 +55,12 @@ private:
 
     std::vector<Command> commands_;
     std::vector<fs::path> file_list_;
+    std::vector<fs::path> recent_;
+    std::vector<fs::path> files_view_;  // Files mode: recent_ (that exist) then file_list_
+    size_t recent_count_ = 0;
+    float top_ = -1;
     FileOpenCallback on_file_open_;
+    void build_files_view();
 
     struct MatchResult {
         int index;
@@ -59,6 +68,7 @@ private:
         std::string display;
         std::string detail;  // muted secondary text (folder, shortcut)
         bool detail_right = false;
+        std::string section;  // muted label at the right of a group's first row
     };
     std::vector<MatchResult> filtered_;
     PickOptions pick_;

@@ -453,6 +453,15 @@ std::vector<std::string> GitRepository::branches() const {
     return result;
 }
 
+bool GitRepository::has_remote() const {
+    if (!repo_) return false;
+    git_strarray names{};
+    if (git_remote_list(&names, repo_) != 0) return false;
+    bool any = names.count > 0;
+    git_strarray_dispose(&names);
+    return any;
+}
+
 // ---------------------------------------------------------------------------
 // checkout
 // ---------------------------------------------------------------------------

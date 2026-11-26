@@ -275,6 +275,9 @@ std::string LSPClient::uri_from_path(const fs::path& path) const {
 bool LSPClient::start(const std::string& command, const std::vector<std::string>& args) {
     if (running_) return false;
     stop();  // reap a server that exited by itself; assigning over live threads would terminate
+    ready_ = false;
+    open_docs_.clear();  // a fresh server has nothing open yet
+    versions_.clear();
 
     std::vector<std::string> argv{command};
     argv.insert(argv.end(), args.begin(), args.end());
@@ -450,11 +453,15 @@ void LSPClient::reader_loop() {
 void LSPClient::handle_message(const std::string& json) {
     // Check if it's a response (has "id" and "result" or "error")
     // We need to distinguish responses from requests (server->client requests also have "id" + "method")
-    bool has_method = json.find("\"method\"") != std::string::npos;
-    bool has_result = json.find("\"result\"") != std::string::npos;
-    bool has_error = json.find("\"error\"") != std::string::npos;
+    size_t method_at = json.find("\"method\"");
+    size_t result_at = std::min(json.find("\"result\""), json.find("\"error\""));
+    bool has_method = method_at != std::string::npos;
+    bool has_result = result_at != std::string::npos;
+    // A "method" key nested inside a result (clangd's initialize capabilities have
+    // one) does not make the message a request: whichever key comes first decides.
+    bool is_response = has_result && (!has_method || result_at < method_at);
 
-    if ((has_result || has_error) && !has_method) {
+    if (is_response) {
         // It's a response
         int id = find_int_value(json, "id", -1);
         std::function<void(const std::string&)> callback;
@@ -532,6 +539,8 @@ void LSPClient::initialize(const fs::path& root_uri) {
         // LSP 3.17 position encoding negotiation; servers that ignore it use UTF-16.
         utf8_positions_ = find_string_value(response, "positionEncoding") == "utf-8";
         send_notification("initialized", "{}");
+        ready_ = true;
+        request_redraw();
     });
 }
 

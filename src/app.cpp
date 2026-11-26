@@ -161,6 +161,7 @@ bool App::init(int argc, char** argv) {
 
     // ---- Commands ----
     register_commands();
+    setup_status_bar();
     refresh_command_keys();
 
     // ---- Git ----
@@ -234,7 +235,8 @@ void App::run() {
             Layout l = compute_layout();
             float x = ev.motion.x, y = ev.motion.y;
             bool in_chrome = l.activity_bar.contains(x, y) || l.sidebar.contains(x, y) || l.tab_bar.contains(x, y) ||
-                             l.terminal_header.contains(x, y) || (welcome_visible_ && l.editor.contains(x, y));
+                             l.terminal_header.contains(x, y) || (welcome_visible_ && l.editor.contains(x, y)) ||
+                             l.status_bar.contains(x, y) || l.title_bar.contains(x, y);
             bool changed = in_chrome || hover_was_chrome_;  // one more frame to clear the highlight
             hover_was_chrome_ = in_chrome;
             return changed;
@@ -562,6 +564,10 @@ void App::handle_event(const SDL_Event& e) {
             command_palette_.handle_mouse(me);
         } else if (settings_page_.visible()) {
             settings_page_.handle_mouse(me);
+        } else if (layout.status_bar.contains(mx, my)) {
+            status_bar_.handle_mouse(me);
+        } else if (layout.title_bar.contains(mx, my)) {
+            command_center_.handle_mouse(me);
         } else if (layout.monitor.contains(mx, my)) {
             monitor_bar_.handle_mouse(me);
             update_monitor();  // detail samples start right away
@@ -681,6 +687,7 @@ void App::handle_event(const SDL_Event& e) {
 // ---------------------------------------------------------------------------
 
 void App::handle_command(const std::string& cmd) {
+    if (status_command(cmd)) return;  // status bar / Command Center commands (status_glue.cpp)
     if (cmd.rfind("workspace_", 0) == 0 || cmd == "open_folder") {
         workspace_command(cmd);
     } else if (cmd == "save") {
@@ -938,9 +945,11 @@ App::Layout App::compute_layout() const {
 
     Layout l{};
 
-    // Status bar: full width, 24px at bottom
-    float status_h = 26.0f;
+    // Status bar: full width at the bottom; Command Center row on top.
+    float status_h = StatusBar::HEIGHT;
     l.status_bar = {0, fh - status_h, fw, status_h};
+    float top = show_command_center_ ? CommandCenter::HEIGHT : 0.0f;
+    l.title_bar = {0, 0, fw, top};
 
     float content_h = fh - status_h;
     if (monitor_visible()) {
@@ -950,9 +959,9 @@ App::Layout App::compute_layout() const {
 
     // Activity bar (always visible), then the sidebar view.
     float ab_w = ACTIVITY_BAR_W;
-    l.activity_bar = {0, 0, ab_w, content_h};
+    l.activity_bar = {0, top, ab_w, content_h - top};
     float sb_w = std::floor(std::min(sidebar_width_, (fw - ab_w) * 0.5f) * sidebar_open_.value);
-    l.sidebar = {ab_w, 0, sb_w, content_h};
+    l.sidebar = {ab_w, top, sb_w, content_h - top};
 
     float right_x = ab_w + sb_w;
     float right_w = fw - right_x;
@@ -966,14 +975,14 @@ App::Layout App::compute_layout() const {
         std::swap(act_x, oth_x);
         std::swap(act_w, oth_w);
     }
-    l.tab_bar = {act_x, 0, act_w, tab_h};
-    l.breadcrumbs = {act_x, tab_h, act_w, crumbs_h};
+    l.tab_bar = {act_x, top, act_w, tab_h};
+    l.breadcrumbs = {act_x, top + tab_h, act_w, crumbs_h};
     if (split_) {
-        l.tab_bar2 = {oth_x, 0, oth_w, tab_h};
-        l.breadcrumbs2 = {oth_x, tab_h, oth_w, crumbs_h};
+        l.tab_bar2 = {oth_x, top, oth_w, tab_h};
+        l.breadcrumbs2 = {oth_x, top + tab_h, oth_w, crumbs_h};
         l.group_split_x = right_x + left_w;
     }
-    tab_h += crumbs_h;
+    tab_h += crumbs_h + top;
 
     // Terminal: at bottom of right region (above status bar)
     float term_h = std::floor(std::min(terminal_height_, (content_h - tab_h) * 0.8f) * terminal_open_.value);
@@ -1019,8 +1028,11 @@ void App::poll_git_refresh() {
     scm_.set_state(wd, git_.branch_name(), git_statuses_);
     status_bar_.set_git_branch(git_.branch_name());
     int ahead = 0, behind = 0;
-    git_.ahead_behind(ahead, behind);
-    status_bar_.set_git_sync(ahead, behind);
+    bool upstream = git_.ahead_behind(ahead, behind);
+    status_bar_.set_git_sync(ahead, behind, upstream, git_.has_remote());
+    status_bar_.set_git_dirty(std::any_of(git_statuses_.begin(), git_statuses_.end(), [](const GitStatus& g) {
+        return g.status != FileStatus::Untracked && g.status != FileStatus::Ignored;
+    }));
     if (git_refresh_pending_) {
         git_refresh_pending_ = false;
         request_git_refresh();
@@ -1153,6 +1165,7 @@ void App::update(float dt) {
     auto ed = tab_bar_.active_editor();
     status_bar_.set_editor(ed);
     editor_view_.set_editor(ed);
+    update_status_bar();
 }
 
 // ---------------------------------------------------------------------------
@@ -1217,7 +1230,7 @@ void App::render() {
             other->set_scroll(saved.sx, saved.sy);
         }
         Color div = theme_.border;
-        renderer_.add_rect({layout.group_split_x, 0, 1.0f, layout.editor.y + layout.editor.h}, div);
+        renderer_.add_rect({layout.group_split_x, layout.tab_bar.y, 1.0f, layout.editor.y + layout.editor.h - layout.tab_bar.y}, div);
     }
     if (layout.terminal_header.h > 0) {
         renderer_.push_clip(layout.terminal_header);
@@ -1227,12 +1240,14 @@ void App::render() {
     if (layout.terminal.h > 0) clipped(terminal_, layout.terminal);
     if (layout.monitor.h > 0) clipped(monitor_bar_, layout.monitor);
     clipped(status_bar_, layout.status_bar);
+    if (layout.title_bar.h > 0) clipped(command_center_, layout.title_bar);
     if (Splitter sp = splitter_drag_ != Splitter::None ? splitter_drag_ : splitter_hover_; sp != Splitter::None) {
         Color c = theme_.accent;
         if (sp == Splitter::Groups)
-            renderer_.add_rect({layout.group_split_x - 1.0f, 0, 2.0f, layout.editor.y + layout.editor.h}, c);
+            renderer_.add_rect({layout.group_split_x - 1.0f, layout.tab_bar.y, 2.0f,
+                                layout.editor.y + layout.editor.h - layout.tab_bar.y}, c);
         else if (sp == Splitter::Sidebar)
-            renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1.0f, 0, 2.0f, layout.sidebar.h}, c);
+            renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1.0f, layout.sidebar.y, 2.0f, layout.sidebar.h}, c);
         else
             renderer_.add_rect({layout.terminal_header.x, layout.terminal_header.y - 1.0f, layout.terminal.w, 2.0f}, c);
     }
@@ -1298,6 +1313,7 @@ void App::open_file(const fs::path& path) {
     editor_view_.set_editor(editor);
     status_bar_.set_editor(editor);
     focus_editor();
+    note_recent_file(path);
 
     setup_lsp_for_file(path);
 
@@ -1359,11 +1375,12 @@ void App::focus_editor() { focus(&editor_view_); }
 App::Splitter App::splitter_at(float x, float y) const {
     Layout l = compute_layout();
     constexpr float GRAB = 4.0f;
-    if (sidebar_visible_ && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y < l.sidebar.h)
+    if (sidebar_visible_ && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y >= l.sidebar.y &&
+        y < l.sidebar.y + l.sidebar.h)
         return Splitter::Sidebar;
     if (terminal_visible_ && std::abs(y - l.terminal_header.y) <= GRAB && x >= l.terminal.x)
         return Splitter::Terminal;
-    if (split_ && std::abs(x - l.group_split_x) <= GRAB && y < l.editor.y + l.editor.h)
+    if (split_ && std::abs(x - l.group_split_x) <= GRAB && y >= l.tab_bar.y && y < l.editor.y + l.editor.h)
         return Splitter::Groups;
     return Splitter::None;
 }
@@ -1520,6 +1537,7 @@ void App::save_session() {
         out << "tab\t" << (static_cast<int>(i) == active) << "\t" << p.line << "\t" << p.col << "\t"
             << ed->scroll_y() << "\t" << ed->buffer().file_path().string() << "\n";
     }
+    for (size_t i = 0; i < recent_files_.size() && i < 50; i++) out << "recent\t" << recent_files_[i].string() << "\n";
 }
 
 bool App::restore_session() {
@@ -1527,11 +1545,16 @@ bool App::restore_session() {
     if (!in) return false;
     std::shared_ptr<Editor> active_ed;
     bool any = false;
+    std::vector<fs::path> recent;
     for (std::string line; std::getline(in, line);) {
         std::istringstream ss(line);
         std::string kind;
         std::getline(ss, kind, '\t');
-        if (kind == "layout") {
+        if (kind == "recent") {
+            std::string path;
+            std::getline(ss, path);
+            if (!path.empty()) recent.push_back(path);
+        } else if (kind == "layout") {
             int sv = 1, tv = 1, view = 0;
             ss >> sv >> tv >> view;
             sidebar_visible_ = sv != 0;
@@ -1562,6 +1585,7 @@ bool App::restore_session() {
     if (active_ed)
         for (size_t i = 0; i < tab_bar_.tabs().size(); i++)
             if (tab_bar_.tabs()[i].editor == active_ed) tab_bar_.set_active(static_cast<int>(i));
+    if (!recent.empty()) recent_files_ = std::move(recent);  // Quick Open history
     return any;
 }
 
@@ -1649,6 +1673,10 @@ void App::open_settings() {
                           [this] { return editor_view_.minimap(); }, "toggle_minimap"));
     rows.push_back(toggle("Breadcrumbs", "Path and enclosing symbols above the editor",
                           [this] { return show_breadcrumbs_; }, "toggle_breadcrumbs"));
+    rows.push_back(toggle("Command Center", "Search box with the file and workspace name above the tabs",
+                          [this] { return show_command_center_; }, "toggle_command_center"));
+    rows.push_back({Row::Button, "Status bar items", "Show or hide individual items (also: right-click the status bar)",
+                    [] { return std::string("Choose"); }, nullptr, [this](int) { settings_page_.close(); status_items_menu(); }});
     rows.push_back(toggle("Remote monitor", "Live CPU, RAM, disk and network of the SSH host",
                           [this] { return remote_monitor_; }, "toggle_remote_monitor"));
     rows.push_back(toggle("Local system monitor", "The same strip for this computer",
@@ -2049,6 +2077,10 @@ void App::confirm_discard(const std::string& action, std::function<void()> then)
 
 void App::set_status_message(const std::string& msg, float seconds) {
     status_bar_.set_message(msg, seconds);
+    // Kept for the notifications bell; long-lived messages (errors, prompts) count as unread.
+    notifications_.push_back({msg, unix_now()});
+    if (notifications_.size() > 200) notifications_.erase(notifications_.begin());
+    if (seconds >= 5.0f) unread_notifications_++;
 }
 
 Editor* App::current_editor() {

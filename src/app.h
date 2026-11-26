@@ -14,6 +14,7 @@
 #include "ui/settings_page.h"
 #include "ui/chat_panel.h"
 #include "ui/monitor_bar.h"
+#include "ui/command_center.h"
 #include "llm.h"
 #include "git/repository.h"
 #include "ssh/session.h"
@@ -169,6 +170,35 @@ private:
     std::string monitor_key_, monitor_folder_;
     bool monitor_visible() const { return !monitor_key_.empty(); }
     void update_monitor();
+    // Status bar items and the Command Center (status_glue.cpp).
+    CommandCenter command_center_;
+    bool show_command_center_ = true;  // settings: command_center
+    std::vector<fs::path> recent_files_;  // Quick Open MRU, newest first
+    struct Notification {
+        std::string text;
+        int64_t time = 0;  // unix seconds
+    };
+    std::vector<Notification> notifications_;  // newest last
+    int unread_notifications_ = 0;
+    std::future<std::pair<bool, std::string>> git_op_job_;  // pull / push / sync
+    std::string git_op_label_;
+    void setup_status_bar();
+    bool status_command(const std::string& cmd);  // true when handled
+    void status_click(const std::string& id);
+    void update_status_bar();
+    void note_recent_file(const fs::path& p);
+    void remote_menu();
+    void show_problems();
+    void goto_next_problem();
+    void pick_indentation();
+    void pick_line_endings();
+    void pick_encoding();
+    void pick_language();
+    void lsp_menu();
+    void show_notifications();
+    void status_items_menu();
+    void git_remote_op(const std::string& op);  // "pull" | "push" | "sync" | "publish"
+    void poll_git_op();
     LSPClient lsp_;
     std::string lsp_server_;
     std::mutex lsp_mutex_;
@@ -248,6 +278,7 @@ private:
 
     // Layout
     struct Layout {
+        Rect title_bar;  // Command Center row (h = 0 when hidden)
         Rect activity_bar;
         Rect sidebar;
         Rect tab_bar;

@@ -38,6 +38,7 @@ void Editor::load_content(const fs::path& path, const std::string& content) {
     scroll_x_ = 0;
     scroll_y_ = 0;
 
+    detect_indentation();
     std::string lang = SyntaxHighlighter::detect_language(path);
     syntax_.set_language(lang);
     constexpr size_t SYNC_PARSE_LIMIT = 256 * 1024;  // small files never show uncoloured
@@ -565,7 +566,7 @@ void Editor::tab() {
     if (!cursors_.primary().empty()) {
         indent();
     } else {
-        insert_text("    ");
+        insert_text(indent_unit());
     }
 }
 
@@ -590,7 +591,7 @@ void Editor::indent() {
     // Insert 4 spaces at the beginning of each line, bottom to top
     for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
         size_t offset = buffer_.line_start(*it);
-        buffer_.insert(offset, "    ");
+        buffer_.insert(offset, indent_unit());
     }
 
     buffer_.end_undo_group();
@@ -617,7 +618,7 @@ void Editor::unindent() {
     for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
         std::string lt = buffer_.line_text(*it);
         size_t to_remove = 0;
-        for (size_t i = 0; i < 4 && i < lt.size(); ++i) {
+        for (size_t i = 0; i < static_cast<size_t>(indent_style_.size) && i < lt.size(); ++i) {
             if (lt[i] == ' ') ++to_remove;
             else if (lt[i] == '\t') { ++to_remove; break; }
             else break;
@@ -1031,6 +1032,117 @@ void Editor::reload() {
 void Editor::sync_syntax() {
     if (!syntax_.poll()) return;  // background parse running; edits stay queued
     syntax_.apply_changes(buffer_, buffer_.take_changes());
+}
+
+// ---------------------------------------------------------------------------
+// File format: indentation, line endings, BOM, language mode
+// ---------------------------------------------------------------------------
+
+std::string Editor::indent_unit() const {
+    return indent_style_.tabs ? std::string("\t") : std::string(static_cast<size_t>(std::max(1, indent_style_.size)), ' ');
+}
+
+void Editor::detect_indentation() {
+    // Like VS Code: tab- vs space-indented lines decide the kind; the most common
+    // positive step between consecutive space-indented lines decides the width.
+    indent_style_ = {};
+    size_t tab_lines = 0, space_lines = 0;
+    int steps[9] = {};
+    size_t prev = 0;
+    size_t n = std::min<size_t>(buffer_.line_count(), 2000);
+    for (size_t l = 0; l < n; l++) {
+        std::string lt = buffer_.line_text(l);
+        if (lt.find_first_not_of(" \t\r") == std::string::npos) continue;  // blank lines say nothing
+        if (lt[0] == '\t') {
+            tab_lines++;
+            continue;
+        }
+        size_t sp = lt.find_first_not_of(' ');
+        if (sp > 0) space_lines++;
+        if (sp > prev && sp - prev <= 8 && sp - prev >= 2) steps[sp - prev]++;
+        prev = sp;
+    }
+    if (tab_lines > space_lines) {
+        indent_style_.tabs = true;
+        return;
+    }
+    int best = 0;
+    for (int w : {2, 4, 8, 3})
+        if (steps[w] > steps[best]) best = w;
+    if (best) indent_style_.size = best;
+}
+
+void Editor::replace_all_text(const std::string& text) {
+    Position p = cursors_.primary_pos();
+    buffer_.begin_undo_group();
+    buffer_.replace(0, buffer_.length(), text);
+    buffer_.end_undo_group();
+    on_text_changed();
+    size_t line = std::min(p.line, buffer_.line_count() - 1);
+    cursors_.set_primary({line, std::min(p.col, buffer_.line_length(line))});
+}
+
+void Editor::convert_indentation(IndentStyle to) {
+    IndentStyle from = indent_style_;
+    int from_w = std::max(1, from.size), to_w = std::max(1, to.size);
+    std::string text = buffer_.text(), out;
+    out.reserve(text.size());
+    size_t i = 0;
+    while (i < text.size()) {
+        // Leading whitespace as a visual column, then re-emitted in the new style.
+        int col = 0;
+        size_t j = i;
+        for (; j < text.size() && (text[j] == ' ' || text[j] == '\t'); j++)
+            col = text[j] == '\t' ? (col / from_w + 1) * from_w : col + 1;
+        size_t levels = static_cast<size_t>(col / from_w), rem = static_cast<size_t>(col % from_w);
+        if (to.tabs) out.append(levels, '\t');
+        else out.append(levels * static_cast<size_t>(to_w), ' ');
+        out.append(rem, ' ');
+        size_t nl = text.find('\n', j);
+        size_t end = nl == std::string::npos ? text.size() : nl + 1;
+        out.append(text, j, end - j);
+        i = end;
+    }
+    indent_style_ = to;
+    if (out != text) replace_all_text(out);
+}
+
+bool Editor::uses_crlf() const {
+    if (buffer_.line_count() < 2) return false;
+    std::string first = buffer_.line_text(0);
+    return !first.empty() && first.back() == '\r';
+}
+
+void Editor::set_line_endings(bool crlf) {
+    std::string text = buffer_.text(), out;
+    out.reserve(text.size() + (crlf ? buffer_.line_count() : 0));
+    for (size_t i = 0; i < text.size(); i++) {
+        char c = text[i];
+        if (c == '\r' && i + 1 < text.size() && text[i + 1] == '\n') continue;  // re-added below
+        if (c == '\n' && crlf) out += '\r';
+        out += c;
+    }
+    if (out != text) replace_all_text(out);
+}
+
+bool Editor::has_bom() const {
+    std::string_view head = buffer_.chunk_at(0);
+    return head.size() >= 3 && head.substr(0, 3) == "\xEF\xBB\xBF";
+}
+
+void Editor::set_bom(bool on) {
+    if (on == has_bom()) return;
+    buffer_.begin_undo_group();
+    if (on) buffer_.insert(0, "\xEF\xBB\xBF");
+    else buffer_.erase(0, 3);
+    buffer_.end_undo_group();
+    on_text_changed();
+}
+
+void Editor::set_language(const std::string& lang_id) {
+    syntax_.set_language(lang_id);
+    buffer_.take_changes();  // the fresh parse below already covers them
+    syntax_.update(buffer_);
 }
 
 } // namespace oh
