@@ -87,8 +87,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     {   // Matching bracket outline
         Position a, b;
         if (editor_->cursors().selections().size() == 1 && editor_->find_bracket_pair(a, b)) {
-            Color c = ctx.theme->fg_muted;
-            c.a = 0.6f;
+            Color c = ctx.theme->bracket_match;
             auto [first, end] = visible_lines(text_rect);
             for (Position p : {a, b}) {
                 if (p.line < first || p.line >= end) continue;
@@ -287,6 +286,10 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
                 case TokenType::Punctuation:  c = ctx.theme->punctuation; break;
                 case TokenType::Property:     c = ctx.theme->property; break;
                 case TokenType::Error:        c = ctx.theme->error; break;
+                case TokenType::KeywordControl: c = ctx.theme->keyword_control; break;
+                case TokenType::Constant:     c = ctx.theme->constant; break;
+                case TokenType::BuiltinType:  c = ctx.theme->type_builtin; break;
+                case TokenType::Variable:     c = ctx.theme->variable; break;
                 default: break;
             }
             for (size_t j = tok.start; j < tok.start + tok.length && j < line_len; j++)
@@ -515,8 +518,7 @@ void EditorView::render_blame(RenderContext& ctx, Rect text_rect) {
 void EditorView::render_indent_guides(RenderContext& ctx, Rect text_rect) {
     auto& buf = editor_->buffer();
     auto [first, end] = visible_lines(text_rect);
-    Color c = ctx.theme->line_number;
-    c.a *= 0.35f;
+    Color c = ctx.theme->indent_guide;
     auto indent_of = [&](size_t line, bool& blank) {
         std::string t = buf.line_text(line);
         size_t col = 0, i = 0;
@@ -551,10 +553,8 @@ void EditorView::render_find_matches(RenderContext& ctx, Rect text_rect) {
     size_t lo = buf.line_start(first);
     size_t hi = end < buf.line_count() ? buf.line_start(end) : buf.length();
     auto it = std::lower_bound(ms.begin(), ms.end(), lo, [](const FindBar::Match& m, size_t o) { return m.start < o; });
-    Color hl = ctx.theme->warning;
-    hl.a = 0.22f;
-    Color cur = ctx.theme->warning;
-    cur.a = 0.5f;
+    Color hl = ctx.theme->find_match;
+    Color cur = ctx.theme->find_match_active;
     for (; it != ms.end() && it->start < hi; ++it) {
         Position a = buf.position_of(it->start), b = buf.position_of(it->start + it->len);
         if (a.line != b.line) continue;  // single-line queries only
@@ -648,6 +648,9 @@ void EditorView::render_minimap(RenderContext& ctx, Rect r) {
                 case TokenType::Function: return th.function_name;
                 case TokenType::Type: return th.type_color;
                 case TokenType::Preprocessor: return th.preprocessor;
+                case TokenType::KeywordControl: return th.keyword_control;
+                case TokenType::Constant: return th.constant;
+                case TokenType::BuiltinType: return th.type_builtin;
                 default: return th.fg;
             }
         };

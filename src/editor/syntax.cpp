@@ -142,6 +142,17 @@ void SyntaxHighlighter::build_type_map() {
     // Override the preprocessor directives back
     m["#include"] = TokenType::Preprocessor;
     m["#define"] = TokenType::Preprocessor;
+
+    // Finer classes so themes can tell control flow, literals and built-in
+    // types apart (they fall back to the keyword / type colours).
+    for (auto& kw : {"if", "else", "for", "while", "do", "switch", "case", "default", "break",
+                     "continue", "return", "goto", "try", "catch", "throw",
+                     "co_await", "co_return", "co_yield"})
+        m[kw] = TokenType::KeywordControl;
+    for (auto& kw : {"true", "false", "null", "NULL", "nullptr", "this"})
+        m[kw] = TokenType::Constant;
+    for (auto& kw : {"primitive_type", "auto", "void", "signed", "unsigned", "long", "short"})
+        m[kw] = TokenType::BuiltinType;
 }
 
 void SyntaxHighlighter::discard_pending() {
@@ -340,6 +351,19 @@ TokenType SyntaxHighlighter::classify_node(TSNode node) const {
     }
 
     if (std::strcmp(type, "field_identifier") == 0) {
+        // Method declarations (`bool empty() const`) and calls (`v.empty()`).
+        TSNode parent = ts_node_parent(node);
+        while (!ts_node_is_null(parent) && std::strcmp(ts_node_type(parent), "qualified_identifier") == 0)
+            parent = ts_node_parent(parent);
+        if (!ts_node_is_null(parent)) {
+            const char* pt = ts_node_type(parent);
+            if (std::strcmp(pt, "function_declarator") == 0) return TokenType::Function;
+            if (std::strcmp(pt, "field_expression") == 0) {
+                TSNode gp = ts_node_parent(parent);
+                if (!ts_node_is_null(gp) && std::strcmp(ts_node_type(gp), "call_expression") == 0)
+                    return TokenType::Function;
+            }
+        }
         return TokenType::Property;
     }
 
