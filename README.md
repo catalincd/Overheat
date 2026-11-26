@@ -18,7 +18,9 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 
 <br>
 
-<img src="docs/screenshots/dark.png" alt="Overheat with the dark theme: explorer, C++ file with inline blame, minimap and terminal">
+<img src="docs/screenshots/themes.webp" alt="Slideshow: Overheat with C, C++ and Rust files in twelve themes (Overheat Dark, Gruvbox Dark, Cyberpunk Neon, Tokyo Night, Catppuccin Mocha, Dracula, One Dark Pro, Nord, GitHub Light, Gruvbox Light, Solarized Light, Overheat Light)">
+
+<sub>C, C++ and Rust in twelve of the built-in themes</sub>
 
 </div>
 
