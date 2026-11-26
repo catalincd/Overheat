@@ -26,6 +26,7 @@ void request_redraw() {
 App::App() = default;
 
 App::~App() {
+    cancel_search();
     llm_.cancel();  // its worker posts to SDL, which is shut down below
     if (vk_.device()) vkDeviceWaitIdle(vk_.device());
     plugins_.shutdown();
@@ -1035,13 +1036,7 @@ void App::update(float dt) {
     lsp_update();
     poll_remote_connect();
     search_.tick(dt);
-    if (search_job_.valid() && search_job_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-        auto hits = search_job_.get();
-        if (!search_cancel_ || !search_cancel_->load()) {
-            bool truncated = hits.size() >= 20000;
-            search_.set_results(std::move(hits), truncated);
-        }
-    }
+    poll_search();
     poll_git_refresh();
     git_poll_timer_ += dt;
     if (git_poll_timer_ > 3.0f) {
@@ -1744,28 +1739,53 @@ void App::setup_search() {
     SearchPanel::Callbacks cb;
     cb.run = [this](const SearchQuery& q) { run_search(q); };
     cb.open = [this](const SearchHit& h) { open_at(h.file, h.line, h.col, h.len); };
+    cb.cancel = [this] { cancel_search(); };
     search_.set_callbacks(std::move(cb));
     search_.set_root(project_root_);
 }
 
+void App::cancel_search() {
+    if (search_stream_) search_stream_->cancel.store(true);
+}
+
 void App::run_search(const SearchQuery& q) {
-    if (search_cancel_) search_cancel_->store(true);
-    search_cancel_ = std::make_shared<std::atomic<bool>>(false);
+    cancel_search();
+    search_stream_.reset();
     if (q.text.empty()) {
         search_.set_results({}, false);
         return;
     }
     if (vfs_->is_remote()) {
         auto hits = search_remote(q);  // runs on the SSH session; brief UI wait
-        bool truncated = hits.size() >= 20000;
+        bool truncated = hits.size() >= SEARCH_MAX_RESULTS;
+        if (truncated) hits.resize(SEARCH_MAX_RESULTS);
         search_.set_results(std::move(hits), truncated);
         return;
     }
-    search_job_ = std::async(std::launch::async, [files = all_files_, q, cancel = search_cancel_] {
-        auto hits = search_files(files, q, *cancel);
+    // Results stream into the panel as they are found; the previous job was cancelled
+    // above, so replacing its future (which waits for it) only blocks for a moment.
+    auto stream = std::make_shared<SearchStream>();
+    search_stream_ = stream;
+    search_.begin_results();
+    search_job_ = std::async(std::launch::async, [files = all_files_, q, stream] {
+        stream->stats = search_files(files, q, stream->cancel, [&](std::vector<SearchHit>&& batch) {
+            stream->push(std::move(batch));
+            request_redraw();
+        });
+        stream->done.store(true);
         request_redraw();
-        return hits;
     });
+}
+
+void App::poll_search() {
+    if (!search_stream_) return;
+    auto hits = search_stream_->take();
+    if (!hits.empty()) search_.append_results(std::move(hits));
+    if (search_stream_->done.load()) {
+        if (auto rest = search_stream_->take(); !rest.empty()) search_.append_results(std::move(rest));
+        search_.finish_results(search_stream_->stats.truncated);
+        search_stream_.reset();
+    }
 }
 
 void App::open_at(const fs::path& path, size_t line, size_t col, size_t len) {

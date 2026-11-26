@@ -8,21 +8,40 @@
 namespace oh {
 
 void SearchPanel::set_results(std::vector<SearchHit> hits, bool truncated) {
-    hits_ = std::move(hits);
-    truncated_ = truncated;
-    busy_ = false;
+    begin_results();
+    append_results(std::move(hits));
+    finish_results(truncated);
+}
+
+void SearchPanel::begin_results() {
+    hits_.clear();
     files_.clear();
     file_hits_.clear();
-    for (size_t i = 0; i < hits_.size(); i++) {
-        if (files_.empty() || files_.back() != hits_[i].file) {
-            files_.push_back(hits_[i].file);
-            file_hits_.push_back({});
-        }
-        file_hits_.back().push_back(static_cast<int>(i));
-    }
-    collapsed_.assign(files_.size(), false);
+    collapsed_.clear();
+    rows_.clear();
+    truncated_ = false;
+    busy_ = true;
     scroll_y_ = 0;
-    rebuild_rows();
+}
+
+void SearchPanel::append_results(std::vector<SearchHit>&& hits) {
+    for (SearchHit& h : hits) {
+        int idx = static_cast<int>(hits_.size());
+        if (files_.empty() || files_.back() != h.file) {
+            files_.push_back(h.file);
+            file_hits_.push_back({});
+            collapsed_.push_back(false);
+            rows_.push_back({static_cast<int>(files_.size() - 1), -1});
+        }
+        file_hits_.back().push_back(idx);
+        if (!collapsed_.back()) rows_.push_back({static_cast<int>(files_.size() - 1), idx});
+        hits_.push_back(std::move(h));
+    }
+}
+
+void SearchPanel::finish_results(bool truncated) {
+    truncated_ = truncated;
+    busy_ = false;
 }
 
 void SearchPanel::rebuild_rows() {
@@ -76,12 +95,22 @@ void SearchPanel::render(RenderContext& ctx, Rect bounds) {
 
     float y = input_.y + input_.h + 8.0f;
     std::string summary;
-    if (busy_) summary = "Searching...";
-    else if (!query_.text.empty())
+    if (!query_.text.empty())
         summary = std::to_string(hits_.size()) + (truncated_ ? "+" : "") + " results in " +
                   std::to_string(files_.size()) + " files";
+    if (busy_) summary = hits_.empty() ? "Searching..." : "Searching... " + summary;
     ctx.r->add_text(bounds.x + 14.0f, base(y, row_h_), summary, th.fg_muted, *ctx.font);
-    y += row_h_ + 4.0f;
+    y += row_h_;
+    if (truncated_ && !busy_) {
+        // VS Code's wording: the result set is capped, ask for a narrower query.
+        ctx.r->push_clip({bounds.x, y, bounds.w - 8.0f, 2.0f * row_h_});
+        ctx.r->add_text(bounds.x + 14.0f, base(y, row_h_), "Results limited to " +
+                        std::to_string(SEARCH_MAX_RESULTS / 1000) + "k;", th.warning, *ctx.font);
+        ctx.r->add_text(bounds.x + 14.0f, base(y + row_h_, row_h_), "refine your search.", th.warning, *ctx.font);
+        ctx.r->pop_clip();
+        y += 2.0f * row_h_;
+    }
+    y += 4.0f;
     list_y_ = y;
 
     Rect list{bounds.x, y, bounds.w, bounds.y + bounds.h - y};
@@ -113,16 +142,19 @@ void SearchPanel::render(RenderContext& ctx, Rect bounds) {
             continue;
         }
         const SearchHit& h = hits_[static_cast<size_t>(row.hit)];
-        // Preview: trim indentation, keep the match in view.
-        size_t lead = h.text.find_first_not_of(" \t");
-        if (lead == std::string::npos) lead = 0;
-        size_t start = h.col > lead + 24 ? h.col - 16 : lead;
-        std::string pre = h.text.substr(start, h.col - start);
-        std::string mid = h.text.substr(h.col, h.len);
-        std::string post = h.text.substr(std::min(h.text.size(), h.col + h.len));
+        // Preview (already clipped around the match by the search): keep the match in view.
+        std::string_view text = h.text;
+        size_t pc = std::min(h.preview_col, text.size());
+        size_t ml = std::min(h.len, text.size() - pc);
+        size_t start = pc > 24 ? pc - 16 : 0;
+        while (start < pc && (static_cast<unsigned char>(text[start]) & 0xC0) == 0x80) start++;
+        std::string_view pre = text.substr(start, pc - start);
+        std::string_view mid = text.substr(pc, ml);
+        std::string_view post = text.substr(pc + ml);
         float x = bounds.x + 34.0f;
         ctx.r->push_clip({bounds.x, ry, bounds.w - 12.0f, row_h_});
         ctx.r->set_fade(bounds.x + bounds.w - 40.0f, bounds.x + bounds.w - 12.0f);
+        if (start > 0) x = ctx.r->add_text(x, rb, "\xE2\x80\xA6", th.fg_muted, *ctx.font);  // cut on the left
         x = ctx.r->add_text(x, rb, pre, th.fg_muted, *ctx.font);
         float mx = x;
         x = ctx.r->add_text(x, rb, mid, th.fg, *ctx.font);

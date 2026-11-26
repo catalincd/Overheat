@@ -10,10 +10,15 @@ public:
     struct Callbacks {
         std::function<void(const SearchQuery&)> run;  // host starts the search
         std::function<void(const SearchHit&)> open;
+        std::function<void()> cancel;  // the query changed: stop the running search
     };
     void set_callbacks(Callbacks cb) { cb_ = std::move(cb); }
     void set_root(const fs::path& root) { root_ = root; }
     void set_results(std::vector<SearchHit> hits, bool truncated);
+    // Streaming: clear, append batches as they arrive, then mark the search finished.
+    void begin_results();
+    void append_results(std::vector<SearchHit>&& hits);
+    void finish_results(bool truncated);
     void set_busy(bool busy) { busy_ = busy; }
     void focus_input() { input_active_ = true; }
     bool input_focused() const { return focused_ && input_active_; }
@@ -42,7 +47,10 @@ private:
     Rect input_{}, case_btn_{}, word_btn_{};
 
     void rebuild_rows();
-    void schedule() { debounce_ = 0.25f; }
+    void schedule() {
+        debounce_ = 0.25f;
+        if (cb_.cancel) cb_.cancel();
+    }
 };
 
 } // namespace oh
