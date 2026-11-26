@@ -35,7 +35,7 @@ DEB=$B/deb
 rm -rf "$DEB" && mkdir -p "$DEB/DEBIAN" "$DEB/usr"
 cp -a "$STAGE/bin" "$STAGE/lib" "$STAGE/share" "$DEB/usr/"
 mkdir -p "$DEB/usr/share/doc/overheat"
-cp LICENSE assets/fonts/JetBrainsMono-OFL.txt "$DEB/usr/share/doc/overheat/"
+cp LICENSE assets/fonts/*.txt "$DEB/usr/share/doc/overheat/"
 cat > "$DEB/DEBIAN/control" <<CONTROL
 Package: overheat
 Version: $VER

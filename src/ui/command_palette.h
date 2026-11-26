@@ -15,6 +15,7 @@ public:
     struct PickOptions {
         std::string placeholder;
         std::vector<std::string> items;
+        std::vector<std::string> details;  // optional muted text right of each item
         std::function<void(int index, const std::string& query)> on_pick;
         std::function<void(int index)> on_preview;
         std::function<void()> on_cancel;

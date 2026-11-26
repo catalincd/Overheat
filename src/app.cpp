@@ -1318,11 +1318,12 @@ bool App::reload_font(const std::string& family, float size) {
 
 void App::select_font() {
     auto families = list_monospace_families();
-    std::vector<std::string> names;
+    std::vector<std::string> names, details;
     int initial = 0;
     for (auto& f : families) {
         if (f.name == font_family_) initial = static_cast<int>(names.size());
         names.push_back(f.name);
+        details.push_back(f.bundled ? "bundled" : "");
     }
     std::string current = font_family_.empty() ? "JetBrainsMono Nerd Font Mono" : font_family_;
     for (size_t i = 0; i < names.size(); i++)
@@ -1331,6 +1332,7 @@ void App::select_font() {
     CommandPalette::PickOptions opts;
     opts.placeholder = "Select font family (live preview)";
     opts.items = names;
+    opts.details = std::move(details);
     opts.initial = initial;
     opts.on_preview = [this, names, current](int i) {
         const std::string& name = names[static_cast<size_t>(i)];

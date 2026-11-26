@@ -10,7 +10,7 @@ the git log; keep this file short and current.
   add limits. Check how VS Code does it: result caps, streaming results, excluded folders
   and binary/large-file skipping
 - [ ] Workspaces like VS Code's, but smarter and never auto-opened on startup
-- [ ] More bundled fonts: research what editor users like (Reddit and similar threads)
+- [x] More bundled fonts: Fira Code, Cascadia Code, Iosevka Term, Maple Mono, Source Code Pro, Hack, IBM Plex Mono, Geist Mono, Monaspace Neon (assets/fonts/README.md)
 - [ ] More themes, using popular VS Code themes as references
 - [ ] Window transparency on Linux and Windows
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations

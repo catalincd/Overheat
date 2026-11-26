@@ -108,7 +108,7 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 
 ### 🎨 Look and feel
 - Overheat Dark and Light themes, plus your own TOML themes
-- Any installed monospace font, with ligatures
+- Ten bundled coding fonts (Fira Code, Cascadia Code, Iosevka, Maple Mono, Monaspace, ...) or any installed monospace font, with ligatures
 - Text zoom with <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>-</kbd>/wheel
 - Quick, subtle animations (or none)
 - Settings page and keyboard-shortcut editor
@@ -318,7 +318,8 @@ servers over Remote-SSH, more grammars, and tool use in the AI chat. See
 ## 📄 License
 
 Overheat is licensed under the **[Apache License 2.0](LICENSE)**. Vendored tree-sitter code is MIT
-(`third_party/`), and the bundled JetBrains Mono Nerd Font is SIL OFL 1.1.
+(`third_party/`), and the bundled fonts are SIL OFL 1.1 (Hack: MIT); see
+[assets/fonts/README.md](assets/fonts/README.md).
 
 ## 🙏 Acknowledgements
 
@@ -326,7 +327,8 @@ Built on [SDL3](https://libsdl.org), [Vulkan](https://www.vulkan.org),
 [FreeType](https://freetype.org), [HarfBuzz](https://harfbuzz.github.io),
 [tree-sitter](https://tree-sitter.github.io), [libgit2](https://libgit2.org) and
 [libssh2](https://libssh2.org). Ships with
-[JetBrains Mono Nerd Font](https://www.nerdfonts.com) (SIL OFL 1.1).
+[JetBrains Mono Nerd Font](https://www.nerdfonts.com), Fira Code, Cascadia Code, Iosevka,
+Maple Mono, Source Code Pro, Hack, IBM Plex Mono, Geist Mono and Monaspace.
 
 <div align="center">
 <br>

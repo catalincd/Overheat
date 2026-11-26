@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stage a portable Windows build: overheat.exe + every DLL it needs from the
-MSYS2 sysroot (found by walking PE imports), the bundled font and the icon.
+MSYS2 sysroot (found by walking PE imports), the bundled fonts and the icon.
 
 usage: bundle.py <build-dir> <sysroot/ucrt64> <out-dir>
 """
@@ -33,8 +33,9 @@ while queue:
 
 # The Vulkan loader is installed with GPU drivers, but ship ours so a missing
 # system loader still works (Windows prefers the app directory).
-for f in ("JetBrainsMonoNerdFontMono-Regular.ttf", "JetBrainsMono-OFL.txt"):
-    shutil.copy2(os.path.join(root, "assets", "fonts", f), os.path.join(out, "fonts"))
+fonts = os.path.join(root, "assets", "fonts")
+for f in sorted(os.listdir(fonts)):  # every bundled font with its license and README
+    shutil.copy2(os.path.join(fonts, f), os.path.join(out, "fonts"))
 shutil.copy2(os.path.join(root, "assets", "logo", "overheat.ico"), out)
 for f in ("LICENSE", "README.md", "TODO.md"):
     if os.path.exists(os.path.join(root, f)):
