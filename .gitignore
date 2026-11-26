@@ -7,3 +7,4 @@ dist/
 build-win/
 build-linux/
 build-arch/
+build-docker/

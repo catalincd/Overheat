@@ -42,7 +42,7 @@ sudo apt install build-essential cmake ninja-build glslc libglm-dev libvulkan-de
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
 ```
 
-Older releases don't package SDL3. See [Older Linux distributions](#older-linux-distributions).
+Older releases don't package SDL3: use the container build ([Docker / Podman](#docker--podman)).
 
 ### Build options
 
@@ -71,53 +71,43 @@ the host's font configuration). The script prints the minimum glibc version of t
 - The **.deb** installs to `/usr` with the private libraries in `/usr/lib/overheat`.
 - The **AppImage** is built only if `appimagetool` is on `PATH`.
 
-## Older Linux distributions
+## Docker / Podman
 
-The packages inherit the glibc version of the machine they are built on: anything built on a
-rolling distribution needs an equally new glibc. To support older systems, build inside a
-container of the **oldest distribution you want to support**. The result then runs there and on
-everything newer.
+`docker/` holds two build environments and a wrapper that runs the packaging scripts inside them.
+The host needs only Docker or Podman (Podman is preferred when both are installed; override with
+`OVERHEAT_ENGINE=docker`).
 
-The recipe below targets Ubuntu 24.04 (glibc 2.39). It builds SDL3 from source, because 24.04 does
-not ship it, and works the same with Debian 12 (`debian:12`).
+| Command | Image | Output in `dist/` |
+|---|---|---|
+| `docker/build.sh linux` | `docker/linux` (Ubuntu 24.04, SDL3 from source, appimagetool) | `.AppImage`, `.tar.gz`, `.deb` |
+| `docker/build.sh windows` | `docker/arch` (MinGW-w64, Wine) | `*-win64-setup.exe`, `*-win64-portable.zip` |
+| `docker/build.sh arch` | `docker/arch` | `.pkg.tar.zst` |
+| `docker/build.sh all` | both | all of the above |
+| `docker/build.sh dev` | `docker/arch` | Debug build + `ctest` in `build-docker/dev` |
+| `docker/build.sh shell [linux\|arch]` | either | interactive shell |
 
-> [!NOTE]
-> This recipe is not exercised by the release process. Adjust the package names if your base image
-> differs.
+- Images are built on first use (`overheat-build-linux`, `overheat-build-arch`). Add `--rebuild` to
+  pull fresh base images and rebuild them.
+- The repository is bind-mounted at **its host path**, not copied, and the container runs as your
+  user (`--user` for Docker, `--userns=keep-id` for Podman). Every file it writes belongs to you.
+- Build trees go to `build-docker/<target>` and never touch the host's `build-*` directories. The
+  packaging scripts take the location from `OVERHEAT_BUILD_DIR`.
+- The Windows build still downloads the MSYS2 packages at build time (cached in
+  `build-docker/win/deps`).
+- To use the environment by hand: `docker/build.sh shell linux`, then run the same commands as on a
+  native host.
 
-```dockerfile
-# packaging/linux/Containerfile (create it, or paste into `podman build -f - .`)
-FROM ubuntu:24.04
-ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential cmake ninja-build git ca-certificates file \
-      glslc libglm-dev libvulkan-dev \
-      libfreetype-dev libharfbuzz-dev libfontconfig-dev libgit2-dev libssh2-1-dev \
-      libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev \
-      libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev libdbus-1-dev \
-      dpkg-dev python3 \
- && rm -rf /var/lib/apt/lists/*
-# SDL3 from a release tag (installed to /usr/local; the packager bundles it)
-RUN git clone --depth 1 --branch release-3.4.20 https://github.com/libsdl-org/SDL /tmp/SDL \
- && cmake -S /tmp/SDL -B /tmp/SDL/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF \
- && cmake --build /tmp/SDL/build && cmake --install /tmp/SDL/build && ldconfig && rm -rf /tmp/SDL
-WORKDIR /src
-```
+### Older Linux distributions
 
-```bash
-podman build -t overheat-build-ubuntu2404 -f packaging/linux/Containerfile .
-podman run --rm -v "$PWD":/src:Z overheat-build-ubuntu2404 \
-    bash -c 'git config --global --add safe.directory /src && packaging/linux/build.sh'
-```
+The Linux packages inherit the glibc version of the machine they are built on. Anything built on
+a rolling distribution needs an equally new glibc. `docker/build.sh linux` builds on
+**Ubuntu 24.04 (glibc 2.39)**, so its packages run on Ubuntu 24.04+, Debian 13+, Fedora 40+ and
+every rolling distro.
 
-Docker works the same: replace `podman` with `docker`. Notes:
-
-- Use a separate build tree (the script uses `build-linux/`), so container builds don't clash with
-  your host's `build/`.
-- To produce an AppImage in the container, put `appimagetool` on its `PATH` (mount it with `-v`).
-  Run it with `--appimage-extract-and-run`, or set `APPIMAGE_EXTRACT_AND_RUN=1`, because
-  containers usually have no FUSE.
-- Check the printed `requires glibc >= …` line. It should match the container's glibc.
+To go older, change the `FROM` line in `docker/linux/Dockerfile` to the oldest distribution you
+want to support (for example `docker.io/library/debian:12` for glibc 2.36) and adjust the package names. Then run
+`docker/build.sh linux --rebuild`. The script prints `requires glibc >= …`; check that it matches
+the base image. You may need a newer GCC than the base image ships, because Overheat is C++20.
 
 ## Windows
 
@@ -159,7 +149,7 @@ cmake --build build
 ### Smoke-testing with Wine
 
 ```bash
-export WINEPREFIX=$PWD/build-win/wineprefix
+export WINEPREFIX=$PWD/build-win/wineprefix   # build-docker/win/wineprefix after a container build
 wine build-win/stage/Overheat/overheat.exe
 ```
 
@@ -177,5 +167,6 @@ terminal.
 | `third_party/` | vendored tree-sitter core and C/C++ grammars |
 | `assets/` | logo (SVG/PNG/ICO) and the bundled font |
 | `packaging/` | Windows (NSIS, toolchain, bundler), Linux (packager, install scripts), Arch (PKGBUILD) |
+| `docker/` | containerised build environments and `build.sh` wrapper |
 | `tests/` | piece-table fuzz test |
 | `tools/qa/` | scripted UI testing (`--script` mode, screenshot capture) |

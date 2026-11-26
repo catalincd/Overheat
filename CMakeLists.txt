@@ -141,7 +141,10 @@ target_link_libraries(overheat PRIVATE
 option(OVERHEAT_PORTABLE "Linux: static libstdc++ + \$ORIGIN/../lib/overheat rpath" OFF)
 if(OVERHEAT_PORTABLE AND NOT WIN32)
     target_link_options(overheat PRIVATE -static-libstdc++ -static-libgcc
-                        "-Wl,-rpath,\$ORIGIN/../lib/overheat" -Wl,--disable-new-dtags)
+                        "-Wl,-rpath,\$ORIGIN/../lib/overheat")
+    # Last on the link line, so it beats --enable-new-dtags from pkg-config files
+    # (SDL3 built from source puts it in sdl3.pc).
+    target_link_libraries(overheat PRIVATE -Wl,--disable-new-dtags)
 endif()
 
 if(WIN32)

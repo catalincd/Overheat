@@ -139,8 +139,8 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 > [!NOTE]
 > **Requirements:** a GPU with a Vulkan 1.2 driver, x86-64-v2 CPU (2009+).
 > The prebuilt Linux AppImage, tarball and .deb are built on a rolling distro and need
-> **glibc 2.43 or newer**. On older distros (Ubuntu 24.04, Debian 12, ...) build them yourself
-> with the [container recipe](docs/BUILDING.md#older-linux-distributions).
+> **glibc 2.43 or newer**. On older distros (Ubuntu 24.04, Debian 13, ...) build them yourself
+> with `docker/build.sh linux` (see [Docker builds](docs/BUILDING.md#docker--podman)).
 
 ## ⌨️ Keyboard shortcuts
 
@@ -194,8 +194,20 @@ so the binary has no runtime data files.
 | Self-contained Linux packages | `packaging/linux/build.sh` | `.AppImage`, `.tar.gz`, `.deb` |
 | Arch package | `packaging/arch/build.sh` | `.pkg.tar.zst` |
 
+### 🐳 With Docker or Podman
+
+No toolchain on the host? Build every package in a container:
+
+```bash
+docker/build.sh linux     # Ubuntu 24.04 image → AppImage, .tar.gz, .deb (glibc ≥ 2.38)
+docker/build.sh windows   # Arch + MinGW-w64 + Wine → setup.exe, portable zip
+docker/build.sh arch      # Arch → .pkg.tar.zst
+docker/build.sh all       # all of the above
+docker/build.sh shell     # a shell in the build environment
+```
+
 See **[docs/BUILDING.md](docs/BUILDING.md)** for other distros, the Windows toolchain and
-building for older glibc.
+the container details.
 
 ## ⚙️ Configuration
 

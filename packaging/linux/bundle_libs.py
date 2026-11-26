@@ -36,6 +36,10 @@ need = set()
 for f in [exe] + [os.path.join(libdir, b) for b in bundled]:
     syms = subprocess.run(["objdump", "-T", f], capture_output=True, text=True).stdout
     need.update(re.findall(r"GLIBC_([0-9.]+)", syms))
+# DT_RPATH, not DT_RUNPATH: only RPATH also covers the bundled libraries' own dependencies.
+dyn = subprocess.run(["readelf", "-d", exe], capture_output=True, text=True, check=True).stdout
+if "(RUNPATH)" in dyn or "$ORIGIN/../lib/overheat" not in dyn:
+    sys.exit("error: bin/overheat needs DT_RPATH $ORIGIN/../lib/overheat (build with OVERHEAT_PORTABLE=ON)")
 key = lambda v: tuple(int(x) for x in v.split("."))
 print("bundled %d libraries: %s" % (len(bundled), " ".join(sorted(bundled))))
 print("requires glibc >= %s" % max(need, key=key))

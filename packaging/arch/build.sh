@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 VER=$(sed -n 's/^project(overheat VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-WORK=build-arch
+WORK=${OVERHEAT_BUILD_DIR:-build-arch}
 rm -rf "$WORK" && mkdir -p "$WORK" dist
 git archive --format=tar.gz --prefix="overheat-$VER/" -o "$WORK/overheat-$VER.tar.gz" HEAD
 sed "s/^pkgver=.*/pkgver=$VER/" packaging/arch/PKGBUILD > "$WORK/PKGBUILD"

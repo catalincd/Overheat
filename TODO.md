@@ -51,8 +51,9 @@ the git log; keep this file short and current.
 Release builds: `packaging/windows/build.sh` (installer + portable zip),
 `packaging/linux/build.sh` (tarball, .deb, AppImage), `packaging/arch/build.sh`.
 
-- Portable Linux packages need glibc >= 2.43 when built on Arch; docs/BUILDING.md has a
-  container recipe for older distros (Ubuntu 24.04 / Debian 12)
+- Portable Linux packages need glibc >= 2.43 when built on Arch; `docker/build.sh linux`
+  builds them on Ubuntu 24.04 (glibc 2.39)
+- [ ] Verify the `docker/` build environments end to end and switch the release to them
 - [ ] Test on real Windows 10/11 hardware (verified under Wine only): HiDPI, IME, ConPTY resize
 - [ ] Windows: settings UI for the terminal shell (now `terminal_shell` in settings.toml)
 - [ ] Windows: Remote-SSH agent auth via Pageant / OpenSSH agent pipe

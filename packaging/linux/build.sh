@@ -8,8 +8,10 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 VER=$(sed -n 's/^project(overheat VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-BUILD=build-linux/release
-STAGE=build-linux/stage/overheat-$VER-linux-x86_64
+# OVERHEAT_BUILD_DIR moves the whole build tree (docker/build.sh uses build-docker/linux).
+B=${OVERHEAT_BUILD_DIR:-build-linux}
+BUILD=$B/release
+STAGE=$B/stage/overheat-$VER-linux-x86_64
 mkdir -p dist
 
 cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOVERHEAT_MARCH=x86-64-v2 \
@@ -20,8 +22,8 @@ cmake --build "$BUILD" -j"$(nproc)"
 rm -rf "$STAGE"
 DESTDIR="$ROOT/$STAGE.tmp" cmake --install "$BUILD" >/dev/null
 mv "$STAGE.tmp/usr" "$STAGE" && rm -rf "$STAGE.tmp"
-python3 -I packaging/linux/bundle_libs.py "$STAGE" | tee build-linux/bundle.txt
-GLIBC=$(sed -n 's/^requires glibc >= //p' build-linux/bundle.txt)
+python3 -I packaging/linux/bundle_libs.py "$STAGE" | tee $B/bundle.txt
+GLIBC=$(sed -n 's/^requires glibc >= //p' $B/bundle.txt)
 
 # ---- tarball ----
 cp packaging/linux/install.sh packaging/linux/uninstall.sh "$STAGE/"
@@ -29,7 +31,7 @@ cp LICENSE README.md "$STAGE/"
 tar -C "$(dirname "$STAGE")" -czf "dist/$(basename "$STAGE").tar.gz" "$(basename "$STAGE")"
 
 # ---- .deb (private libraries under /usr/lib/overheat) ----
-DEB=build-linux/deb
+DEB=$B/deb
 rm -rf "$DEB" && mkdir -p "$DEB/DEBIAN" "$DEB/usr"
 cp -a "$STAGE/bin" "$STAGE/lib" "$STAGE/share" "$DEB/usr/"
 mkdir -p "$DEB/usr/share/doc/overheat"
@@ -62,7 +64,7 @@ dpkg-deb --root-owner-group -Zxz --build "$DEB" "dist/overheat_${VER}_amd64.deb"
 
 # ---- AppImage ----
 if command -v appimagetool >/dev/null; then
-    APPDIR=build-linux/Overheat.AppDir
+    APPDIR=$B/Overheat.AppDir
     rm -rf "$APPDIR" && mkdir -p "$APPDIR"
     cp -a "$STAGE/bin" "$STAGE/lib" "$STAGE/share" "$APPDIR/" 2>/dev/null
     mkdir -p "$APPDIR/usr" && mv "$APPDIR/bin" "$APPDIR/lib" "$APPDIR/share" "$APPDIR/usr/"
