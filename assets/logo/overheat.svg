@@ -1,51 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1f2026"/>
-      <stop offset="1" stop-color="#111214"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.78" r="0.55">
-      <stop offset="0" stop-color="#ff7a1a" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#ff7a1a" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="outer" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="#ff2d1a"/>
-      <stop offset="0.55" stop-color="#ff6a00"/>
-      <stop offset="1" stop-color="#ffb13d"/>
-    </linearGradient>
-    <linearGradient id="middle" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="#ff8a00"/>
-      <stop offset="1" stop-color="#ffd54a"/>
-    </linearGradient>
-    <linearGradient id="core" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="#fff3c4"/>
-      <stop offset="1" stop-color="#ffe27a"/>
-    </linearGradient>
-  </defs>
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#tile)"/>
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#glow)"/>
-  <!-- outer flame -->
-  <path fill="url(#outer)" d="M256 64
-    C 284 128 360 160 372 246
-    C 382 318 344 404 256 420
-    C 168 404 130 318 140 246
-    C 146 204 170 176 190 154
-    C 192 190 204 214 226 226
-    C 214 170 228 112 256 64 Z"/>
-  <!-- middle flame -->
-  <path fill="url(#middle)" d="M262 176
-    C 284 220 330 244 330 300
-    C 330 352 298 388 256 392
-    C 214 388 184 352 186 306
-    C 188 276 202 258 218 244
-    C 220 270 232 286 250 292
-    C 240 252 246 210 262 176 Z"/>
-  <!-- core -->
-  <path fill="url(#core)" d="M258 270
-    C 274 296 298 312 296 342
-    C 294 368 276 384 256 386
-    C 236 384 220 368 220 346
-    C 220 326 232 312 244 304
-    C 246 320 252 328 262 332
-    C 254 312 252 290 258 270 Z"/>
+  <!-- Overheat: a faceted flame on a transparent background. Flat facets only, no
+       gradients or glow; light comes from the upper left, so left-facing planes use the
+       lighter tones and right-facing planes the darker ones. The PNGs at 16 and 24 px are
+       rendered from overheat-small.svg (same outline, fewer facets). See render.sh. -->
+  <g transform="translate(4 1)" stroke-width="1.5" stroke-linejoin="round">
+    <!-- back tongue, in shadow behind the front one -->
+    <polygon fill="#d42414" stroke="#d42414" points="148,138 110,300 150,296"/>
+    <polygon fill="#a8190d" stroke="#a8190d" points="148,138 150,296 200,236"/>
+    <polygon fill="#ff2d1a" stroke="#ff2d1a" points="110,300 176,410 150,296"/>
+    <polygon fill="#d42414" stroke="#d42414" points="150,296 176,410 168,268 200,236"/>
+    <!-- front tongue: lit upper-left planes, shaded right and lower planes -->
+    <polygon fill="#ffb13d" stroke="#ffb13d" points="300,36 218,150 276,270"/>
+    <polygon fill="#ff8a00" stroke="#ff8a00" points="218,150 168,268 276,270"/>
+    <polygon fill="#ff6a00" stroke="#ff6a00" points="300,36 276,270 354,150"/>
+    <polygon fill="#ff2d1a" stroke="#ff2d1a" points="354,150 276,270 394,276"/>
+    <polygon fill="#ff6a00" stroke="#ff6a00" points="168,268 176,410 264,400 276,270"/>
+    <polygon fill="#d42414" stroke="#d42414" points="276,270 264,400 364,398 394,276"/>
+    <polygon fill="#ff2d1a" stroke="#ff2d1a" points="176,410 262,474 264,400"/>
+    <polygon fill="#a8190d" stroke="#a8190d" points="264,400 262,474 364,398"/>
+    <!-- core gem -->
+    <polygon fill="#fff3c4" stroke="#fff3c4" points="277,218 224,338 268,348"/>
+    <polygon fill="#ffd54a" stroke="#ffd54a" points="277,218 268,348 316,330"/>
+    <polygon fill="#ffe27a" stroke="#ffe27a" points="224,338 262,436 268,348"/>
+    <polygon fill="#ffb13d" stroke="#ffb13d" points="268,348 262,436 316,330"/>
+  </g>
 </svg>
