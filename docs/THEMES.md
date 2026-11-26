@@ -23,7 +23,7 @@ each theme straight away, and `Escape` goes back to the theme you had before.
 | Catppuccin Mocha | dark | Catppuccin | [catppuccin/vscode](https://github.com/catppuccin/vscode), [catppuccin/palette](https://github.com/catppuccin/palette) | MIT |
 | Catppuccin Latte | light | Catppuccin | [catppuccin/vscode](https://github.com/catppuccin/vscode), [catppuccin/palette](https://github.com/catppuccin/palette) | MIT |
 | Tokyo Night | dark | Tokyo Night | [enkia/tokyo-night-vscode-theme](https://github.com/enkia/tokyo-night-vscode-theme) | MIT |
-| Gruvbox Dark | dark | Gruvbox Theme (medium contrast), after morhetz/gruvbox | [jdinhify/vscode-theme-gruvbox](https://github.com/jdinhify/vscode-theme-gruvbox) | MIT |
+| Gruvbox Dark | dark | the "Gruvbox Material" palette used by the popular Sublime Text port | [sainnhe/gruvbox-material](https://github.com/sainnhe/gruvbox-material) (after morhetz/gruvbox) | MIT |
 | Gruvbox Dark Hard | dark | Gruvbox Dark with the `dark0_hard` background | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
 | Gruvbox Dark Soft | dark | Gruvbox Dark with the `dark0_soft` background | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
 | Gruvbox Light | light | light palette with the "faded" accents, as in `colors/gruvbox.vim` | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
@@ -77,3 +77,5 @@ order: `ui.foreground_muted`, `diagnostic.warning`, `diagnostic.warning`, `gutte
 `editor.foreground`, `syntax.keyword`, `syntax.keyword`, `syntax.type` and `editor.foreground`.
 Older theme files therefore keep their look. A theme with `dark = false` and no `base` starts from
 Overheat Light.
+
+**Cyberpunk Neon** is an original Overheat theme (dark violet base with magenta, cyan and yellow neon).
