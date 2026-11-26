@@ -92,8 +92,10 @@ private:
             default: return file_tree_;
         }
     }
-    std::future<std::vector<SearchHit>> search_job_;
-    std::shared_ptr<std::atomic<bool>> search_cancel_;
+    std::future<void> search_job_;
+    std::shared_ptr<SearchStream> search_stream_;
+    void poll_search();
+    void cancel_search();
     void setup_search();
     void run_search(const SearchQuery& q);
     std::vector<SearchHit> search_remote(const SearchQuery& q);

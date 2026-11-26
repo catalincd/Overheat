@@ -14,24 +14,34 @@ std::string shell_quote(const std::string& s) {
 } // namespace
 
 std::vector<SearchHit> App::search_remote(const SearchQuery& q) {
-    std::string cmd = "grep -rnI --exclude-dir=.git -m 500 -F";
+    // Same exclusions and limits as local search: skip binaries (-I), VCS and build
+    // output folders, cap matches per file and in total, and cut very long lines so a
+    // minified file cannot flood the SSH channel.
+    std::string cmd = "grep -rnI -m 500 -F";
+    for (const char* d : {".git", ".hg", ".svn", "node_modules", "__pycache__", "build", "dist", "target", "out",
+                          ".cache", ".venv"})
+        cmd += std::string(" --exclude-dir=") + d;
     if (!q.case_sensitive) cmd += " -i";
     if (q.whole_word) cmd += " -w";
     cmd += " -e " + shell_quote(q.text) + " -- " + shell_quote(project_root_.generic_string()) +
-           " 2>/dev/null | head -n 20000";
+           " 2>/dev/null | head -n " + std::to_string(SEARCH_MAX_RESULTS + 1) + " | cut -b 1-8192";
     std::vector<SearchHit> hits;
     std::string out = ssh_.exec(cmd).stdout_data;
     size_t start = 0;
-    while (start < out.size()) {
+    while (start < out.size() && hits.size() <= SEARCH_MAX_RESULTS) {
         size_t nl = out.find('\n', start);
-        std::string row = out.substr(start, (nl == std::string::npos ? out.size() : nl) - start);
+        std::string_view row(out.data() + start, (nl == std::string::npos ? out.size() : nl) - start);
         start = nl == std::string::npos ? out.size() : nl + 1;
         size_t c1 = row.find(':'), c2 = c1 == std::string::npos ? c1 : row.find(':', c1 + 1);
         if (c2 == std::string::npos) continue;
-        std::string text = row.substr(c2 + 1);
-        size_t line = static_cast<size_t>(std::strtoul(row.c_str() + c1 + 1, nullptr, 10));
-        for (auto [col, len] : find_in_line(text, q))
-            hits.push_back({fs::path(row.substr(0, c1)), line ? line - 1 : 0, col, len, text.substr(0, 400)});
+        std::string_view text = row.substr(c2 + 1);
+        fs::path file(std::string(row.substr(0, c1)));
+        size_t line = static_cast<size_t>(std::strtoul(std::string(row.substr(c1 + 1, c2 - c1 - 1)).c_str(), nullptr, 10));
+        line = line ? line - 1 : 0;
+        auto matches = find_in_line(text, q);
+        // The match may lie past the cut; still list the line.
+        if (matches.empty()) hits.push_back(make_search_hit(file, line, text, 0, 0));
+        for (auto [col, len] : matches) hits.push_back(make_search_hit(file, line, text, col, len));
     }
     return hits;
 }
