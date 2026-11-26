@@ -281,6 +281,12 @@ bool LSPClient::start(const std::string& command, const std::vector<std::string>
         held_.clear();
         hold_until_initialized_ = false;
     }
+    {
+        std::lock_guard<std::mutex> lock(nav_mutex_);  // a new server has new capabilities
+        server_caps_.clear();
+        provider_cache_.clear();
+        progress_.clear();
+    }
     open_docs_.clear();  // a fresh server has nothing open yet
     versions_.clear();
 
@@ -303,6 +309,7 @@ void LSPClient::stop() {
     // A server that exited by itself (EOF sets running_ = false) still has threads
     // to join; the writer sleeps on outbox_cv_ until it is woken here.
     if (!running_ && !writer_thread_.joinable() && !reader_thread_.joinable() && !process_) return;
+    stopping_ = true;  // the reader's EOF is ours: don't fail pending requests (client_nav.cpp)
     {
         std::lock_guard<std::mutex> lock(outbox_mutex_);
         running_ = false;
@@ -321,6 +328,7 @@ void LSPClient::stop() {
     // Clear pending requests
     std::lock_guard<std::mutex> lock(pending_mutex_);
     pending_requests_.clear();
+    stopping_ = false;
 }
 
 void LSPClient::send_message(const std::string& json) {
@@ -361,8 +369,8 @@ void LSPClient::writer_loop() {
     }
 }
 
-void LSPClient::send_request(const std::string& method, const std::string& params,
-                             std::function<void(const std::string&)> callback) {
+int LSPClient::send_request(const std::string& method, const std::string& params,
+                            std::function<void(const std::string&)> callback) {
     int id;
     {
         std::lock_guard<std::mutex> lock(pending_mutex_);
@@ -375,6 +383,7 @@ void LSPClient::send_request(const std::string& method, const std::string& param
     std::string json = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
                        ",\"method\":\"" + method + "\",\"params\":" + params + "}";
     send_message(json);
+    return id;
 }
 
 void LSPClient::send_notification(const std::string& method, const std::string& params) {
@@ -415,6 +424,7 @@ void LSPClient::reader_loop() {
             char c;
             if (!read_byte(c)) {
                 running_ = false;
+                fail_pending();  // server exited: answer what it never will
                 return;
             }
             headers += c;
@@ -456,6 +466,7 @@ void LSPClient::reader_loop() {
             long n = read_bytes(&body[total_read], static_cast<size_t>(content_length) - total_read);
             if (n <= 0) {
                 running_ = false;
+                fail_pending();  // server exited: answer what it never will
                 return;
             }
             total_read += static_cast<size_t>(n);
@@ -496,6 +507,7 @@ void LSPClient::handle_message(const std::string& json) {
     } else if (has_method) {
         // It's a notification or server request
         std::string method = find_string_value(json, "method");
+        if (method != "textDocument/publishDiagnostics" && handle_server_message(method, json)) return;
         if (method == "textDocument/publishDiagnostics") {
             if (!on_diagnostics_) return;
 
@@ -546,10 +558,18 @@ void LSPClient::initialize(const fs::path& root_uri) {
                 "\"synchronization\":{\"didSave\":true,\"didOpen\":true,\"didClose\":true},"
                 "\"publishDiagnostics\":{},"
                 "\"completion\":{\"completionItem\":{\"snippetSupport\":false}},"
-                "\"hover\":{},"
+                "\"hover\":{\"contentFormat\":[\"markdown\",\"plaintext\"]},"
                 "\"definition\":{},"
-                "\"references\":{}"
-            "}"
+                "\"references\":{},"
+                // Navigation requests (client_nav.cpp).
+                "\"declaration\":{},\"typeDefinition\":{},\"implementation\":{},"
+                "\"documentSymbol\":{\"hierarchicalDocumentSymbolSupport\":true},"
+                "\"rename\":{\"prepareSupport\":true},"
+                "\"inlayHint\":{}"
+            "},"
+            "\"workspace\":{\"symbol\":{},\"workspaceEdit\":{\"documentChanges\":true},"
+                "\"inlayHint\":{\"refreshSupport\":true}},"
+            "\"window\":{\"workDoneProgress\":true}"
         "}}";
 
     {
@@ -559,6 +579,11 @@ void LSPClient::initialize(const fs::path& root_uri) {
     send_request("initialize", params, [this](const std::string& response) {
         // LSP 3.17 position encoding negotiation; servers that ignore it use UTF-16.
         utf8_positions_ = find_string_value(response, "positionEncoding") == "utf-8";
+        {
+            std::lock_guard<std::mutex> lock(nav_mutex_);
+            server_caps_ = response;
+            provider_cache_.clear();
+        }
         send_notification("initialized", "{}");
         ready_ = true;
         request_redraw();

@@ -220,6 +220,23 @@ private:
     void lsp_goto_definition();
     size_t lsp_col_to_byte(const fs::path& path, size_t line, size_t col);
     Position lsp_position(Editor& ed);
+
+    // LSP navigation (nav_glue.cpp): hover, Ctrl+click, peek definition/references,
+    // rename, symbol pickers, switch header/source, inlay hints, back/forward history.
+    struct NavState;
+    struct NavStateDeleter { void operator()(NavState* s) const; };
+    std::unique_ptr<NavState, NavStateDeleter> nav_;
+    void setup_nav();
+    bool nav_command(const std::string& cmd);     // true when handled
+    bool nav_key(SDL_Keycode key, KeyMod mods);   // popups and the peek view first
+    void nav_key_up(SDL_Keycode key);
+    bool nav_text(const std::string& text);
+    bool nav_mouse(const SDL_Event& e);           // true when consumed
+    void nav_update();
+    void nav_render_editor(RenderContext& ctx);   // the peek view in the editor's zone
+    void nav_render_popups(RenderContext& ctx, Rect window);
+    void nav_probe();
+    float nav_peek_height();
     PluginManager plugins_;
 
     // Workspaces (workspace.cpp). Never opened on their own: only from the

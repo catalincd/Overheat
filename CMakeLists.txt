@@ -118,6 +118,10 @@ set(OVERHEAT_SOURCES
     src/ui/find_bar.cpp
     src/ui/search_panel.cpp
     src/ui/completion_popup.cpp
+    src/ui/markdown.cpp
+    src/ui/hover_popup.cpp
+    src/ui/peek_view.cpp
+    src/ui/rename_box.cpp
     src/ui/settings_page.cpp
     src/ui/chat_panel.cpp
     src/llm.cpp
@@ -126,6 +130,9 @@ set(OVERHEAT_SOURCES
     src/ssh/session.cpp
     src/ssh/ssh_config.cpp
     src/lsp/client.cpp
+    src/lsp/client_nav.cpp
+    src/lsp/json.cpp
+    src/lsp/workspace_edit.cpp
     src/plugin/api.cpp
     src/keys.cpp
     src/script.cpp
@@ -140,6 +147,8 @@ set(OVERHEAT_SOURCES
     src/workspace_store.cpp
     src/lsp_glue.cpp
     src/status_glue.cpp
+    src/nav_glue.cpp
+    src/nav_history.cpp
     src/platform/platform_posix.cpp
     src/platform/platform_win.cpp
 )
@@ -260,6 +269,13 @@ add_executable(workspace_test tests/workspace_test.cpp src/workspace_store.cpp)
 target_include_directories(workspace_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(workspace_test PRIVATE PkgConfig::FREETYPE)
 add_test(NAME workspace_test COMMAND workspace_test ${CMAKE_BINARY_DIR}/workspace_test_dir)
+
+add_executable(nav_test tests/nav_test.cpp src/ui/markdown.cpp src/lsp/json.cpp src/lsp/workspace_edit.cpp
+                        src/nav_history.cpp)
+target_include_directories(nav_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(nav_test PRIVATE -fsanitize=address,undefined)
+target_link_options(nav_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME nav_test COMMAND nav_test)
 
 add_executable(file_icon_test tests/file_icon_test.cpp src/ui/file_icon_map.cpp)
 target_include_directories(file_icon_test PRIVATE ${CMAKE_SOURCE_DIR}/src)

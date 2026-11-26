@@ -167,6 +167,7 @@ bool App::init(int argc, char** argv) {
     register_commands();
     load_keymap();
     setup_status_bar();
+    setup_nav();
     refresh_command_keys();
 
     // ---- Git ----
@@ -404,6 +405,7 @@ void App::emit_probe(const std::string& label) {
             std::fprintf(stderr, "  selections=%s\n", all.c_str());
         }
     }
+    nav_probe();
 }
 
 void App::quit() {
@@ -476,6 +478,7 @@ void App::handle_event(const SDL_Event& e) {
             settings_page_.handle_key(ke);
             break;
         }
+        if (nav_key(kc, mods)) break;  // rename box, hover, peek view (nav_glue.cpp)
         // Sidebar text inputs (commit message, search) take typing keys before global bindings.
         if (sidebar_visible_ && !command_palette_.is_visible()) {
             KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
@@ -539,6 +542,7 @@ void App::handle_event(const SDL_Event& e) {
     }
 
     case SDL_EVENT_KEY_UP: {
+        nav_key_up(e.key.key);
         // The Ctrl+Tab switcher commits when Ctrl is released.
         if (switcher_open_ && (e.key.key == SDLK_LCTRL || e.key.key == SDLK_RCTRL)) {
             if (command_palette_.is_visible()) command_palette_.accept();
@@ -560,6 +564,7 @@ void App::handle_event(const SDL_Event& e) {
             chord_eat_text_ = false;
         } else if (command_palette_.is_visible()) {
             command_palette_.handle_text(text);
+        } else if (nav_text(text)) {
         } else if (scm_.input_focused()) {
             scm_.handle_text(text);
         } else if (search_.input_focused()) {
@@ -601,6 +606,7 @@ void App::handle_event(const SDL_Event& e) {
             if (monitor_bar_.detail_rect().contains(mx, my)) break;
             if (!layout.monitor.contains(mx, my)) monitor_bar_.set_detail(false);
         }
+        if (nav_mouse(e)) break;  // hover popup, peek view, Ctrl+click (nav_glue.cpp)
         if (command_palette_.is_visible()) {
             command_palette_.handle_mouse(me);
         } else if (settings_page_.visible()) {
@@ -639,6 +645,7 @@ void App::handle_event(const SDL_Event& e) {
     }
 
     case SDL_EVENT_MOUSE_BUTTON_UP: {
+        nav_mouse(e);
         if (splitter_drag_ == Splitter::Groups) {
             splitter_drag_ = Splitter::None;
             break;
@@ -673,6 +680,7 @@ void App::handle_event(const SDL_Event& e) {
             settings_page_.handle_mouse(me);
             break;
         }
+        if (nav_mouse(e)) break;
         if ((SDL_GetModState() & SDL_KMOD_CTRL) && layout.editor.contains(mx, my)) {
             set_font_size(font_size_ + (e.wheel.y > 0 ? 1.0f : -1.0f));
             break;
@@ -702,6 +710,7 @@ void App::handle_event(const SDL_Event& e) {
             request_redraw();
             break;
         }
+        nav_mouse(e);  // hover dwell, Ctrl+hover links
         if (!(e.motion.state & SDL_BUTTON_LMASK) && !command_palette_.is_visible()) {
             Splitter s = splitter_at(e.motion.x, e.motion.y);
             if (s != splitter_hover_) {
@@ -729,6 +738,7 @@ void App::handle_event(const SDL_Event& e) {
 
 void App::handle_command(const std::string& cmd) {
     if (status_command(cmd)) return;  // status bar / Command Center commands (status_glue.cpp)
+    if (nav_command(cmd)) return;     // LSP navigation (nav_glue.cpp)
     if (cmd.rfind("workspace_", 0) == 0 || cmd == "open_folder") {
         workspace_command(cmd);
     } else if (cmd == "save") {
@@ -1247,6 +1257,7 @@ void App::update(float dt) {
     auto ed = tab_bar_.active_editor();
     status_bar_.set_editor(ed);
     editor_view_.set_editor(ed);
+    nav_update();
     update_status_bar();
 }
 
@@ -1289,6 +1300,7 @@ void App::render() {
     render_breadcrumbs(ctx, layout.breadcrumbs, current_editor());
     renderer_.pop_clip();
     clipped(editor_view_, layout.editor);
+    nav_render_editor(ctx);
     renderer_.push_clip(layout.editor);
     render_welcome(ctx, layout.editor);
     renderer_.pop_clip();
@@ -1338,6 +1350,7 @@ void App::render() {
     renderer_.set_popup(true);  // opaque on a translucent window (opaque_popups)
     if (layout.monitor.h > 0)
         monitor_bar_.render_detail(ctx, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
+    nav_render_popups(ctx, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (settings_page_.visible())
         clipped(settings_page_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (command_palette_.is_visible())

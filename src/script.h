@@ -10,6 +10,7 @@ namespace oh {
 // Replays a test script by injecting SDL events into the app's own queue.
 //   wait MS | click X Y | dclick X Y | drag X1 Y1 X2 Y2 | scroll X Y DY
 //   key COMBO (e.g. ctrl+shift+p, Down, Return) | type TEXT | probe LABEL | quit
+//   move X Y (pointer motion, no button) | mods ctrl|shift|alt|none (held for later steps)
 class ScriptRunner {
 public:
     bool load(const fs::path& path, SDL_Window* window);

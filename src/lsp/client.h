@@ -37,6 +37,40 @@ struct LSPLocation {
     Position pos;
 };
 
+// --- Navigation types (requests in lsp/client_nav.cpp) ---
+struct LSPRangeLoc {  // a Location / LocationLink target with its range
+    fs::path path;
+    Position start{}, end{};
+};
+
+struct LSPSymbol {  // DocumentSymbol (flattened, depth-first) or WorkspaceSymbol
+    std::string name, detail, container;
+    int kind = 0;  // LSP SymbolKind
+    fs::path path;
+    Position start{}, end{};  // whole range
+    Position sel{};           // selectionRange start (the name)
+    int depth = 0;
+};
+
+struct LSPInlayHint {
+    Position pos{};
+    std::string label;
+    int kind = 0;  // 1 = type, 2 = parameter
+    bool pad_left = false, pad_right = false;
+    int cells = 0;  // display width incl. padding (filled in by the UI)
+};
+
+struct LSPPrepareRename {
+    bool ok = false;
+    bool use_word = false;  // server only said "default behavior": rename the word at the cursor
+    Position start{}, end{};
+    std::string placeholder;
+    std::string error;
+};
+
+struct LSPWorkspaceEdit;
+namespace json { struct Value; }
+
 class LSPClient {
 public:
     LSPClient();
@@ -72,6 +106,37 @@ public:
     using ReferencesCallback = std::function<void(std::vector<LSPLocation>)>;
     void references(const fs::path& path, Position pos, ReferencesCallback cb);
 
+    // --- Navigation (lsp/client_nav.cpp) ---
+    // Every request returns its id (0 when no server runs) for cancel(). Callbacks run
+    // on the reader thread, also with an empty result when the request failed or the
+    // server exited, so callers never wait forever.
+    void cancel(int id);
+    int hover_markdown(const fs::path& path, Position pos, HoverCallback cb);
+    using LocationsCallback = std::function<void(std::vector<LSPRangeLoc>)>;
+    // method: textDocument/definition, declaration, typeDefinition, implementation, references
+    int locations(const std::string& method, const fs::path& path, Position pos, LocationsCallback cb);
+    int prepare_rename(const fs::path& path, Position pos, std::function<void(LSPPrepareRename)> cb);
+    using RenameCallback = std::function<void(std::optional<LSPWorkspaceEdit>, std::string error)>;
+    int rename(const fs::path& path, Position pos, const std::string& new_name, RenameCallback cb);
+    using SymbolsCallback = std::function<void(std::vector<LSPSymbol>)>;
+    int document_symbols(const fs::path& path, SymbolsCallback cb);
+    int workspace_symbols(const std::string& query, SymbolsCallback cb);
+    int switch_source_header(const fs::path& path, std::function<void(std::optional<fs::path>)> cb);
+    using InlayCallback = std::function<void(std::vector<LSPInlayHint>, bool ok)>;
+    int inlay_hints(const fs::path& path, Position start, Position end, InlayCallback cb);
+    // Files changed on disk behind the server's back (rename into unopened files).
+    void did_change_watched_files(const std::vector<fs::path>& paths);
+    // From the initialize result, e.g. has_provider("renameProvider").
+    bool has_provider(const std::string& name) const;
+    // Work-done progress ($/progress), e.g. "rust-analyzer: Indexing 12/40"; "" when idle.
+    std::string progress() const;
+    // Bumped when a progress ends or the server asks to refresh inlay hints.
+    uint64_t refresh_epoch() const { return refresh_epoch_; }
+    // Generic request: `cb` gets the whole response (Null if the server went away).
+    int request(const std::string& method, const std::string& params,
+                std::function<void(const json::Value& response)> cb);
+    std::string text_document_position(const fs::path& path, Position pos) const;
+
     // Diagnostics
     using DiagnosticsCallback = std::function<void(const fs::path&, std::vector<LSPDiagnostic>)>;
     void set_on_diagnostics(DiagnosticsCallback cb) { on_diagnostics_ = cb; }
@@ -103,8 +168,19 @@ private:
     std::unordered_map<std::string, int> versions_;  // document versions (UI thread only)
     std::unordered_set<std::string> open_docs_;
 
+    // Navigation state (client_nav.cpp).
+    mutable std::mutex nav_mutex_;
+    std::string server_caps_;  // raw initialize result
+    mutable std::unordered_map<std::string, bool> provider_cache_;  // has_provider() answers
+    std::unordered_map<std::string, std::string> progress_;  // token -> "title: message"
+    std::atomic<uint64_t> refresh_epoch_{0};
+    std::atomic<bool> stopping_{false};
+    // Server -> client requests and notifications besides diagnostics; true if handled.
+    bool handle_server_message(const std::string& method, const std::string& json);
+    void fail_pending();
+
     void send_message(const std::string& json);
-    void send_request(const std::string& method, const std::string& params,
+    int send_request(const std::string& method, const std::string& params,
                       std::function<void(const std::string&)> callback = {});
     void send_notification(const std::string& method, const std::string& params);
     void reader_loop();

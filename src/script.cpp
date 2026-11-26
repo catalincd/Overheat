@@ -127,6 +127,20 @@ std::vector<std::string> ScriptRunner::step(TimePoint now) {
             e.wheel.mouse_x = x;
             e.wheel.mouse_y = y;
             SDL_PushEvent(&e);
+        } else if (cmd == "move") {  // pointer motion without buttons (hover dwell)
+            float x, y;
+            ss >> x >> y;
+            push_motion(x, y, false);
+        } else if (cmd == "mods") {  // held modifiers for later clicks/motion: ctrl, shift, alt, none
+            std::string m;
+            SDL_Keymod mod = SDL_KMOD_NONE;
+            while (ss >> m) {
+                for (auto& c : m) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (m == "ctrl") mod |= SDL_KMOD_LCTRL;
+                else if (m == "shift") mod |= SDL_KMOD_LSHIFT;
+                else if (m == "alt") mod |= SDL_KMOD_LALT;
+            }
+            SDL_SetModState(mod);
         } else if (cmd == "key") {
             std::string combo;
             ss >> combo;
