@@ -90,6 +90,8 @@ private:
     std::mutex outbox_mutex_;
     std::condition_variable outbox_cv_;
     std::vector<std::string> outbox_;
+    bool hold_until_initialized_ = false;  // queue into held_ until `initialized` is sent
+    std::vector<std::string> held_;
     void writer_loop();
 
     int next_id_ = 1;

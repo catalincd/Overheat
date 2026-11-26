@@ -276,6 +276,11 @@ bool LSPClient::start(const std::string& command, const std::vector<std::string>
     if (running_) return false;
     stop();  // reap a server that exited by itself; assigning over live threads would terminate
     ready_ = false;
+    {
+        std::lock_guard<std::mutex> lock(outbox_mutex_);
+        held_.clear();
+        hold_until_initialized_ = false;
+    }
     open_docs_.clear();  // a fresh server has nothing open yet
     versions_.clear();
 
@@ -324,7 +329,19 @@ void LSPClient::send_message(const std::string& json) {
     {
         std::lock_guard<std::mutex> lock(outbox_mutex_);
         if (!running_) return;
+        // Until `initialized` is sent, only initialize/initialized may go out: strict
+        // servers (rust-analyzer) exit when a didOpen arrives before `initialized`.
+        bool init_msg = json.find("\"method\":\"initialize") < 48;
+        if (hold_until_initialized_ && !init_msg) {
+            held_.push_back(std::move(message));
+            return;
+        }
         outbox_.push_back(std::move(message));
+        if (init_msg && json.find("\"method\":\"initialized\"") != std::string::npos) {
+            hold_until_initialized_ = false;
+            for (auto& m : held_) outbox_.push_back(std::move(m));
+            held_.clear();
+        }
     }
     outbox_cv_.notify_one();
 }
@@ -535,6 +552,10 @@ void LSPClient::initialize(const fs::path& root_uri) {
             "}"
         "}}";
 
+    {
+        std::lock_guard<std::mutex> lock(outbox_mutex_);
+        hold_until_initialized_ = true;
+    }
     send_request("initialize", params, [this](const std::string& response) {
         // LSP 3.17 position encoding negotiation; servers that ignore it use UTF-16.
         utf8_positions_ = find_string_value(response, "positionEncoding") == "utf-8";
