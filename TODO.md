@@ -24,12 +24,18 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
 - [ ] **Linting:** clang-tidy through clangd (`.clang-tidy`), `cargo clippy` as a task
   with its own matcher, quick fixes / code actions (Ctrl+.) from both, and format on save
   with clang-format / rustfmt (via the LSP).
-- [ ] **LSP navigation:** hover tooltips with a small markdown renderer; Ctrl+click and
-  hover-underline go-to-definition; Peek Definition (Alt+F12); Go to Declaration / Type
-  Definition / Implementation; Find All References with a peek view; rename (F2) with a
-  preview; document symbols (Ctrl+Shift+O) and workspace symbols (Ctrl+T); clangd's
-  switch header/source (Alt+O); inlay hints (parameter names, types) for rust-analyzer
-  and clangd; back/forward navigation history (Ctrl+Alt+- / Ctrl+Shift+-).
+- [ ] **LSP navigation follow-ups** (hover, Ctrl+click, peek, references, rename, symbols,
+  switch header/source, inlay hints and history are in; see nav_glue.cpp):
+  - one language server at a time: a C++ file and a Rust file in one session don't both
+    get a server. Run one client per language family (and per Cargo workspace)
+  - rename preview (a diff of the WorkspaceEdit before applying), and file renames from
+    `documentChanges` (create/rename/delete are skipped and counted today)
+  - the peek preview is read-only; make it an editable view of the real buffer
+  - inlay hints are off while word wrap is on; hint tooltips / click-through are not done
+  - symbol pickers: `@:` grouping by kind, and workspace symbols across both servers
+  - hover over the peek preview, and links in hover markdown (shown, not clickable)
+  - move the QA scripts and sample projects (now in /tmp during development) to
+    `tests/projects/` with the build-task and debugger items
 - [ ] **Debugger (DAP):**
   - launch and attach configurations: the CMake target or Cargo binary, args, env,
     cwd; `.vscode/launch.json` import
@@ -120,12 +126,8 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
     clang-tidy through clangd (`.clang-tidy`), external linters per language (ruff,
     eslint, shellcheck…) run on save with problem matchers, quick fixes / code actions
     (Ctrl+.), and a Problems panel listing all diagnostics with severity filters.
-  - **Go to definition:** F12 exists. Add Ctrl+click and hover underline on symbols,
-    Peek Definition (Alt+F12) inline, Go to Declaration / Type Definition /
-    Implementation, a picker when there are several results, and back/forward
-    navigation history. Alt+Left/Right in the `vscode` keymap preset; the default preset
-    uses Alt+Left/Right for subword motion, so bind VS Code's Linux keys there
-    (Ctrl+Alt+- back, Ctrl+Shift+- forward). It must work for remote files too.
+  - **Go to definition over Remote-SSH:** navigation works with local language servers;
+    remote files need the servers on the host (see Remote below).
 
 ## Follow-ups from the 2026-11-26 batch
 

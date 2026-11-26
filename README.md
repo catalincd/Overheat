@@ -69,7 +69,11 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 
 ### 🧠 Code intelligence
 - tree-sitter highlighting (C, C++, Rust)
-- Language Server Protocol: diagnostics, completion, go to definition
+- Language Server Protocol (clangd, rust-analyzer): diagnostics, completion
+- Hover tooltips with markdown and highlighted code; Ctrl+click go to definition
+- Peek definition and Find All References inline; declaration, type definition, implementations
+- Rename across files, document / workspace symbols, switch header/source, inlay hints
+- Back / forward navigation history
 - Breadcrumbs with the enclosing class and function
 - Minimap with a viewport you can drag
 - Squiggly underlines drawn by the shader
@@ -171,8 +175,8 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | Switch editor (recent) | <kbd>Ctrl</kbd>+<kbd>Tab</kbd> | Move line up / down | <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> |
 | Next / previous tab | <kbd>Ctrl</kbd>+<kbd>PgDn</kbd> / <kbd>PgUp</kbd> | Duplicate line | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> |
 | Go to line | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Delete line | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> |
-| Go to definition | <kbd>F12</kbd> | Toggle comment | <kbd>Ctrl</kbd>+<kbd>/</kbd> |
-| Next problem | <kbd>F8</kbd> | | |
+| Go to definition | <kbd>F12</kbd> or <kbd>Ctrl</kbd>+click | Toggle comment | <kbd>Ctrl</kbd>+<kbd>/</kbd> |
+| Next problem | <kbd>F8</kbd> | Rename symbol | <kbd>F2</kbd> |
 | Find / Replace | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Select line | <kbd>Ctrl</kbd>+<kbd>L</kbd> |
 | Find in files | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Trigger suggestions | <kbd>Ctrl</kbd>+<kbd>Space</kbd> |
 | Save / Save As | <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Undo / Redo | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> |
@@ -185,6 +189,18 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | Source Control | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Zoom in / out / reset | <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd> |
 | AI chat | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd> | Color theme | <kbd>Ctrl</kbd>+<kbd>K</kbd> <kbd>Ctrl</kbd>+<kbd>T</kbd> |
 | Settings | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Fullscreen | <kbd>F11</kbd> |
+
+| Code navigation (language server) | | | |
+|---|---|---|---|
+| Peek definition | <kbd>Alt</kbd>+<kbd>F12</kbd> | Show hover | <kbd>Ctrl</kbd>+<kbd>K</kbd> <kbd>Ctrl</kbd>+<kbd>I</kbd> (or rest the mouse) |
+| Find all references (peek) | <kbd>Shift</kbd>+<kbd>F12</kbd> | Go to symbol in editor | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> |
+| Go to implementations | <kbd>Ctrl</kbd>+<kbd>F12</kbd> | Go to symbol in workspace | <kbd>Ctrl</kbd>+<kbd>T</kbd> |
+| Go back / forward | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>-</kbd> | Switch header/source (C/C++) | <kbd>Alt</kbd>+<kbd>O</kbd> |
+
+In the peek view, <kbd>↑</kbd> / <kbd>↓</kbd> pick a location, <kbd>Enter</kbd> or a double click opens it
+and <kbd>Esc</kbd> closes it. *Go to Declaration*, *Go to Type Definition* and *View: Toggle Inlay
+Hints* are in the Command Palette. The `"vscode"` preset also binds Go back / forward to
+<kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> (the Overheat preset uses those for subword motion).
 
 Cursor motion follows the **keymap preset** (`keymap` in `settings.toml`, or *Keymap* in Settings).
 Add <kbd>Shift</kbd> to any motion to extend the selection; every cursor moves on its own.
@@ -260,6 +276,7 @@ cursor_vfx = "none"                  # railgun | torpedo | pixiedust | sonicboom
 scroll_animation_ms = 250            # smooth-scroll spring; 0 = instant
 wobbly = false                       # elastic pop for the palette and settings page
 keymap = "overheat"                  # or "vscode": Ctrl+arrows move by VS Code words
+inlay_hints = "auto"                 # auto (Rust only) | true (also C/C++) | false
 file_icons = "overheat"              # "overheat" | "minimal" | "none"
 bracket_colors = true                # ( [ { coloured by nesting depth
 scope_highlight = true               # tint the { } scopes around the cursor
@@ -344,8 +361,20 @@ word_wrap = true    # also: font_family, font_size, minimap, breadcrumbs, ligatu
 
 - **Key bindings:** use the shortcut editor in Settings, or edit `keybindings.json`
   (`{"Ctrl+Alt+T": "toggle_terminal"}`).
-- **Language servers:** C and C++ use `clangd`, Rust uses `rust-analyzer`, from your `PATH`. Give clangd a
-  `compile_commands.json` (`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`) for accurate results.
+- **Language servers:** C and C++ use `clangd`, Rust uses `rust-analyzer`, from your `PATH`. One
+  server runs at a time, started by the first C/C++ or Rust file you open.
+  - clangd needs a `compile_commands.json` for accurate results. With CMake, configure with
+    `cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (or `set(CMAKE_EXPORT_COMPILE_COMMANDS ON)`).
+    clangd finds it in the project folder or `build/`; another build folder directly under the
+    project (`build-release/`, `cmake-build-debug/`) is passed with `--compile-commands-dir`.
+  - rust-analyzer starts in the folder of the `Cargo.toml` (the project folder if it has one, else
+    the nearest one above the file). Its indexing progress shows in the status bar; navigation
+    answers get complete once it finishes.
+  - Inlay hints (parameter names, deduced types) are on for Rust and off for C/C++ by default:
+    clangd's parameter hints make short call-heavy C++ lines much wider. *View: Toggle Inlay Hints*
+    flips the `inlay_hints` setting.
+  - Rename edits open files in place (one undo step each) and rewrites files that are not open on
+    disk (written to a temporary file, then renamed over the original); the status bar sums it up.
 - **AI chat (draft):** choose a backend with *AI: Select Backend*. Any OpenAI-compatible
   `/v1/chat/completions` endpoint works. API keys are read from the `OVERHEAT_LLM_API_KEY`
   environment variable and are never written to disk.
