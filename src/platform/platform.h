@@ -67,6 +67,11 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// One local system-monitor sample in sysmon's `@@section` format. POSIX runs
+// `sh_script` with /bin/sh; Windows builds the sections from Win32 calls (CPU,
+// memory, uptime, fixed drives; no network or processes).
+std::string local_system_sample(const std::string& sh_script, const std::string& folder, bool detail);
+
 // Shared libraries (plugins).
 void* load_library(const fs::path& path);
 void* find_symbol(void* lib, const char* name);

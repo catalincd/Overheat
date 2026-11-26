@@ -186,6 +186,44 @@ void App::open_remote_folder(const fs::path& path) {
     update_window_title();
 }
 
+// Starts, retargets or stops the system monitor to match the current state, and
+// hands its latest snapshot to the strip. Cheap enough to run every frame.
+void App::update_monitor() {
+    std::string key;
+    if (remote_active_ && ssh_.is_connected() && remote_monitor_) key = "ssh:" + remote_target_.display();
+    else if (!remote_active_ && local_monitor_) key = "local";
+    std::string folder = project_root_.generic_string();
+    if (key != monitor_key_) {
+        monitor_.stop();
+        monitor_bar_.clear();
+        monitor_key_ = key;
+        monitor_folder_ = folder;
+        if (key == "local") {
+            monitor_bar_.set_label("local");
+            monitor_.start_local(folder);
+        } else if (!key.empty()) {
+            // A second connection with the main session's credentials, pinned to
+            // the host key the user already accepted; it never shares ssh_.
+            SSHConfig cfg = ssh_.config();
+            cfg.trust_new_host = false;
+            cfg.pinned_fingerprint = ssh_.host_fingerprint();
+            cfg.timeout_ms = 8000;
+            monitor_bar_.set_label(remote_target_.user + "@" + remote_target_.alias);
+            monitor_.start_remote(cfg, folder);
+        }
+        request_redraw();
+    }
+    monitor_.reap();
+    if (!monitor_.running()) return;
+    if (folder != monitor_folder_) {
+        monitor_folder_ = folder;
+        monitor_.set_folder(folder);
+    }
+    monitor_.set_detail(monitor_bar_.detail_open());
+    SysMonitor::Snapshot snap;
+    if (monitor_.poll(monitor_bar_.version(), snap)) monitor_bar_.set_snapshot(snap);
+}
+
 void App::remote_disconnect() {
     if (!remote_active_) return;
     if (workspace_) close_workspace(true);

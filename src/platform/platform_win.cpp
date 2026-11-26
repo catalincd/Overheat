@@ -6,6 +6,7 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <shlobj.h>
+#include <cstdio>
 #include <cstdlib>
 
 namespace oh::platform {
@@ -354,6 +355,51 @@ void close_library(void* lib) {
     if (lib) FreeLibrary(static_cast<HMODULE>(lib));
 }
 const char* library_extension() { return ".dll"; }
+
+// ---------------------------------------------------------------- system monitor
+
+std::string local_system_sample(const std::string&, const std::string& folder, bool) {
+    std::string out;
+    char buf[512];
+    auto u64 = [](FILETIME f) { return (static_cast<unsigned long long>(f.dwHighDateTime) << 32) | f.dwLowDateTime; };
+    out += "@@host\n" + getenv_str("COMPUTERNAME") + "\n@@user\n" + user_name() + "\n@@os\nWindows\n";
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    out += "@@ncpu\n" + std::to_string(si.dwNumberOfProcessors) + "\n";
+    FILETIME idle, kernel, user;
+    if (GetSystemTimes(&idle, &kernel, &user)) {  // kernel time includes idle time
+        std::snprintf(buf, sizeof buf, "@@stat\ncpu %llu 0 %llu %llu\n", u64(user), u64(kernel) - u64(idle), u64(idle));
+        out += buf;
+    }
+    MEMORYSTATUSEX ms{};
+    ms.dwLength = sizeof ms;
+    if (GlobalMemoryStatusEx(&ms)) {
+        std::snprintf(buf, sizeof buf, "@@meminfo\nMemTotal: %llu kB\nMemFree: %llu kB\nMemAvailable: %llu kB\n",
+                      ms.ullTotalPhys / 1024, ms.ullAvailPhys / 1024, ms.ullAvailPhys / 1024);
+        out += buf;
+    }
+    std::snprintf(buf, sizeof buf, "@@uptime\n%.1f\n", static_cast<double>(GetTickCount64()) / 1000.0);
+    out += buf;
+    // Fixed drives as `df -P -k` rows; the folder's drive again under @@dfcwd.
+    std::string rows, cwd_row;
+    char drive = folder.size() >= 2 && folder[1] == ':' ? static_cast<char>(folder[0] & ~0x20) : 0;
+    DWORD mask = GetLogicalDrives();
+    for (int i = 0; i < 26; i++) {
+        if (!(mask & (1u << i))) continue;
+        wchar_t root[] = {static_cast<wchar_t>(L'A' + i), L':', L'\\', 0};
+        if (GetDriveTypeW(root) != DRIVE_FIXED) continue;
+        ULARGE_INTEGER avail{}, total{}, free_bytes{};
+        if (!GetDiskFreeSpaceExW(root, &avail, &total, &free_bytes)) continue;
+        unsigned long long t = total.QuadPart / 1024, f = free_bytes.QuadPart / 1024, a = avail.QuadPart / 1024;
+        std::snprintf(buf, sizeof buf, "%c: %llu %llu %llu %llu%% %c:\\\n", 'A' + i, t, t - f, a,
+                      t ? (t - f) * 100 / t : 0ull, 'A' + i);
+        rows += buf;
+        if (drive == 'A' + i) cwd_row = buf;
+    }
+    out += "@@df\n" + rows;
+    if (!cwd_row.empty()) out += "@@dfcwd\n" + cwd_row;
+    return out;
+}
 
 } // namespace oh::platform
 #endif
