@@ -27,11 +27,11 @@ int ScriptRunner::ms_until_next(TimePoint now) const {
     return ms < 0 ? 0 : static_cast<int>(ms);
 }
 
-void ScriptRunner::push_mouse_button(float x, float y, bool down, int clicks) {
+void ScriptRunner::push_mouse_button(float x, float y, bool down, int clicks, int button) {
     SDL_Event e{};
     e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
     e.button.windowID = window_id_;
-    e.button.button = SDL_BUTTON_LEFT;
+    e.button.button = static_cast<Uint8>(button);
     e.button.down = down;
     e.button.clicks = static_cast<Uint8>(clicks);
     e.button.x = x;
@@ -102,13 +102,14 @@ std::vector<std::string> ScriptRunner::step(TimePoint now) {
         int delay = 80;  // default spacing so each step gets its own frame
         if (cmd == "wait") {
             ss >> delay;
-        } else if (cmd == "click" || cmd == "dclick") {
+        } else if (cmd == "click" || cmd == "dclick" || cmd == "rclick") {
             float x, y;
             ss >> x >> y;
             push_motion(x, y, false);
             int clicks = cmd == "dclick" ? 2 : 1;
-            push_mouse_button(x, y, true, clicks);
-            push_mouse_button(x, y, false, clicks);
+            int button = cmd == "rclick" ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
+            push_mouse_button(x, y, true, clicks, button);
+            push_mouse_button(x, y, false, clicks, button);
         } else if (cmd == "drag") {
             float x1, y1, x2, y2;
             ss >> x1 >> y1 >> x2 >> y2;

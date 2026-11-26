@@ -22,7 +22,8 @@ def find_window(pid):
 
 import re
 src = open(script).read()
-src = re.sub(r"\{([^}]+)\}", lambda m: str(int(eval(m.group(1), {"W": W, "H": H}))), src)
+# Only {..} expressions using W or H are evaluated, so logpoint text like {i} passes through.
+src = re.sub(r"\{([^}]*[WH][^}]*)\}", lambda m: str(int(eval(m.group(1), {"W": W, "H": H}))), src)
 script = os.path.join(outdir, "script.txt")
 open(script, "w").write(src)
 # Default: the app captures its own frames (works with the screen locked or the

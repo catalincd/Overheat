@@ -26,7 +26,7 @@ float EditorView::gutter_width(const FontAtlas& font) const {
     while (n >= 10) { digits++; n /= 10; }
     // At least 3 digits wide, plus padding on both sides
     digits = std::max(digits, 3);
-    return static_cast<float>(digits) * font.char_width() + 30.0f;  // + change-marker lane
+    return static_cast<float>(digits) * font.char_width() + 30.0f + DEBUG_LANE_W;  // + change and breakpoint lanes
 }
 
 void EditorView::render(RenderContext& ctx, Rect bounds) {
@@ -70,6 +70,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     render_gutter(ctx, gutter_rect);
     ctx.r->push_clip(gutter_rect);
     render_git_marks(ctx, gutter_rect);
+    render_debug_gutter(ctx, gutter_rect);
     ctx.r->pop_clip();
     ctx.r->push_clip(text_rect);
     {   // Current line underneath everything else in the text area.
@@ -82,6 +83,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
                             ctx.theme->current_line);
         }
     }
+    render_debug_lines(ctx, text_rect);
     render_indent_guides(ctx, text_rect);
     render_find_matches(ctx, text_rect);
     {   // Matching bracket outline
@@ -100,6 +102,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     render_selections(ctx, text_rect);
     render_text(ctx, text_rect);
     render_diagnostics(ctx, text_rect);
+    render_inline_values(ctx, text_rect);
     render_blame(ctx, text_rect);
     render_cursors(ctx, text_rect);
     ctx.r->pop_clip();
@@ -500,6 +503,9 @@ void EditorView::render_blame(RenderContext& ctx, Rect text_rect) {
     if (!show_blame_ || editor_->cursors().selections().size() != 1) return;
     size_t line = editor_->cursors().primary_pos().line;
     if (line_has_diagnostic(line)) return;  // the diagnostic message owns the line end
+    if (debug_marks_)  // so do the debugger's inline values
+        for (auto& iv : debug_marks_->inline_values)
+            if (iv.first == line) return;
     auto [first, end] = visible_lines(text_rect);
     if (line < first || line >= end) return;
     bool uncommitted = false;
@@ -862,6 +868,12 @@ bool EditorView::handle_mouse(const MouseEvent& e) {
     if (e.button == 1 && e.pressed) completion_.hide();
     if (e.button == 1 && e.pressed && !e.motion) find_.blur();
     if (!bounds_.contains(e.x, e.y) && !mouse_selecting_) return false;
+    // Breakpoint lane (left click) and gutter context menu (right click).
+    if (on_gutter_click && e.pressed && !e.motion && !mouse_selecting_ && e.x < bounds_.x + cached_gutter_w_ &&
+        ((e.button == 1 && e.x < bounds_.x + DEBUG_LANE_W + 4.0f) || e.button == 3)) {
+        on_gutter_click(position_at(e.x, e.y).line, e.button);
+        return true;
+    }
 
     if (e.scroll_y != 0.0f) {
         float new_scroll = editor_->scroll_y() - e.scroll_y * cached_line_h_ * 3.0f;

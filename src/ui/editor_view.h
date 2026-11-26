@@ -3,6 +3,7 @@
 #include "editor/editor.h"
 #include "ui/find_bar.h"
 #include "ui/completion_popup.h"
+#include "ui/debug_marks.h"
 #include "renderer/font_atlas.h"
 #include "anim.h"
 #include <unordered_map>
@@ -36,6 +37,11 @@ public:
     bool wants_focus() const override { return true; }
 
     float gutter_width(const FontAtlas& font) const;
+    // Debugger: marks for this editor's file (nullptr = none) and gutter clicks on
+    // the breakpoint lane (button 1) or anywhere in the gutter (button 3).
+    void set_debug_marks(const DebugMarks* m) { debug_marks_ = m; }
+    std::function<void(size_t line, int button)> on_gutter_click;
+    static constexpr float DEBUG_LANE_W = 16.0f;
     float last_gutter_width() const { return cached_gutter_w_; }
 
 private:
@@ -78,6 +84,10 @@ private:
     float cached_gutter_w_ = 40.0f;
 
     void render_gutter(RenderContext& ctx, Rect gutter_rect);
+    const DebugMarks* debug_marks_ = nullptr;
+    void render_debug_lines(RenderContext& ctx, Rect text_rect);   // under the text
+    void render_debug_gutter(RenderContext& ctx, Rect gutter_rect);
+    void render_inline_values(RenderContext& ctx, Rect text_rect);
     void render_git_marks(RenderContext& ctx, Rect gutter_rect);
     void render_blame(RenderContext& ctx, Rect text_rect);
     void render_text(RenderContext& ctx, Rect text_rect);

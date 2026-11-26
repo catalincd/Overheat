@@ -120,11 +120,16 @@ set(OVERHEAT_SOURCES
     src/workspace.cpp
     src/workspace_store.cpp
     src/lsp_glue.cpp
+    src/debug_glue.cpp
     src/debug/json.cpp
     src/debug/dap_client.cpp
     src/debug/breakpoints.cpp
     src/debug/launch_config.cpp
     src/debug/debugger.cpp
+    src/ui/debug_panel.cpp
+    src/ui/debug_console.cpp
+    src/ui/debug_toolbar.cpp
+    src/ui/debug_editor.cpp
     src/platform/platform_posix.cpp
     src/platform/platform_win.cpp
 )
