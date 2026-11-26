@@ -197,6 +197,12 @@ static void test_generic_and_ansi() {
                           "[\x1b]8;;https://gcc.gnu.org/x\x07-Wfoo\x1b]8;;\x07]\r";
     auto ps = run({"gcc"}, colored + "\n");
     CHECK(ps.size() == 1 && ps[0].message == "boom" && ps[0].code == "-Wfoo", "ansi + osc8 stripped");
+    // A progress bar (\r + erase) before the diagnostic on the same line, and CR LF
+    // line ends, as a PTY delivers them.
+    auto pb = run({"rustc"}, "    Building [=====>   ] 3/4: sample\r\x1b[Kerror[E0425]: cannot find value `x`\r\n"
+                             "  --> src/main.rs:2:5\r\n");
+    CHECK(pb.size() == 1 && pb[0].code == "E0425" && pb[0].line == 1 && pb[0].col == 4, "progress bar prefix: %zu",
+          pb.size());
     auto g = run({"generic"}, "lib/x.py:12: warning: old style\nnot a location: 12\nmake: *** [Makefile:3: a] Error 1\n"
                               "src/a.ts:4:2 - missing semicolon\n");
     CHECK(g.size() == 2 && g[0].severity == 2 && g[0].line == 11 && g[1].col == 1, "generic: %zu", g.size());

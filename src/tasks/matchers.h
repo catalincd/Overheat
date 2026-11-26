@@ -39,6 +39,11 @@ public:
     void feed(const std::string& chunk);
     // End of output: flushes multi-line state (a pending CMake message, ...).
     void finish();
+    // A whole cargo JSON line: collects its problem and returns the text to show
+    // instead. False (nothing done) when the line is not cargo JSON.
+    bool feed_cargo_json(const std::string& line, std::string& display) {
+        return cargo_json_line(line, display, &problems_);
+    }
 
     const std::vector<Problem>& problems() const { return problems_; }
     bool uses(const std::string& matcher) const;

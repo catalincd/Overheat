@@ -35,6 +35,8 @@ public:
     void set_message(const std::string& msg, float duration = 3.0f);
     // Running background work (LSP start, git, SSH): a spinner with the first one.
     void set_tasks(std::vector<std::string> tasks) { tasks_ = std::move(tasks); }
+    // The last build task's outcome ("cargo build: 2 errors"), until the next run; "" hides it.
+    void set_task_result(const std::string& text, bool ok) { task_result_ = text; task_ok_ = ok; }
     // Language server for the current file: "" = none. state: 0 starting, 1 ready, 2 stopped.
     void set_lsp(const std::string& name, int state) { lsp_name_ = name; lsp_state_ = state; }
     void set_unread(int n) { unread_ = n; }
@@ -63,6 +65,8 @@ private:
     std::string message_;
     float message_timer_ = 0;
     std::vector<std::string> tasks_;
+    std::string task_result_;
+    bool task_ok_ = true;
     std::string lsp_name_;
     int lsp_state_ = 0;
     int unread_ = 0;

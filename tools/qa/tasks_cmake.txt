@@ -1,0 +1,35 @@
+# C++ (CMake presets) at 1400x900; set up with tests/projects/qa_setup.sh, open src/main.cpp.
+# "CMake: build (broken)" runs its configure preset first; gcc's template instantiation
+# context shows under the error in Problems; F8 / Shift+F8 step through the problems.
+wait 1500
+drag 800 675 800 430
+wait 200
+key Ctrl+Shift+P
+type Tasks: Run Task
+key Return
+wait 400
+type build (broken)
+wait 300
+probe shot:m_picker
+wait 100
+key Return
+wait 12000
+probe shot:m_task_output
+wait 100
+key Ctrl+Shift+M
+wait 500
+probe shot:m_problems
+wait 100
+key F8
+wait 400
+probe shot:m_f8
+wait 100
+key F8
+wait 400
+probe m_f8_2
+wait 100
+key Shift+F8
+wait 400
+probe m_shift_f8
+wait 100
+quit

@@ -123,7 +123,8 @@ void App::status_click(const std::string& id) {
     else if (id == "branch") git_checkout();
     else if (id == "sync") git_remote_op(status_bar_.publish_mode() ? "publish" : "sync");
     else if (id == "problems") show_problems();
-    else if (id == "tasks") show_notifications();
+    else if (id == "tasks") tasks_.running() ? show_bottom(BottomView::Task, false) : show_notifications();
+    else if (id == "task") show_bottom(BottomView::Task, false);
     else if (id == "position") handle_command("goto_line");
     else if (id == "indent") pick_indentation();
     else if (id == "encoding") pick_encoding();
@@ -159,6 +160,7 @@ void App::update_status_bar() {
 
     // Background work, newest kind first.
     std::vector<std::string> tasks;
+    if (tasks_.running()) tasks.push_back(tasks_.step_label() + "...");
     if (connect_job_.valid()) tasks.push_back("Connecting to " + remote_target_.alias + "...");
     if (git_op_job_.valid()) tasks.push_back(git_op_label_);
     if (lsp_.is_running() && !lsp_.is_ready()) tasks.push_back("Starting " + lsp_server_ + "...");
@@ -212,77 +214,7 @@ void App::remote_menu() {
     command_palette_.pick(std::move(opts));
 }
 
-namespace {
-struct Problem {
-    std::string file;
-    LSPDiagnostic d;
-};
-bool before(const Position& a, const Position& b) { return a.line != b.line ? a.line < b.line : a.col < b.col; }
-}  // namespace
-
-void App::show_problems() {
-    std::vector<Problem> all;
-    for (auto& [file, list] : diagnostics_)
-        for (auto& d : list)
-            if (d.severity <= 2) all.push_back({file, d});
-    if (all.empty()) {
-        status_bar_.set_message("No problems have been detected in the workspace.");
-        return;
-    }
-    std::stable_sort(all.begin(), all.end(), [](const Problem& a, const Problem& b) {
-        if (a.d.severity != b.d.severity) return a.d.severity < b.d.severity;
-        if (a.file != b.file) return a.file < b.file;
-        return before(a.d.start, b.d.start);
-    });
-    std::vector<std::string> items, details;
-    for (auto& p : all) {
-        std::string msg = p.d.message.substr(0, p.d.message.find('\n'));
-        items.push_back((p.d.severity == 1 ? "✖ " : "⚠ ") + msg);
-        details.push_back(fs::path(p.file).filename().string() + ":" + std::to_string(p.d.start.line + 1));
-    }
-    CommandPalette::PickOptions opts;
-    opts.placeholder = "Problems: " + std::to_string(all.size()) + " (pick one to go there)";
-    opts.items = std::move(items);
-    opts.details = std::move(details);
-    opts.on_pick = [this, all](int i, const std::string&) {
-        if (i < 0) return;
-        auto& p = all[static_cast<size_t>(i)];
-        open_at(p.file, p.d.start.line, p.d.start.col, 0);
-    };
-    command_palette_.pick(std::move(opts));
-}
-
-void App::goto_next_problem() {
-    Editor* ed = current_editor();
-    std::string cur = ed ? ed->buffer().file_path().string() : std::string();
-    auto pick_from = [](const std::vector<LSPDiagnostic>& list, Position after, bool strict) -> const LSPDiagnostic* {
-        const LSPDiagnostic* best = nullptr;
-        for (auto& d : list) {
-            if (d.severity > 2 || (strict && !before(after, d.start))) continue;
-            if (!best || before(d.start, best->start)) best = &d;
-        }
-        return best;
-    };
-    const LSPDiagnostic* d = nullptr;
-    std::string file = cur;
-    if (auto it = diagnostics_.find(cur); ed && it != diagnostics_.end()) {
-        d = pick_from(it->second, ed->cursors().primary_pos(), true);
-        if (!d) d = pick_from(it->second, {0, 0}, false);  // wrap around in this file
-    }
-    if (!d)  // nothing here: the first problem of another file
-        for (auto& [f, list] : diagnostics_)
-            if ((d = pick_from(list, {0, 0}, false))) {
-                file = f;
-                break;
-            }
-    if (!d) {
-        status_bar_.set_message("No problems");
-        return;
-    }
-    LSPDiagnostic copy = *d;
-    open_at(file, copy.start.line, copy.start.col, 0);
-    status_bar_.set_message(copy.message.substr(0, copy.message.find('\n')), 6.0f);
-}
+// show_problems() and goto_next_problem() live in tasks_glue.cpp (the Problems panel).
 
 void App::pick_indentation() {
     Editor* ed = current_editor();

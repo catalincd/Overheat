@@ -158,7 +158,10 @@ void ProblemCollector::finish() {
 }
 
 void ProblemCollector::feed_line(const std::string& raw_line) {
-    std::string line = strip_ansi(raw_line);
+    // A carriage return inside the line (progress bars) returns to column 0: what
+    // follows the last one is what the terminal ends up showing.
+    size_t cr = raw_line.find_last_of('\r', raw_line.size() >= 2 ? raw_line.size() - 2 : 0);
+    std::string line = strip_ansi(cr == std::string::npos || raw_line.size() < 2 ? raw_line : raw_line.substr(cr + 1));
     if (cmake_open_ && uses("cmake") && match_cmake(line)) return;
     for (auto& n : names_) {
         if (n == "gcc" && match_gcc(line)) return;
@@ -205,10 +208,9 @@ bool ProblemCollector::match_gcc(const std::string& line) {
         if (sep != std::string::npos && sep > 0 && !line.empty() && line.back() == ':' &&
             looks_like_path(line.substr(0, sep))) {
             std::string what = line.substr(sep + 2, line.size() - sep - 3);
+            // "In function 'f'" / "At top level": the next diagnostic says where; nothing to keep.
             if (starts_with(what, "In instantiation of") || starts_with(what, "In substitution of"))
                 gcc_pending_.push_back({line.substr(0, sep), 0, 0, what});
-            else if (!starts_with(what, "In file included"))
-                ;  // "In function 'f'": the next diagnostic says where; nothing to keep
             return true;
         }
         return false;

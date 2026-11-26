@@ -47,7 +47,8 @@ struct Item {
 const std::vector<std::pair<std::string, std::string>>& StatusBar::item_names() {
     static const std::vector<std::pair<std::string, std::string>> names = {
         {"remote", "Remote Host"},      {"branch", "Git Branch"},          {"sync", "Git Sync"},
-        {"problems", "Problems"},       {"tasks", "Background Tasks"},     {"position", "Cursor Position"},
+        {"problems", "Problems"},       {"tasks", "Background Tasks"},     {"task", "Last Task Result"},
+        {"position", "Cursor Position"},
         {"indent", "Indentation"},      {"encoding", "Encoding"},          {"eol", "Line Endings"},
         {"language", "Language Mode"},  {"lsp", "Language Server"},        {"bell", "Notifications"}};
     return names;
@@ -136,6 +137,8 @@ void StatusBar::render(RenderContext& ctx, Rect bounds) {
         std::string t = tasks_.front();
         if (tasks_.size() > 1) t += " (+" + std::to_string(tasks_.size() - 1) + ")";
         add("tasks", false, 60, {{SPINNER, t}});
+    } else if (!task_result_.empty()) {
+        add("task", false, 58, {{task_ok_ ? 0xEAB2u : 0xEA87u, task_result_, neutral, task_ok_ ? th.git_added : th.error}});
     }
 
     // ---- right (display order, left to right) ----

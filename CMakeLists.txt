@@ -140,6 +140,13 @@ set(OVERHEAT_SOURCES
     src/workspace_store.cpp
     src/lsp_glue.cpp
     src/status_glue.cpp
+    src/tasks_glue.cpp
+    src/tasks/json.cpp
+    src/tasks/matchers.cpp
+    src/tasks/links.cpp
+    src/tasks/tasks.cpp
+    src/tasks/runner.cpp
+    src/ui/problems_panel.cpp
     src/platform/platform_posix.cpp
     src/platform/platform_win.cpp
 )
