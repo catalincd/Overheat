@@ -65,6 +65,10 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
   - settings: `companion = "bongo-fox" | "bongo-cat" | "kit" | "wpm" | "keylog" | "flame" | "none"`,
     placement, ink colour from the theme; idle companions stop redrawing (no frame cost)
   - prototype: an interactive page made 2026-11-26 (see the artifact link in the session)
+  - [x] **Pet foxes in the editor** (like VS Code Pets): done as a yard strip under the editor
+    (`src/ui/pets.cpp`, `pets = true`): mother fox + kits that walk, run with WPM, chase,
+    mouse-pounce a ball, hop on clicks / good builds, and sleep when idle (no frames).
+    Still open: the OLED-style companions above (Bongo Fox, WPM graph, keylog, flame)
 - [ ] **Kitsune theme** (fox orange): warm brown-black, fur orange keywords, rust control
   flow, moss strings, amber numbers, sage types, cream functions; plus a light variant
 - [ ] **Hex editor:** "Reopen With → Hex Editor" for any file, and the default for

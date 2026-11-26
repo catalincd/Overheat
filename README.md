@@ -146,6 +146,9 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 - Text zoom with <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>-</kbd>/wheel
 - Quick, subtle animations (or none): Neovide-style cursor smear that flies between splits and into
   the terminal, spring-based smooth scrolling, optional cursor particles (railgun, pixiedust, ripple, ...)
+- Pet foxes (opt-in, View: Toggle Pets): a mother fox and up to two kits live in a thin strip under
+  the editor. They walk, run when you type fast, chase each other, mouse-pounce on a ball, hop when
+  clicked or when a build succeeds, and curl up asleep when you stop (then they cost no frames)
 - Settings page and keyboard-shortcut editor
 - Draft AI chat (any OpenAI-compatible endpoint)
 
@@ -383,6 +386,9 @@ debug.inline_values = true
 debug.rust_step_into_std = false     # true: Step Into also enters core/alloc/std
 debug.trace = false                  # log DAP traffic to the Debug Console
 format_on_save = false               # format with the language server (clang-format, rustfmt)
+pets = false                         # foxes in a strip under the editor (View: Toggle Pets)
+pet_count = 3                        # 1 = the mother fox, 2-3 = plus one or two kits
+pet_kit_color = "red"                # first kit's coat: "red" | "arctic" | "silver"
 ```
 
 <details>
