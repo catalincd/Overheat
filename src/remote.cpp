@@ -37,6 +37,7 @@ std::vector<SearchHit> App::search_remote(const SearchQuery& q) {
 }
 
 void App::remote_connect_prompt() {
+    pending_workspace_.reset();  // a manual connect does not open a workspace
     ssh_config_.load(SshConfig::default_path());
     CommandPalette::PickOptions opts;
     opts.placeholder = "Select a host from ssh config, or type user@host[:port]";
@@ -82,6 +83,12 @@ void App::poll_remote_connect() {
     case SSHConnectStatus::Ok: {
         std::string home = ssh_.home_dir();
         set_status_message("Connected to " + remote_target_.display());
+        if (pending_workspace_) {  // opening a Remote-SSH workspace: its folder is known
+            Workspace ws = *pending_workspace_;
+            open_remote_folder(fs::path(parse_ssh_folder(ws.folders.front())->second));
+            finish_open_workspace(ws);
+            break;
+        }
         CommandPalette::PickOptions opts;
         opts.placeholder = "Remote folder to open (Enter = " + home + ")";
         opts.allow_free_text = true;
@@ -123,12 +130,14 @@ void App::poll_remote_connect() {
     }
     case SSHConnectStatus::HostChanged:
     case SSHConnectStatus::NetworkError:
+        pending_workspace_.reset();
         set_status_message(ssh_.last_error(), 12.0f);
         break;
     }
 }
 
 void App::open_remote_folder(const fs::path& path) {
+    if (workspace_) close_workspace(true);  // saves its session first
     if (!remote_active_) local_root_ = project_root_;
     remote_active_ = true;
     for (int i = static_cast<int>(tab_bar_.tabs().size()) - 1; i >= 0; i--) tab_bar_.close_tab(i);
@@ -163,10 +172,13 @@ void App::open_remote_folder(const fs::path& path) {
     terminal_argv_ = argv;
     terminal_.spawn(argv);
     set_status_message("Opened " + path.string() + " on " + remote_target_.display());
+    if (!pending_workspace_) update_workspace_hint(true);
+    update_window_title();
 }
 
 void App::remote_disconnect() {
     if (!remote_active_) return;
+    if (workspace_) close_workspace(true);
     remote_active_ = false;
     for (int i = static_cast<int>(tab_bar_.tabs().size()) - 1; i >= 0; i--) tab_bar_.close_tab(i);
     ssh_.disconnect();
@@ -187,6 +199,8 @@ void App::remote_disconnect() {
         request_git_refresh();
     }
     set_status_message("Disconnected");
+    update_workspace_hint(false);
+    update_window_title();
 }
 
 } // namespace oh

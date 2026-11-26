@@ -182,6 +182,8 @@ bool App::init(int argc, char** argv) {
     command_palette_.set_root(project_root_);
     command_palette_.set_file_list(all_files_);
     command_palette_.set_on_file_open([this](const fs::path& p) { open_file(p); });
+    setup_workspaces();  // only points out a matching workspace; never opens one
+    update_window_title();
 
     // ---- Text input ----
     SDL_StartTextInput(window_);
@@ -213,7 +215,7 @@ void App::run() {
             Layout l = compute_layout();
             float x = ev.motion.x, y = ev.motion.y;
             bool in_chrome = l.activity_bar.contains(x, y) || l.sidebar.contains(x, y) || l.tab_bar.contains(x, y) ||
-                             l.terminal_header.contains(x, y);
+                             l.terminal_header.contains(x, y) || (welcome_visible_ && l.editor.contains(x, y));
             bool changed = in_chrome || hover_was_chrome_;  // one more frame to clear the highlight
             hover_was_chrome_ = in_chrome;
             return changed;
@@ -288,6 +290,7 @@ void App::run() {
                          frame_ms, renderer_.quad_count());
         }
     }
+    autosave_workspace();
     save_session();
     print_frame_stats();
 }
@@ -519,7 +522,7 @@ void App::handle_event(const SDL_Event& e) {
             terminal_.handle_mouse(me);
         } else if (layout.tab_bar.contains(mx, my)) {
             tab_bar_.handle_mouse(me);
-        } else if (layout.editor.contains(mx, my)) {
+        } else if (layout.editor.contains(mx, my) && !welcome_click(mx, my)) {
             focus(&editor_view_);
             editor_view_.handle_mouse(me);
         }
@@ -616,7 +619,9 @@ void App::handle_event(const SDL_Event& e) {
 // ---------------------------------------------------------------------------
 
 void App::handle_command(const std::string& cmd) {
-    if (cmd == "save") {
+    if (cmd.rfind("workspace_", 0) == 0 || cmd == "open_folder") {
+        workspace_command(cmd);
+    } else if (cmd == "save") {
         save_current();
     } else if (cmd == "save_as") {
         save_as();
@@ -1107,6 +1112,9 @@ void App::render() {
     render_breadcrumbs(ctx, layout.breadcrumbs, current_editor());
     renderer_.pop_clip();
     clipped(editor_view_, layout.editor);
+    renderer_.push_clip(layout.editor);
+    render_welcome(ctx, layout.editor);
+    renderer_.pop_clip();
     if (split_) {
         clipped(tab_bar2_, layout.tab_bar2);
         auto other = tab_bar2_.active_editor();
@@ -1381,6 +1389,7 @@ fs::path App::session_file() const {
 
 void App::save_session() {
     if (remote_active_) return;  // remote sessions are not restored (yet)
+    if (workspace_) return;      // an open workspace keeps its session in its own file
     std::error_code ec;
     fs::create_directories(session_file().parent_path(), ec);
     std::ofstream out(session_file());
@@ -1966,6 +1975,13 @@ void App::register_commands() {
     add("select_font",             "Preferences: Font Family",  "");
     add("toggle_ligatures",        "Preferences: Toggle Font Ligatures", "");
     add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");
+    add("workspace_switch",        "Workspaces: Open Workspace...", "Ctrl+R");
+    add("workspace_save_as",       "Workspaces: Save Workspace As...", "");
+    add("workspace_add_folder",    "Workspaces: Add Folder to Workspace...", "");
+    add("workspace_close",         "Workspaces: Close Workspace", "");
+    add("workspace_delete",        "Workspaces: Delete Workspace...", "");
+    add("workspace_edit",          "Workspaces: Edit Workspace File", "");
+    add("open_folder",             "File: Open Folder...",      "");
     add("quit",                    "Quit",                      "Ctrl+Q");
 }
 
@@ -1997,6 +2013,7 @@ void App::scan_project_files() {
         }
     };
     scan(project_root_, 0);
+    for (auto& root : extra_roots_) scan(root, 0);  // multi-root workspace folders
     std::sort(all_files_.begin(), all_files_.end());
 }
 

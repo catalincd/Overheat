@@ -24,6 +24,7 @@
 #include "theme.h"
 #include "anim.h"
 #include "vfs.h"
+#include "workspace.h"
 #include <future>
 #include <optional>
 #include <SDL3/SDL.h>
@@ -170,6 +171,40 @@ private:
     size_t lsp_col_to_byte(const fs::path& path, size_t line, size_t col);
     Position lsp_position(Editor& ed);
     PluginManager plugins_;
+
+    // Workspaces (workspace.cpp). Never opened on their own: only from the
+    // switcher (Ctrl+R) or the welcome screen. Autosaved only once opened or saved.
+    WorkspaceStore workspaces_;
+    std::optional<Workspace> workspace_;          // the open workspace, if any
+    std::optional<Workspace> pending_workspace_;  // waiting for its SSH connection
+    std::vector<fs::path> extra_roots_;           // root folders after project_root_
+    std::vector<std::function<void()>> workspace_undo_;  // reverts settings overrides
+    std::optional<Workspace> hint_workspace_;     // a saved workspace this folder belongs to
+    std::vector<std::pair<Rect, std::function<void()>>> welcome_hits_;
+    bool welcome_visible_ = false;
+    std::vector<Workspace> recent_workspaces_;  // welcome screen list, newest first
+    bool recent_stale_ = true;
+    void setup_workspaces();
+    void workspace_command(const std::string& cmd);
+    void workspace_switcher();
+    void open_workspace(Workspace ws);
+    void finish_open_workspace(Workspace ws);
+    void restore_workspace_tabs(const Workspace& ws);
+    Workspace capture_workspace() const;
+    void autosave_workspace();
+    void close_workspace(bool keep_tabs);
+    void save_workspace_as(const std::string& suggested = "");
+    void add_folder_to_workspace();
+    void delete_workspace();
+    void open_folder_prompt();
+    void switch_local_root(const fs::path& root);
+    void apply_workspace_settings(const Workspace& ws);
+    void revert_workspace_settings();
+    void update_workspace_hint(bool announce);
+    void update_window_title();
+    std::string folder_uri(const fs::path& p) const;
+    void render_welcome(RenderContext& ctx, Rect r);
+    bool welcome_click(float x, float y);
 
     ScriptRunner script_;
     bool scripted_ = false;
