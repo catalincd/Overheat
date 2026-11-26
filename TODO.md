@@ -10,6 +10,10 @@ the git log; keep this file short and current.
 - [ ] **New logo/icon:** a flat but 3D-looking flame in the style of Obsidian's logo,
   centred, with no background. Keep the current colours, using contrast between them for
   shading. No drop light
+- [ ] **Command Center** like VS Code's: a search-box strip at the top centre showing the
+  open file / workspace name (e.g. `app.cpp — Overheat`). Clicking it opens Quick Open
+  (Ctrl+P); Ctrl+Shift+P opens the same box in `>` command mode, and recently opened files
+  are listed first
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
 
 ## Follow-ups from the 2026-11-26 batch
