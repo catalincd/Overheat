@@ -108,7 +108,12 @@ void CommandPalette::update_filter() {
     if (mode_ == Mode::Pick) {
         for (size_t i = 0; i < pick_.items.size(); i++) {
             int score = fuzzy_score(query_, pick_.items[i]);
-            if (score >= 0) filtered_.push_back({static_cast<int>(i), query_.empty() ? 0 : score, pick_.items[i]});
+            if (score < 0) continue;
+            filtered_.push_back({static_cast<int>(i), query_.empty() ? 0 : score, pick_.items[i]});
+            if (i < pick_.details.size()) {
+                filtered_.back().detail = pick_.details[i];
+                filtered_.back().detail_right = true;
+            }
         }
         if (!query_.empty())
             std::stable_sort(filtered_.begin(), filtered_.end(),

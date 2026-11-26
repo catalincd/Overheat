@@ -1003,7 +1003,11 @@ void App::git_checkout() {
 }
 
 void App::select_theme() {
-    auto names = themes_.names();
+    std::vector<std::string> names, details;
+    for (auto& info : themes_.list()) {
+        names.push_back(info.name);
+        details.push_back(std::string(info.user ? "user, " : "") + (info.dark ? "dark" : "light"));
+    }
     std::string original = themes_.current();
     int initial = 0;
     for (size_t i = 0; i < names.size(); i++)
@@ -1011,6 +1015,7 @@ void App::select_theme() {
     CommandPalette::PickOptions opts;
     opts.placeholder = "Select color theme (live preview)";
     opts.items = names;
+    opts.details = std::move(details);
     opts.initial = initial;
     opts.on_preview = [this, names](int i) { themes_.apply(names[static_cast<size_t>(i)], theme_); };
     opts.on_cancel = [this, original] { themes_.apply(original, theme_); };
