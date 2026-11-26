@@ -137,12 +137,28 @@ void KeyMap::init_defaults(const std::string& preset) {
     bind(SDLK_MINUS, KeyMod::Ctrl,                      "zoom_out");
     bind(SDLK_0,     KeyMod::Ctrl,                      "zoom_reset");
     bind(SDLK_EQUALS,KeyMod::Ctrl | KeyMod::Shift,      "zoom_in");   // Ctrl++ on US layouts
-    bind(SDLK_MINUS, KeyMod::Ctrl | KeyMod::Shift,      "zoom_out");
     bind(SDLK_KP_PLUS,  KeyMod::Ctrl,                   "zoom_in");
     bind(SDLK_KP_MINUS, KeyMod::Ctrl,                   "zoom_out");
     bind(SDLK_KP_0,     KeyMod::Ctrl,                   "zoom_reset");
 
+    // LSP navigation (nav_glue.cpp), as in VS Code. Ctrl+Shift+- was a second zoom-out
+    // chord; it is VS Code's Go Forward (Linux), and Ctrl+- still zooms out.
+    bind(SDLK_F12,   KeyMod::Alt,                       "peek_definition");
+    bind(SDLK_F12,   KeyMod::Shift,                     "find_references");
+    bind(SDLK_F12,   KeyMod::Ctrl,                      "goto_implementation");
+    bind(SDLK_F2,    KeyMod::None,                      "rename_symbol");
+    bind(SDLK_O,     KeyMod::Ctrl | KeyMod::Shift,      "document_symbols");
+    bind(SDLK_T,     KeyMod::Ctrl,                      "workspace_symbols");
+    bind(SDLK_O,     KeyMod::Alt,                       "switch_header_source");
+    bind(SDLK_MINUS, KeyMod::Ctrl | KeyMod::Alt,        "navigate_back");
+    bind(SDLK_MINUS, KeyMod::Ctrl | KeyMod::Shift,      "navigate_forward");
+    if (preset == "vscode") {  // Alt+Left/Right hop subwords in the Overheat preset
+        bind(SDLK_LEFT,  KeyMod::Alt,                   "navigate_back");
+        bind(SDLK_RIGHT, KeyMod::Alt,                   "navigate_forward");
+    }
+
     // Chords
+    bind_chord(SDLK_K, KeyMod::Ctrl, SDLK_I, KeyMod::Ctrl, "show_hover");
     bind_chord(SDLK_K, KeyMod::Ctrl, SDLK_T, KeyMod::Ctrl, "select_theme");
     bind_chord(SDLK_K, KeyMod::Ctrl, SDLK_S, KeyMod::Ctrl, "keybindings");
 }

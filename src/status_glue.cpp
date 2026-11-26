@@ -164,6 +164,8 @@ void App::update_status_bar() {
     if (connect_job_.valid()) tasks.push_back("Connecting to " + remote_target_.alias + "...");
     if (git_op_job_.valid()) tasks.push_back(git_op_label_);
     if (lsp_.is_running() && !lsp_.is_ready()) tasks.push_back("Starting " + lsp_server_ + "...");
+    else if (std::string p = lsp_.is_running() ? lsp_.progress() : std::string(); !p.empty())
+        tasks.push_back(lsp_server_ + ": " + p);  // work-done progress, e.g. indexing
     status_bar_.set_tasks(std::move(tasks));
 
     if (connect_job_.valid()) status_bar_.set_remote("Opening Remote...");

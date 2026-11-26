@@ -109,12 +109,23 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
         }
     }
     render_selections(ctx, text_rect);
+    render_inlay_hints(ctx, text_rect);
     render_text(ctx, text_rect);
+    if (link_ && link_->first.line == link_->second.line && link_->first.line < editor_->buffer().line_count()) {
+        std::string l = view_line(link_->first.line);
+        Pt a = point(l, link_->first.line, std::min(link_->first.col, l.size()), text_rect);
+        Pt b = point(l, link_->second.line, std::min(link_->second.col, l.size()), text_rect);
+        if (b.y == a.y && b.x > a.x)
+            ctx.r->add_rect({a.x, std::floor(a.y + cached_line_h_ - 2.0f), b.x - a.x, 1.0f}, ctx.theme->accent);
+    }
     render_diagnostics(ctx, text_rect);
     render_inline_values(ctx, text_rect);
     render_blame(ctx, text_rect);
     render_cursors(ctx, text_rect);
     ctx.r->pop_clip();
+    zone_rect_ = zone_line_ == SIZE_MAX ? Rect{}
+               : Rect{bounds.x, text_rect.y + static_cast<float>(first_row(zone_line_ + 1)) * cached_line_h_ - view_y_,
+                      bounds.w - mm_w, zone_h_};
     render_minimap(ctx, minimap_rect_);
     render_scrollbar(ctx, {text_rect.x, text_rect.y, text_rect.w + minimap_width(), text_rect.h});
     find_.render(ctx, bounds);
@@ -230,8 +241,10 @@ EditorView::Pt EditorView::point(const std::string& text, size_t line, size_t by
     auto segs = segments(text);
     size_t seg = static_cast<size_t>(std::upper_bound(segs.begin(), segs.end(), byte) - segs.begin()) - 1;
     size_t seg_col = seg ? utf8::display_col(text, segs[seg]) : 0;
-    float x = text_rect.x + TEXT_PAD - view_x_ + static_cast<float>(dcol(text, line, byte) - seg_col) * cached_char_w_;
-    return {x, text_rect.y + static_cast<float>(first_row(line) + seg) * cached_line_h_ - view_y_};
+    float x = text_rect.x + TEXT_PAD - view_x_ +
+              static_cast<float>(dcol(text, line, byte) - seg_col + inlay_cells(line, byte, byte >= text.size())) *
+                  cached_char_w_;
+    return {x, text_rect.y + static_cast<float>(first_row(line) + seg) * cached_line_h_ - view_y_ + zone_dy(line)};
 }
 
 size_t EditorView::dcol(const std::string& text, size_t line, size_t byte) const {
@@ -239,7 +252,7 @@ size_t EditorView::dcol(const std::string& text, size_t line, size_t byte) const
 }
 
 float EditorView::row_y(size_t line, Rect text_rect) const {
-    return text_rect.y + static_cast<float>(first_row(line)) * cached_line_h_ - view_y_;
+    return text_rect.y + static_cast<float>(first_row(line)) * cached_line_h_ - view_y_ + zone_dy(line);
 }
 
 std::string EditorView::view_line(size_t line) const {
@@ -266,7 +279,12 @@ float EditorView::col_x(const std::string& line_text, size_t byte_col, Rect text
 }
 
 std::pair<size_t, size_t> EditorView::visible_lines(Rect text_rect) const {
-    size_t top = static_cast<size_t>(std::max(0.0f, view_y_) / cached_line_h_);
+    float vy = view_y_;
+    if (zone_line_ != SIZE_MAX) {  // below the zone, rows sit zone_h_ lower
+        float zone_top = static_cast<float>(first_row(zone_line_ + 1)) * cached_line_h_;
+        if (vy > zone_top) vy = std::max(zone_top, vy - zone_h_);
+    }
+    size_t top = static_cast<size_t>(std::max(0.0f, vy) / cached_line_h_);
     size_t count = static_cast<size_t>(text_rect.h / cached_line_h_) + 2;
     size_t first = line_at_row(top).first;
     size_t end = std::min(line_at_row(top + count).first + 1, editor_->buffer().line_count());
@@ -371,14 +389,17 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
         float right_edge = text_rect.x + text_rect.w;
         auto segs = segments(line);
         size_t seg = 0;
+        auto [hint, hint_end] = inlays_on(line_idx);
+        float hint_shift = 0;
         for (const FontAtlas::Shaped& g : it->second) {
+            for (; hint != hint_end && hint->pos.col <= g.cluster; ++hint) hint_shift += hint->cells * char_w;
             if (g.cluster >= line_len) continue;
             char lead = line[g.cluster];
             if (lead == '\t' || lead == '\r') continue;
             if (g.cluster != prev_cluster) { prev_cluster = g.cluster; in_cluster = 0; }
             while (seg + 1 < segs.size() && g.cluster >= segs[seg + 1]) seg++;
             float seg_x = static_cast<float>(col_of[segs[seg]]) * char_w;
-            float x = x_base + static_cast<float>(col_of[g.cluster]) * char_w - seg_x + in_cluster + g.x_offset;
+            float x = x_base + static_cast<float>(col_of[g.cluster]) * char_w - seg_x + in_cluster + g.x_offset + hint_shift;
             baseline = y + static_cast<float>(seg) * cached_line_h_ + ctx.font->ascender();
             if (x > right_edge) {
                 if (segs.size() == 1) break;
@@ -438,7 +459,8 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
                 bool last = k + 1 == segs.size();
                 if (a > b || (a == b && !(last && line_idx != mx.line))) continue;
                 Pt p0 = point(line, line_idx, a, text_rect);
-                float x1 = p0.x + static_cast<float>(dcol(line, line_idx, b) - dcol(line, line_idx, a)) * cached_char_w_;
+                float x1 = p0.x + static_cast<float>(dcol(line, line_idx, b) - dcol(line, line_idx, a) +
+                                                     inlay_cells(line_idx, b, false) - inlay_cells(line_idx, a, false)) * cached_char_w_;
                 if (last && line_idx != mx.line) x1 += cached_char_w_;  // show the selected newline
                 if (x1 > p0.x) ctx.r->add_rect({p0.x, p0.y, x1 - p0.x, cached_line_h_}, ctx.theme->selection);
             }
@@ -447,7 +469,7 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
 }
 
 float EditorView::max_scroll() const {
-    return std::max(0.0f, static_cast<float>(total_rows() - 1) * cached_line_h_);
+    return std::max(0.0f, static_cast<float>(total_rows() - 1) * cached_line_h_ + (zone_line_ != SIZE_MAX ? zone_h_ : 0.0f));
 }
 
 void EditorView::render_scrollbar(RenderContext& ctx, Rect text_rect) {
@@ -524,7 +546,8 @@ void EditorView::render_diagnostics(RenderContext& ctx, Rect text_rect) {
                 size_t a = std::max(c0, s0), b = std::min(c1, s1);
                 if (a > b || (a == b && segs.size() > 1)) continue;
                 Pt p0 = point(text, line, a, text_rect);
-                float x1 = std::max(p0.x + static_cast<float>(dcol(text, line, b) - dcol(text, line, a)) *
+                float x1 = std::max(p0.x + static_cast<float>(dcol(text, line, b) - dcol(text, line, a) +
+                                                              inlay_cells(line, b, false) - inlay_cells(line, a, false)) *
                                                cached_char_w_, p0.x + cached_char_w_);
                 ctx.r->add_squiggle({p0.x, p0.y + cached_line_h_ - 5.0f, x1 - p0.x, 5.0f}, color_of(d.severity), 1.2f, 6.0f, 1.2f);
             }
@@ -690,6 +713,11 @@ void EditorView::reveal_cursor() {
     if (!editor_) return;
     if (!wrapping()) {
         editor_->scroll_to_cursor(bounds_.w - cached_gutter_w_ - minimap_width(), bounds_.h, cached_char_w_, cached_line_h_);
+        if (size_t l = editor_->cursors().primary_pos().line; zone_dy(l) > 0) {
+            float y = static_cast<float>(l) * cached_line_h_ + zone_h_;
+            if (y + cached_line_h_ > editor_->scroll_y() + bounds_.h)
+                editor_->set_scroll(editor_->scroll_x(), y + cached_line_h_ * 3.0f - bounds_.h);
+        }
         return;
     }
     Position p = editor_->cursors().primary_pos();
@@ -763,6 +791,11 @@ Position EditorView::position_at(float x, float y) const {
     auto& buf = editor_->buffer();
     float rel_y = y - text_rect.y + view_y_;
     float rel_x = x - text_rect.x - TEXT_PAD + view_x_;
+    if (zone_line_ != SIZE_MAX) {
+        float zone_top = static_cast<float>(first_row(zone_line_ + 1)) * cached_line_h_;
+        if (rel_y >= zone_top + zone_h_) rel_y -= zone_h_;
+        else if (rel_y >= zone_top) rel_y = zone_top - 1.0f;  // inside the zone: its anchor line
+    }
     size_t row = rel_y > 0 ? static_cast<size_t>(rel_y / cached_line_h_) : 0;
     row = std::min(row, total_rows() - 1);
     auto [line, seg] = line_at_row(row);
@@ -770,6 +803,19 @@ Position EditorView::position_at(float x, float y) const {
     auto segs = segments(text);
     seg = std::min(seg, segs.size() - 1);
     size_t seg_dcol = utf8::display_col(text, segs[seg]);
+    if (auto [h, h_end] = inlays_on(line); h != h_end) {  // visual cells -> buffer cells
+        float vis = rel_x / cached_char_w_, passed = 0;
+        for (; h != h_end; ++h) {
+            float start = static_cast<float>(utf8::display_col(text, h->pos.col)) + passed;
+            if (vis < start) break;
+            if (vis < start + h->cells) {  // on the hint: the character after it
+                vis = start;
+                break;
+            }
+            passed += h->cells;
+        }
+        rel_x = (vis - passed) * cached_char_w_;
+    }
     // Round to the nearest cell edge; byte_col_at snaps to a character boundary.
     size_t dcol = seg_dcol + (rel_x > 0 ? static_cast<size_t>(rel_x / cached_char_w_ + 0.5f) : 0);
     size_t byte = virt() ? editor_->view_byte(line, text, dcol) : utf8::byte_col_at(text, dcol);
@@ -1010,6 +1056,84 @@ void EditorView::update(float dt) {
     if (cursor_blink_timer_ >= 1.0f) {
         cursor_blink_timer_ -= 1.0f;
         cursor_visible_ = !cursor_visible_;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LSP navigation: geometry, the inline zone and inlay hints
+// ---------------------------------------------------------------------------
+
+Rect EditorView::text_area() const {
+    return {bounds_.x + cached_gutter_w_, bounds_.y, bounds_.w - cached_gutter_w_ - minimap_width(), bounds_.h};
+}
+
+std::optional<Position> EditorView::char_at_point(float x, float y) const {
+    if (!editor_ || gated()) return std::nullopt;
+    Rect tr = text_area();
+    if (!tr.contains(x, y) || zone_rect_.contains(x, y)) return std::nullopt;
+    Position p = position_at(x, y);
+    std::string text = view_line(p.line);
+    Pt pt = point(text, p.line, p.col, tr);
+    if (pt.x > x && p.col > 0) p.col = utf8::prev_boundary(text, p.col);  // position_at rounds to the nearest edge
+    if (p.col >= text.size()) return std::nullopt;                         // past the end of the line
+    if (y < pt.y || y >= pt.y + cached_line_h_) return std::nullopt;       // below the last line
+    return p;
+}
+
+Rect EditorView::char_rect(Position p) const {
+    if (!editor_ || p.line >= editor_->buffer().line_count()) return {};
+    std::string text = view_line(p.line);
+    Pt pt = point(text, p.line, std::min(p.col, text.size()), text_area());
+    return {pt.x, pt.y, cached_char_w_, cached_line_h_};
+}
+
+void EditorView::set_zone(std::optional<size_t> after_line, float height) {
+    zone_line_ = after_line ? *after_line : SIZE_MAX;
+    zone_h_ = after_line ? height : 0.0f;
+    if (!after_line) zone_rect_ = {};
+}
+
+std::pair<const LSPInlayHint*, const LSPInlayHint*> EditorView::inlays_on(size_t line) const {
+    if (!inlays_ || inlays_->empty() || wrapping()) return {nullptr, nullptr};
+    auto lo = std::lower_bound(inlays_->begin(), inlays_->end(), line,
+                               [](const LSPInlayHint& h, size_t l) { return h.pos.line < l; });
+    auto hi = lo;
+    while (hi != inlays_->end() && hi->pos.line == line) ++hi;
+    return {inlays_->data() + (lo - inlays_->begin()), inlays_->data() + (hi - inlays_->begin())};
+}
+
+size_t EditorView::inlay_cells(size_t line, size_t byte, bool inclusive) const {
+    size_t cells = 0;
+    for (auto [h, end] = inlays_on(line); h != end; ++h) {
+        if (h->pos.col < byte || (inclusive && h->pos.col == byte)) cells += static_cast<size_t>(h->cells);
+        else break;
+    }
+    return cells;
+}
+
+void EditorView::render_inlay_hints(RenderContext& ctx, Rect text_rect) {
+    if (!inlays_ || inlays_->empty() || wrapping()) return;
+    auto [first, end] = visible_lines(text_rect);
+    Color bg = ctx.theme->fg_muted;
+    bg.a *= 0.13f;
+    Color fg = ctx.theme->fg_muted;
+    for (size_t line = first; line < end; line++) {
+        auto [h, h_end] = inlays_on(line);
+        if (h == h_end) continue;
+        std::string text = view_line(line);
+        float y = row_y(line, text_rect);
+        size_t passed = 0;
+        for (; h != h_end; ++h) {
+            size_t col = std::min(h->pos.col, text.size());
+            float x = text_rect.x + TEXT_PAD - view_x_ +
+                      static_cast<float>(utf8::display_col(text, col) + passed) * cached_char_w_;
+            passed += static_cast<size_t>(h->cells);
+            float x0 = x + (h->pad_left ? cached_char_w_ : 0.0f);
+            float w = static_cast<float>(utf8::display_col(h->label, h->label.size())) * cached_char_w_;
+            if (x0 > text_rect.x + text_rect.w || x0 + w < text_rect.x) continue;
+            ctx.r->add_rect({x0 - 1.0f, y + 2.0f, w + 2.0f, cached_line_h_ - 4.0f}, bg, 3.0f);
+            ctx.r->add_text(x0, y + ctx.font->ascender(), h->label, fg, *ctx.font);
+        }
     }
 }
 

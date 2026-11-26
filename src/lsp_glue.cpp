@@ -20,6 +20,33 @@ std::string server_for(const std::string& lang, std::vector<std::string>& args) 
     return "";
 }
 bool is_ident(unsigned char c) { return std::isalnum(c) || c == '_' || c >= 0x80; }
+
+// rust-analyzer's root is the Cargo package or workspace: the project folder when it
+// has a Cargo.toml, else the nearest folder above the file that has one.
+fs::path server_root(const std::string& server, const fs::path& file, const fs::path& project) {
+    std::error_code ec;
+    if (server != "rust-analyzer" || fs::exists(project / "Cargo.toml", ec)) return project;
+    for (fs::path d = file.parent_path(); !d.empty(); d = d.parent_path()) {
+        if (fs::exists(d / "Cargo.toml", ec)) return d;
+        if (d == d.parent_path()) break;
+    }
+    return project;
+}
+
+// clangd looks for compile_commands.json next to the sources, in their parent folders
+// and in each one's build/ folder. CMake build trees named otherwise (build-release/,
+// cmake-build-debug/, out/) are passed explicitly.
+void add_clangd_args(const fs::path& project, std::vector<std::string>& args) {
+    std::error_code ec;
+    if (fs::exists(project / "compile_commands.json", ec) || fs::exists(project / "build" / "compile_commands.json", ec))
+        return;
+    for (auto& entry : fs::directory_iterator(project, ec)) {
+        if (entry.is_directory(ec) && fs::exists(entry.path() / "compile_commands.json", ec)) {
+            args.push_back("--compile-commands-dir=" + entry.path().string());
+            return;
+        }
+    }
+}
 } // namespace
 
 void App::lsp_post(std::function<void()> fn) {
@@ -52,6 +79,7 @@ void App::setup_lsp_for_file(const fs::path& path) {
     std::string server = server_for(lang, args);
     if (server.empty()) return;
     if (!lsp_.is_running()) {
+        if (server == "clangd") add_clangd_args(project_root_, args);
         if (!lsp_.start(server, args)) return;
         lsp_server_ = server;
         lsp_.set_on_diagnostics([this](const fs::path& file, std::vector<LSPDiagnostic> diags) {
@@ -63,7 +91,7 @@ void App::setup_lsp_for_file(const fs::path& path) {
                 diagnostics_[file.string()] = std::move(diags);
             });
         });
-        lsp_.initialize(project_root_);
+        lsp_.initialize(server_root(server, path, project_root_));
     }
     if (server != lsp_server_ || lsp_.is_open(path)) return;  // one server, one language family
     Editor* ed = current_editor();

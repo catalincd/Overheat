@@ -128,17 +128,19 @@ std::vector<std::string> ScriptRunner::step(TimePoint now) {
             e.wheel.mouse_x = x;
             e.wheel.mouse_y = y;
             SDL_PushEvent(&e);
-        } else if (cmd == "move") {  // pointer motion without a button (hover)
+        } else if (cmd == "move") {  // pointer motion without buttons (hover dwell)
             float x, y;
             ss >> x >> y;
             push_motion(x, y, false);
-        } else if (cmd == "mods") {  // held modifiers for later clicks: "mods ctrl", "mods none"
+        } else if (cmd == "mods") {  // held modifiers for later clicks/motion: ctrl, shift, alt, none
             std::string m;
-            ss >> m;
             SDL_Keymod mod = SDL_KMOD_NONE;
-            if (m.find("ctrl") != std::string::npos) mod |= SDL_KMOD_LCTRL;
-            if (m.find("shift") != std::string::npos) mod |= SDL_KMOD_LSHIFT;
-            if (m.find("alt") != std::string::npos) mod |= SDL_KMOD_LALT;
+            while (ss >> m) {
+                for (auto& c : m) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (m == "ctrl") mod |= SDL_KMOD_LCTRL;
+                else if (m == "shift") mod |= SDL_KMOD_LSHIFT;
+                else if (m == "alt") mod |= SDL_KMOD_LALT;
+            }
             SDL_SetModState(mod);
         } else if (cmd == "key") {
             std::string combo;

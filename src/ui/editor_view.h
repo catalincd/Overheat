@@ -10,6 +10,7 @@
 #include <functional>
 #include <unordered_map>
 #include <memory>
+#include <optional>
 
 namespace oh {
 
@@ -48,6 +49,21 @@ public:
     std::function<void(size_t line, int button)> on_gutter_click;
     static constexpr float DEBUG_LANE_W = 16.0f;
     float last_gutter_width() const { return cached_gutter_w_; }
+
+    // LSP navigation (nav_glue.cpp). Screen geometry of buffer positions:
+    std::optional<Position> char_at_point(float x, float y) const;  // character cell under the pointer
+    Rect char_rect(Position p) const;  // screen cell of p (as last rendered)
+    Rect text_area() const;
+    float line_height() const { return cached_line_h_; }
+    // An inline zone (the peek view) of `height` pixels below `after_line`; lines
+    // after it move down. The owner draws into zone_rect() after render().
+    void set_zone(std::optional<size_t> after_line, float height);
+    Rect zone_rect() const { return zone_rect_; }
+    // Ctrl+hover link: underline [start, end) on one line.
+    void set_link(std::optional<std::pair<Position, Position>> range) { link_ = range; }
+    // Inlay hints (sorted by position, byte columns): drawn inline without changing
+    // buffer columns. Ignored while word wrap is on.
+    void set_inlay_hints(const std::vector<LSPInlayHint>* hints) { inlays_ = hints; }
 
 private:
     std::shared_ptr<Editor> editor_;
@@ -129,6 +145,17 @@ private:
     std::pair<size_t, size_t> visible_lines(Rect text_rect) const;  // [first, end)
 
     static constexpr float TEXT_PAD = 4.0f;
+
+    size_t zone_line_ = SIZE_MAX;
+    float zone_h_ = 0;
+    Rect zone_rect_{};
+    float zone_dy(size_t line) const { return line != SIZE_MAX && zone_line_ != SIZE_MAX && line > zone_line_ ? zone_h_ : 0.0f; }
+    std::optional<std::pair<Position, Position>> link_;
+    const std::vector<LSPInlayHint>* inlays_ = nullptr;
+    std::pair<const LSPInlayHint*, const LSPInlayHint*> inlays_on(size_t line) const;
+    // Cells of hints drawn before byte `byte` of `line` (inclusive: also those at it).
+    size_t inlay_cells(size_t line, size_t byte, bool inclusive) const;
+    void render_inlay_hints(RenderContext& ctx, Rect text_rect);
 
     std::function<void(Editor&)> on_open_anyway_;
     Rect gate_button_{};

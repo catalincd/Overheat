@@ -23,12 +23,18 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
   - the task terminal is one reused tab; per-task terminals come with multiple terminals
   - CMake: pick the build target / preset in the status bar, and a run task for the
     chosen executable (today Ctrl+F5 needs a `run` group task for CMake projects)
-- [ ] **LSP navigation:** hover tooltips with a small markdown renderer; Ctrl+click and
-  hover-underline go-to-definition; Peek Definition (Alt+F12); Go to Declaration / Type
-  Definition / Implementation; Find All References with a peek view; rename (F2) with a
-  preview; document symbols (Ctrl+Shift+O) and workspace symbols (Ctrl+T); clangd's
-  switch header/source (Alt+O); inlay hints (parameter names, types) for rust-analyzer
-  and clangd; back/forward navigation history (Ctrl+Alt+- / Ctrl+Shift+-).
+- [ ] **LSP navigation follow-ups** (hover, Ctrl+click, peek, references, rename, symbols,
+  switch header/source, inlay hints and history are in; see nav_glue.cpp):
+  - one language server at a time: a C++ file and a Rust file in one session don't both
+    get a server. Run one client per language family (and per Cargo workspace)
+  - rename preview (a diff of the WorkspaceEdit before applying), and file renames from
+    `documentChanges` (create/rename/delete are skipped and counted today)
+  - the peek preview is read-only; make it an editable view of the real buffer
+  - inlay hints are off while word wrap is on; hint tooltips / click-through are not done
+  - symbol pickers: `@:` grouping by kind, and workspace symbols across both servers
+  - hover over the peek preview, and links in hover markdown (shown, not clickable)
+  - move the QA scripts and sample projects (now in /tmp during development) to
+    `tests/projects/` with the build-task and debugger items
 - [ ] **Multibuffers** (Zed): references, search results and the Problems panel as one
   editable list of excerpts (see "From the editor survey").
 - [ ] **Remote:** run clangd / rust-analyzer, builds and gdb on the Remote-SSH host
@@ -96,10 +102,23 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
     navigation history. Alt+Left/Right in the `vscode` keymap preset; the default preset
     uses Alt+Left/Right for subword motion, so bind VS Code's Linux keys there
     (Ctrl+Alt+- back, Ctrl+Shift+- forward). It must work for remote files too.
+- [ ] **Build, lint and navigation like VS Code**
+  - **Build tasks:** a project task file (like `.vscode/tasks.json`: name, command, cwd,
+    env, default build task) with Run Build Task (Ctrl+Shift+B) and Run Task… in the
+    palette. Output goes to a task terminal, and problem matchers (gcc/clang, MSVC, rustc,
+    tsc, generic `file:line:col`) feed the Problems panel. Auto-detect CMake, Make, Cargo
+    and npm scripts. Also import `.vscode/tasks.json` when present. Works over Remote-SSH.
+    Builds on the clickable-errors item below.
+  - **Linting:** today only the language server's diagnostics show (clangd). Add
+    clang-tidy through clangd (`.clang-tidy`), external linters per language (ruff,
+    eslint, shellcheck…) run on save with problem matchers, quick fixes / code actions
+    (Ctrl+.), and a Problems panel listing all diagnostics with severity filters.
+  - **Go to definition over Remote-SSH:** navigation works with local language servers;
+    remote files need the servers on the host (see Remote below).
 
 ## Cleanup
 
-- [ ] One JSON library: `src/debug/json` (reader + writer, `oh::Json`) and `src/tasks/json`
+- [ ] One JSON library: `src/debug/json` (reader + writer, `oh::Json`), `src/lsp/json` (`oh::lsp_json`) and `src/tasks/json`
   (JSONC reader, `oh::json::Value`) were written in parallel; merge them (keep JSONC
   comments/trailing commas and source-ordered members) and move it to `src/json.{h,cpp}`
 

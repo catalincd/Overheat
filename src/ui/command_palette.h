@@ -22,8 +22,18 @@ public:
         bool allow_free_text = false;
         bool password = false;  // mask typed text
         int initial = 0;
+        // Symbol pickers (nav_glue.cpp): an icon glyph per item (0 = none), a callback
+        // on every query change (live server queries), and no local fuzzy filtering
+        // when the server already filtered the items.
+        std::vector<uint32_t> icons;
+        std::function<void(const std::string& query)> on_query;
+        bool server_filtered = false;
     };
     void pick(PickOptions opts);
+    // Replace a live picker's items (e.g. workspace symbols arriving for the query).
+    void set_pick_items(std::vector<std::string> items, std::vector<std::string> details, std::vector<uint32_t> icons);
+    bool picking() const { return visible_ && mode_ == Mode::Pick; }
+    const std::string& query() const { return query_; }
     void move_selection(int delta) { select(selected_index_ + delta); }
     void accept();  // as if Enter were pressed
 

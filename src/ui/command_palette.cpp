@@ -41,6 +41,17 @@ void CommandPalette::pick(PickOptions opts) {
     select(std::clamp(pick_.initial, 0, std::max(0, static_cast<int>(filtered_.size()) - 1)));
 }
 
+void CommandPalette::set_pick_items(std::vector<std::string> items, std::vector<std::string> details,
+                                    std::vector<uint32_t> icons) {
+    if (mode_ != Mode::Pick) return;
+    pick_.items = std::move(items);
+    pick_.details = std::move(details);
+    pick_.icons = std::move(icons);
+    last_previewed_ = -1;
+    update_filter();
+    select(0);
+}
+
 void CommandPalette::accept() {
     KeyEvent enter{static_cast<uint32_t>(SDLK_RETURN), KeyMod::None, true};
     handle_key(enter);
@@ -120,7 +131,7 @@ void CommandPalette::update_filter() {
 
     if (mode_ == Mode::Pick) {
         for (size_t i = 0; i < pick_.items.size(); i++) {
-            int score = fuzzy_score(query_, pick_.items[i]);
+            int score = pick_.server_filtered ? 0 : fuzzy_score(query_, pick_.items[i]);
             if (score >= 0)
                 filtered_.push_back({static_cast<int>(i), query_.empty() ? 0 : score, pick_.items[i],
                                      i < pick_.details.size() ? pick_.details[i] : std::string(), true, {}});
@@ -255,6 +266,10 @@ void CommandPalette::render(RenderContext& ctx, Rect bounds) {
         ctx.r->set_fade(right - 24.0f, right);
         float tx = palette_x + 18.0f;
         if (mode_ == Mode::Files) tx = file_icons::draw(*ctx.r, *ctx.font, th, tx, by, m.display, false);
+        if (mode_ == Mode::Pick && static_cast<size_t>(m.index) < pick_.icons.size() && pick_.icons[static_cast<size_t>(m.index)]) {
+            ctx.r->add_char(tx, by, pick_.icons[static_cast<size_t>(m.index)], th.accent, *ctx.font);
+            tx += 2.0f * char_w;
+        }
         float end = ctx.r->add_text(tx, by, m.display, th.fg, *ctx.font);
         if (!m.detail_right && !m.detail.empty())
             ctx.r->add_text(end + 12.0f, by, m.detail, th.fg_muted, *ctx.font);
@@ -351,6 +366,7 @@ bool CommandPalette::handle_key(const KeyEvent& e) {
                 }
                 update_filter();
                 select(0);
+                if (mode_ == Mode::Pick && pick_.on_query) pick_.on_query(query_);
             }
             return true;
 
@@ -380,6 +396,7 @@ bool CommandPalette::handle_text(const std::string& text) {
     query_ += text;
     update_filter();
     select(0);
+    if (mode_ == Mode::Pick && pick_.on_query) pick_.on_query(query_);
     return true;
 }
 
