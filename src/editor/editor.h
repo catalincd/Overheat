@@ -42,6 +42,17 @@ public:
     // VS Code-style multi-cursor helpers.
     void add_next_occurrence();          // Ctrl+D
     void add_cursor_vertical(int dir);   // Ctrl+Alt+Up/Down
+
+    // 4coder-style word motion for Ctrl+Left/Right: alphanumeric runs in code,
+    // whitespace-separated runs in plain text (4coder's code map vs file map).
+    void move_word_4coder(int dir, bool select);
+    bool is_code() const;
+
+    // Syntax-aware selection over the tree-sitter tree (Helix/Kakoune, VS Code's
+    // smart select). Every cursor works independently; false when there is no tree.
+    bool expand_selection();           // to the enclosing node
+    bool shrink_selection();           // back to the previous expand step (or a child)
+    bool select_sibling(int dir);      // next (+1) / previous (-1) sibling node
     // Typing with auto-closing brackets/quotes, skip-over and selection wrapping.
     void type_text(const std::string& text);
     static inline bool auto_close_pairs = true;  // setting: auto_close_brackets
@@ -108,6 +119,11 @@ private:
     std::vector<GitBlame> blame_;  // index = HEAD line - 1
 
     void on_text_changed();
+
+    // Expand history for shrink_selection: the selection sets before each expand step,
+    // valid while the cursors still hold `expanded_`.
+    std::vector<std::vector<Selection>> expand_history_;
+    std::vector<Selection> expanded_;
 };
 
 } // namespace oh

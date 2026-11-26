@@ -134,6 +134,11 @@ private:
     float watch_timer_ = 0;
     void watch_open_files();
     void refresh_command_keys();
+    // Keymap preset from settings.toml `keymap` ("overheat" or "vscode") + keybindings.json.
+    std::string keymap_preset() const;
+    void load_keymap();
+    // Cursor motion / syntax-selection commands; false when nothing applies.
+    bool run_motion(Editor& ed, const std::string& cmd);
     fs::path session_file() const;
     void save_session();
     bool restore_session();

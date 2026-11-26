@@ -28,6 +28,13 @@ void CursorSet::add_selection(Selection s) {
     update_preferred_col();
 }
 
+void CursorSet::set_selections(std::vector<Selection> sels) {
+    if (sels.empty()) return;
+    selections_ = std::move(sels);
+    merge_overlapping();
+    update_preferred_col();
+}
+
 void CursorSet::clear_secondary() {
     if (selections_.size() > 1) {
         Selection primary = selections_[0];
@@ -228,6 +235,56 @@ void CursorSet::move_word_right(const TextBuffer& buf, bool select) {
         }
 
         apply_move(sel, buf.position_of(offset), select);
+    }
+    merge_overlapping();
+    update_preferred_col();
+}
+
+namespace {
+// Byte accessor over the piece table for motion::seek_*: caches one line, so scans in
+// either direction copy each line once. Bytes past a line's text read as '\n'.
+struct LineCursor {
+    explicit LineCursor(const TextBuffer& b) : buf(b) {}
+    const TextBuffer& buf;
+    size_t start = SIZE_MAX;
+    std::string text;
+    char operator()(size_t i) {
+        if (start == SIZE_MAX || i < start || i > start + text.size()) {
+            Position p = buf.position_of(i);
+            start = i - p.col;
+            text = buf.line_text(p.line);
+        }
+        size_t col = i - start;
+        return col < text.size() ? text[col] : '\n';
+    }
+};
+}  // namespace
+
+void CursorSet::move_boundary(const TextBuffer& buf, int dir, motion::Boundary b, bool select) {
+    size_t total = buf.length();
+    LineCursor at(buf);
+    for (auto& sel : selections_) {
+        size_t offset = buf.offset_of(sel.head.line, sel.head.col);
+        size_t next = dir < 0 ? motion::seek_left(at, total, offset, b) : motion::seek_right(at, total, offset, b);
+        apply_move(sel, buf.position_of(next), select);
+    }
+    merge_overlapping();
+    update_preferred_col();
+}
+
+void CursorSet::move_blank_line(const TextBuffer& buf, int dir, bool select) {
+    size_t n = buf.line_count();
+    auto blank = [&](size_t line) {
+        std::string t = buf.line_text(line);
+        return std::all_of(t.begin(), t.end(), [](char c) { return motion::is_space(static_cast<unsigned char>(c)); });
+    };
+    for (auto& sel : selections_) {
+        size_t line = motion::blank_line_hop(blank, n, sel.head.line, dir);
+        Position to;
+        if (line == SIZE_MAX) to = {0, 0};                              // above the first paragraph
+        else if (line >= n) to = {n - 1, buf.line_length(n - 1)};      // below the last one
+        else to = {line, buf.line_length(line)};                        // 4coder's *_blank_line_end
+        apply_move(sel, to, select);
     }
     merge_overlapping();
     update_preferred_col();

@@ -153,15 +153,9 @@ bool App::init(int argc, char** argv) {
         if (choice.empty() || !themes_.apply(choice, theme_)) themes_.apply("Overheat Dark", theme_);
     }
 
-    // ---- Key bindings ----
-    keymap_.init_defaults();
-
-    // User key bindings overlay the defaults.
-    if (fs::path user_keys = config_dir_ / "keybindings.json"; fs::exists(user_keys)) keymap_.load(user_keys);
-
-    // ---- Commands ----
+    // ---- Commands and key bindings ----
     register_commands();
-    refresh_command_keys();
+    load_keymap();
 
     // ---- Git ----
     git_.open(project_root_);
@@ -388,6 +382,13 @@ void App::emit_probe(const std::string& label) {
         std::fprintf(stderr, "  selection=%zu:%zu-%zu:%zu line=\"%s\"\n", s0.anchor.line,
                      s0.anchor.col, s0.head.line, s0.head.col,
                      ed->buffer().line_text(p.line).substr(0, 80).c_str());
+        if (sel.size() > 1) {
+            std::string all;
+            for (auto& s : sel)
+                all += " " + std::to_string(s.anchor.line) + ":" + std::to_string(s.anchor.col) + "-" +
+                       std::to_string(s.head.line) + ":" + std::to_string(s.head.col);
+            std::fprintf(stderr, "  selections=%s\n", all.c_str());
+        }
     }
 }
 
@@ -788,6 +789,9 @@ void App::handle_command(const std::string& cmd) {
             ed->add_next_occurrence();
             editor_view_.reveal_cursor();
         }
+    } else if (cmd.starts_with("cursor_") || cmd == "expand_selection" || cmd == "shrink_selection" ||
+               cmd == "select_next_sibling" || cmd == "select_prev_sibling") {
+        if (Editor* ed = current_editor(); ed && run_motion(*ed, cmd)) editor_view_.reveal_cursor();
     } else if (cmd == "add_cursor_above" || cmd == "add_cursor_below") {
         if (Editor* ed = current_editor()) ed->add_cursor_vertical(cmd == "add_cursor_above" ? -1 : 1);
     } else if (cmd == "select_line") {
@@ -1614,10 +1618,51 @@ void App::unsplit_if_empty() {
     status_bar_.set_editor(ed);
 }
 
+bool App::run_motion(Editor& ed, const std::string& cmd) {
+    std::string name = cmd;
+    bool select = name.starts_with("cursor_") && name.ends_with("_select");
+    if (select) name.resize(name.size() - 7);
+    auto& cur = ed.cursors();
+    auto& buf = ed.buffer();
+    using motion::Boundary;
+    if (name == "cursor_boundary_left") ed.move_word_4coder(-1, select);
+    else if (name == "cursor_boundary_right") ed.move_word_4coder(1, select);
+    else if (name == "cursor_subword_left") cur.move_boundary(buf, -1, Boundary::Subword, select);
+    else if (name == "cursor_subword_right") cur.move_boundary(buf, 1, Boundary::Subword, select);
+    else if (name == "cursor_token_left") cur.move_boundary(buf, -1, Boundary::Whitespace, select);
+    else if (name == "cursor_token_right") cur.move_boundary(buf, 1, Boundary::Whitespace, select);
+    else if (name == "cursor_blank_line_up") cur.move_blank_line(buf, -1, select);
+    else if (name == "cursor_blank_line_down") cur.move_blank_line(buf, 1, select);
+    else if (name == "cursor_word_left") cur.move_word_left(buf, select);
+    else if (name == "cursor_word_right") cur.move_word_right(buf, select);
+    else if (name == "expand_selection") return ed.expand_selection();
+    else if (name == "shrink_selection") return ed.shrink_selection();
+    else if (name == "select_next_sibling") return ed.select_sibling(1);
+    else if (name == "select_prev_sibling") return ed.select_sibling(-1);
+    else return false;
+    return true;
+}
+
 void App::refresh_command_keys() {
-    for (auto& c : commands_)
-        if (std::string k = keymap_.binding_for(c.name); !k.empty()) c.keybinding = k;
+    for (auto& c : commands_) {
+        std::string k = keymap_.binding_for(c.name);
+        // Single chords all live in the keymap, so an empty lookup means "unbound" (e.g.
+        // after switching presets); multi-chord labels like "Ctrl+K Ctrl+T" are not in it.
+        if (!k.empty() || c.keybinding.find(' ') == std::string::npos) c.keybinding = k;
+    }
     command_palette_.set_commands(commands_);
+}
+
+std::string App::keymap_preset() const {
+    return themes_.setting("keymap") == "vscode" ? "vscode" : "overheat";
+}
+
+void App::load_keymap() {
+    // Preset defaults first; the user's keybindings.json overlays them.
+    keymap_ = KeyMap{};
+    keymap_.init_defaults(keymap_preset());
+    if (fs::path user_keys = config_dir_ / "keybindings.json"; fs::exists(user_keys)) keymap_.load(user_keys);
+    refresh_command_keys();
 }
 
 void App::open_settings() {
@@ -1659,6 +1704,14 @@ void App::open_settings() {
                     nullptr, [] { return Editor::auto_close_pairs; }, [this](int) {
                         Editor::auto_close_pairs = !Editor::auto_close_pairs;
                         themes_.set_setting("auto_close_brackets", Editor::auto_close_pairs ? "true" : "false");
+                    }});
+    rows.push_back({Row::Choice, "Keymap", "Ctrl/Alt+arrows: Overheat (4coder) or VS Code",
+                    [this] { return std::string(keymap_preset() == "vscode" ? "VS Code" : "Overheat"); }, nullptr,
+                    [this](int) {
+                        std::string next = keymap_preset() == "vscode" ? "overheat" : "vscode";
+                        themes_.set_setting("keymap", "\"" + next + "\"");
+                        load_keymap();
+                        set_status_message(std::string("Keymap: ") + (next == "vscode" ? "VS Code" : "Overheat"));
                     }});
     rows.push_back({Row::Button, "Keyboard shortcuts", "Search commands and assign new key chords",
                     [] { return std::string("Edit"); }, nullptr, [this](int) { settings_page_.close(); open_keybindings(); }});
@@ -2083,6 +2136,25 @@ void App::register_commands() {
     add("undo",                    "Undo",                      "Ctrl+Z");
     add("redo",                    "Redo",                      "Ctrl+Shift+Z");
     add("select_word",             "Add Selection To Next Find Match", "Ctrl+D");
+    // Cursor motion (keys depend on the keymap preset; see KeyMap::init_defaults).
+    for (auto [name, label] : std::initializer_list<std::pair<const char*, const char*>>{
+             {"cursor_boundary_left", "Cursor Word Left (4coder)"},
+             {"cursor_boundary_right", "Cursor Word Right (4coder)"},
+             {"cursor_subword_left", "Cursor Subword Left"},
+             {"cursor_subword_right", "Cursor Subword Right"},
+             {"cursor_token_left", "Cursor Token Left"},
+             {"cursor_token_right", "Cursor Token Right"},
+             {"cursor_blank_line_up", "Cursor to Previous Blank Line"},
+             {"cursor_blank_line_down", "Cursor to Next Blank Line"},
+             {"cursor_word_left", "Cursor Word Left (VS Code)"},
+             {"cursor_word_right", "Cursor Word Right (VS Code)"}}) {
+        add(name, label, "");
+        add(std::string(name) + "_select", std::string(label) + " Select", "");
+    }
+    add("expand_selection",        "Expand Selection (syntax)", "");
+    add("shrink_selection",        "Shrink Selection (syntax)", "");
+    add("select_next_sibling",     "Select Next Sibling Node",  "");
+    add("select_prev_sibling",     "Select Previous Sibling Node", "");
     add("add_cursor_above",        "Add Cursor Above",          "Ctrl+Alt+Up");
     add("add_cursor_below",        "Add Cursor Below",          "Ctrl+Alt+Down");
     add("select_line",             "Select Line",               "Ctrl+L");
