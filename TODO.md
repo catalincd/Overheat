@@ -55,6 +55,18 @@ for C/C++ and Rust, plus lldb-dap / CodeLLDB when installed.
   status bar column counts bytes, not the virtual column; per-language/per-workspace
   indent settings; rustfmt's `)\n.method()` chains and `macro_rules!` bodies; clang-format
   style operand alignment (`a ||\n    b` aligns under `a`); more languages with real rules
+- [ ] **Companions: Corne-style OLED animations** (QMK keyboard screens). Small pixel
+  screens (128x32, scaled) in the status bar, a corner of the editor or the sidebar foot,
+  driven by real typing in the editor. Our own pixel art (don't copy QMK bitmaps):
+  - Bongo Cat and a **Bongo Fox** (orange, dark "socks", swishing tail) that slap on keys
+  - a pet like QMK's Luna, as a fox kit: naps when idle, trots and zooms with WPM, jumps on Space
+  - WPM meter and graph, keylog + modifier/mode indicator, an "Overheat" flame that grows
+    with typing speed
+  - settings: `companion = "bongo-fox" | "bongo-cat" | "kit" | "wpm" | "keylog" | "flame" | "none"`,
+    placement, ink colour from the theme; idle companions stop redrawing (no frame cost)
+  - prototype: an interactive page made 2026-11-26 (see the artifact link in the session)
+- [ ] **Kitsune theme** (fox orange): warm brown-black, fur orange keywords, rust control
+  flow, moss strings, amber numbers, sage types, cream functions; plus a light variant
 - [ ] **Hex editor:** "Reopen With → Hex Editor" for any file, and the default for
   detected binaries. Offset / hex / ASCII columns, goto offset, search for bytes or text,
   in-place byte editing with undo and save, and selection kept in sync between the hex
