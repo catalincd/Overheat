@@ -89,6 +89,7 @@ bool App::init(int argc, char** argv) {
     }
     if (std::string v = themes_.setting("opacity"); !v.empty())
         opacity_ = std::clamp(std::strtof(v.c_str(), nullptr), 0.5f, 1.0f);
+    renderer_.set_opaque_popups(themes_.setting("opaque_popups") != "false");
 
     // A transparent window can composite per-pixel alpha (Wayland, X11 ARGB visual,
     // DWM blur-behind on Windows). It costs nothing while the swapchain stays opaque,
@@ -939,6 +940,10 @@ void App::handle_command(const std::string& cmd) {
             update_monitor();
         }
         monitor_bar_.set_detail(!monitor_bar_.detail_open());
+    } else if (cmd == "toggle_opaque_popups") {
+        renderer_.set_opaque_popups(!renderer_.opaque_popups());
+        themes_.set_setting("opaque_popups", renderer_.opaque_popups() ? "true" : "false");
+        set_status_message(std::string("Opaque popups ") + (renderer_.opaque_popups() ? "on" : "off"));
     } else if (cmd == "toggle_animations") {
         anim::enabled = !anim::enabled;
         themes_.set_setting("animations", anim::enabled ? "true" : "false");
@@ -1266,12 +1271,14 @@ void App::render() {
         else
             renderer_.add_rect({layout.terminal_header.x, layout.terminal_header.y - 1.0f, layout.terminal.w, 2.0f}, c);
     }
+    renderer_.set_popup(true);  // opaque on a translucent window (opaque_popups)
     if (layout.monitor.h > 0)
         monitor_bar_.render_detail(ctx, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (settings_page_.visible())
         clipped(settings_page_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (command_palette_.is_visible())
         clipped(command_palette_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
+    renderer_.set_popup(false);
 
     if (debug_hit_ && last_click_x_ >= 0) {
         Color hit = Color::hex(0xff00ff);
@@ -1715,6 +1722,8 @@ void App::open_settings() {
                     "Translucent background, opaque text (50-100%)",
                     [this] { return std::to_string(static_cast<int>(std::lround(opacity_ * 100))) + "%"; }, nullptr,
                     [this](int d) { if (d) set_opacity(opacity_ + 0.05f * static_cast<float>(d)); }});
+    rows.push_back(toggle("Opaque popups", "Palette, settings and completion stay solid",
+                          [this] { return renderer_.opaque_popups(); }, "toggle_opaque_popups"));
     rows.push_back(toggle("Font ligatures", "Render => != -> as joined glyphs when the font has them",
                           [this] { return font_.ligatures(); }, "toggle_ligatures"));
     rows.push_back(toggle("Animations", "Smooth scrolling, caret glide, panel and popup motion",
@@ -2200,6 +2209,7 @@ void App::register_commands() {
     add("toggle_minimap",          "View: Toggle Minimap",      "");
     add("toggle_breadcrumbs",      "View: Toggle Breadcrumbs",  "");
     add("toggle_animations",       "Preferences: Toggle Animations", "");
+    add("toggle_opaque_popups",    "Preferences: Toggle Opaque Popups", "");
     add("select_font",             "Preferences: Font Family",  "");
     add("toggle_ligatures",        "Preferences: Toggle Font Ligatures", "");
     add("select_theme",            "Preferences: Color Theme",  "Ctrl+K Ctrl+T");

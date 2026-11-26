@@ -9,7 +9,8 @@ layout(location = 1) flat in uint v_index;
 // Translucent-window variant (dual-source blending, see Renderer2D). Colour
 // blends with out_cover.a exactly as in the opaque path, so the rgb channels
 // hold the same straight composite; the alpha channel instead accumulates
-// window opacity: fills count at g.opacity, text and squiggles at full.
+// window opacity: fills count at g.opacity (popup fills at full), text and
+// squiggles at full.
 layout(location = 0, index = 0) out vec4 out_color;
 layout(location = 0, index = 1) out vec4 out_cover;
 #else
@@ -95,7 +96,8 @@ void main() {
     alpha *= color.a;
     if (alpha <= 0.002) discard;
 #ifdef OH_ALPHA_MASK
-    float target = kind == KIND_RECT ? g.opacity : 1.0;
+    // Rect params.y = 1: an opaque popup fill (Renderer2D::set_popup).
+    float target = kind == KIND_RECT && q.params.y < 0.5 ? g.opacity : 1.0;
     out_color = vec4(color.rgb * alpha, alpha * target);
     out_cover = vec4(alpha);
 #else

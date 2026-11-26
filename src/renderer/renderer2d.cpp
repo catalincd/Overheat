@@ -149,6 +149,7 @@ void Renderer2D::begin(VkExtent2D extent) {
     clip_stack_.clear();
     fade_start_ = fade_end_ = 0;
     alpha_ = 1.0f;
+    popup_ = false;
 }
 
 glm::vec4 Renderer2D::current_clip() const {
@@ -199,7 +200,7 @@ void Renderer2D::add_rect(Rect r, Color color, float radius, float border_w, Col
     q.color  = color.vec4();
     q.data   = {radius, border_w, 0, 0};
     q.color2 = border_color.vec4();
-    q.params = {KIND_RECT, 0, fade_start_, fade_end_};
+    q.params = {KIND_RECT, popup_ && opaque_popups_ ? 1.0f : 0.0f, fade_start_, fade_end_};  // y: opaque fill
     push(q);
 }
 

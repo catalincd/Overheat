@@ -30,6 +30,12 @@ public:
     // rects reach the desktop at this alpha, text and squiggles stay opaque.
     void set_window_opacity(float o) { opacity_ = o; }
     bool can_translucent() const { return pipeline_mask_ != VK_NULL_HANDLE; }
+    // Popups (palette, settings card, completion, monitor details) stay opaque on a
+    // translucent window when opaque_popups is on (setting: opaque_popups, default on).
+    // Wrap a popup's drawing in set_popup(true) ... set_popup(false).
+    void set_opaque_popups(bool on) { opaque_popups_ = on; }
+    bool opaque_popups() const { return opaque_popups_; }
+    void set_popup(bool on) { popup_ = on; }
 
     void add_rect(Rect rect, Color color, float corner_radius = 0.0f,
                   float border_width = 0.0f, Color border_color = {0, 0, 0, 0});
@@ -72,6 +78,7 @@ private:
     float fade_start_ = 0, fade_end_ = 0;
     float alpha_ = 1.0f;
     float opacity_ = 1.0f;
+    bool opaque_popups_ = true, popup_ = false;
     bool overflow_warned_ = false;
 };
 

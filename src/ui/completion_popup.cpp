@@ -95,6 +95,7 @@ bool CompletionPopup::handle_key(Editor& ed, const KeyEvent& e) {
 
 void CompletionPopup::render(RenderContext& ctx, float x, float line_top, float line_h, Rect clip) {
     if (!visible_ || shown_.empty()) return;
+    ctx.r->set_popup(true);  // stays opaque on a translucent window
     const Theme& th = *ctx.theme;
     float cw = ctx.font->char_width();
     row_h_ = std::round(ctx.font->line_height() + 4.0f);
@@ -125,6 +126,7 @@ void CompletionPopup::render(RenderContext& ctx, float x, float line_top, float 
         ctx.r->set_fade(0, 0);
         ctx.r->pop_clip();
     }
+    ctx.r->set_popup(false);
 }
 
 bool CompletionPopup::handle_mouse(Editor& ed, const MouseEvent& e) {
