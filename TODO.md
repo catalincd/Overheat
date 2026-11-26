@@ -80,6 +80,26 @@ the git log; keep this file short and current.
   - maximize or restore a group, close a group and merge its tabs, and "Join All Groups"
   - layouts saved in sessions and workspaces
   - split terminals in the panel, and later a side-by-side diff view on the same layout
+- [ ] **Folder picker navigation** (File: Open Folder…, Add Folder to Workspace, remote
+  folders). Today it is a typed path. Make it a browsable list like VS Code's simple file
+  dialog (`files.simpleDialog`, also used for Remote-SSH); check its exact behaviour
+  first:
+  - the list shows the subfolders (and files, greyed) of the current path, with a `..` entry
+  - **Enter** on a highlighted folder goes into it (one level forward); Enter on the
+    current path, or an "OK" item, opens it
+  - **Backspace** on an empty filter, or right after a `/`, goes up one folder
+  - typing filters the list, Tab completes the path, and `~` and absolute paths work
+  - the same picker serves local and SFTP paths
+- [ ] **Multiple terminal instances:**
+  - several terminals in the panel as tabs or a side list, each with its own shell,
+    cwd and title (from the shell / OSC 0/2), plus new, kill and rename actions
+  - split terminals side by side within the panel
+  - a shell profile picker (bash, zsh, fish, pwsh, cmd, ssh host) and a default profile
+    setting
+  - Ctrl+Shift+` for a new terminal, and keys to focus the next/previous terminal
+  - local and remote terminals can coexist; terminals restore in sessions and
+    workspaces (cwd and profile, not the process)
+  - task runs (see build tasks) get their own terminal
 - [ ] **Build, lint and navigation like VS Code**
   - **Build tasks:** a project task file (like `.vscode/tasks.json`: name, command, cwd,
     env, default build task) with Run Build Task (Ctrl+Shift+B) and Run Task… in the
@@ -153,7 +173,6 @@ the git log; keep this file short and current.
 
 ## Workbench
 
-- [ ] Multiple terminals (tabs) and split terminals
 - [ ] Hover fades and press states for buttons (animation polish)
 - [ ] Settings UI: search box, tab width, terminal font, per-language settings
 - [ ] Command palette: recently used commands first
