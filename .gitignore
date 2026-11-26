@@ -8,3 +8,4 @@ build-win/
 build-linux/
 build-arch/
 build-docker/
+.claude/worktrees/

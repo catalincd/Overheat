@@ -5,20 +5,25 @@ the git log; keep this file short and current.
 
 ## Requested (2026-11-26)
 
-- [ ] **Bug:** recursive search in a folder crashes. Find out whether it is the renderer
-  (too many result quads/glyphs) or the search itself (memory, unbounded results), then
-  add limits. Check how VS Code does it: result caps, streaming results, excluded folders
-  and binary/large-file skipping
-- [ ] Workspaces like VS Code's, but smarter and never auto-opened on startup
-- [x] More bundled fonts: Fira Code, Cascadia Code, Iosevka Term, Maple Mono, Source Code Pro, Hack, IBM Plex Mono, Geist Mono, Monaspace Neon (assets/fonts/README.md)
-- [ ] More themes, using popular VS Code themes as references
-- [x] Window transparency on Linux and Windows (`opacity`; per-pixel where the Vulkan surface composites alpha, else whole-window opacity on X11/Windows)
-- [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
-- [ ] Full-featured status bar
+- [ ] Full-featured status bar (keep reading `status.background`; Dark+/Light+ use a blue bar)
 - [ ] File-type icons in the explorer and tabs, like VS Code's but in our own style
 - [ ] **New logo/icon:** a flat but 3D-looking flame in the style of Obsidian's logo,
   centred, with no background. Keep the current colours, using contrast between them for
   shading. No drop light
+- [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
+
+## Follow-ups from the 2026-11-26 batch
+
+- [ ] Search: multi-threaded local search (no-match scan of 41k files takes ~2 s)
+- [ ] Workspaces: test Remote-SSH workspaces against a real host; mixed local + remote
+  folders; apply edits to a workspace's `[settings]` live; git for non-primary roots
+- [ ] Transparency: opaque popups / palette option; background blur (KDE, Windows mica)
+- [ ] Transparency on Windows: test on real drivers. Per-pixel needs PRE/POST_MULTIPLIED
+  `compositeAlpha` (rare on Windows); reliable per-pixel needs presenting via
+  DirectComposition (Vulkan → D3D11 interop)
+- [ ] Fonts: bold / italic faces; consider dropping Iosevka (8 MB of the 10.6 MB)
+- [ ] Themes: Gruvbox Light, Tokyo Night Day; string-escape and namespace colours
+- [ ] Ctrl+K Ctrl+T (theme picker chord) doesn't fire in `--script` mode
 
 ## From the editor survey (2026-11-26)
 
@@ -75,7 +80,8 @@ the git log; keep this file short and current.
 - Ligatures are on by default; JetBrains Mono turns `/=` into `≠` (toggle in Settings)
 - The terminal does not reflow old output when resized
 - Split editors support two groups only
-- Remote search briefly blocks the UI while `grep` runs on the host
+- Remote search briefly blocks the UI while `grep` runs on the host (needs a thread-safe
+  SSH channel; local search already streams on a worker thread)
 - The OMP chat backend shows the CLI's "Working..." line in replies
 
 ## Platform & release
