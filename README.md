@@ -104,6 +104,8 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 - Logs in with ssh-agent, key files or a password
 - Browse, edit and save over SFTP (saves are atomic)
 - Remote terminal and remote search
+- Remote monitor, like MobaXterm: live CPU, RAM, disk, network, load and uptime
+  above the status bar; click it for per-core CPU, memory, filesystems and top processes
 
 </td>
 <td valign="top">
@@ -228,6 +230,8 @@ minimap = true
 animations = true
 opacity = 1.0                        # 0.5-1.0: translucent background, opaque text
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
+remote_monitor = true                # host stats strip while on Remote-SSH
+local_monitor = false                # the same strip for this computer
 ```
 
 <details>
@@ -305,6 +309,13 @@ word_wrap = true    # also: font_family, font_size, minimap, breadcrumbs, ligatu
   environment variable and are never written to disk.
 - **Remote-SSH:** *Remote-SSH: Connect to Host...* reads `~/.ssh/config` (override with
   `OVERHEAT_SSH_CONFIG`).
+- **Remote monitor:** while connected, a strip above the status bar shows the host's CPU,
+  RAM, disk, network, load and uptime, sampled every 2 s over a second SSH connection
+  (same login, host key pinned) by one small `sh` script reading `/proc`, `df` and `ps`.
+  Click it, or run *Remote-SSH: Show System Monitor Details*, for the detail card. macOS
+  and BSD hosts show what they can (load, uptime, memory total, disks). Toggle it in
+  Settings or with *Remote-SSH: Toggle Remote Monitor*; *View: Toggle Local System
+  Monitor* shows the same strip for this computer.
 
 </details>
 
