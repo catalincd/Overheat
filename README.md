@@ -91,6 +91,8 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 - <kbd>Ctrl</kbd>+<kbd>Tab</kbd> through recent files
 - Quick Open and Command Palette
 - Panels you can resize, and your session restored on start
+- Workspaces: named sets of local or Remote-SSH folders with their tabs, splits and
+  panels. Never opened on their own; switch with <kbd>Ctrl</kbd>+<kbd>R</kbd>
 - Open files reload when they change on disk
 
 </td>
@@ -152,6 +154,7 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | Files & navigation | | Editing | |
 |---|---|---|---|
 | Quick Open | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Add next match to selection | <kbd>Ctrl</kbd>+<kbd>D</kbd> |
+| Open workspace (recent) | <kbd>Ctrl</kbd>+<kbd>R</kbd> | | |
 | Command Palette | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> | Add cursor above / below | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> |
 | Switch editor (recent) | <kbd>Ctrl</kbd>+<kbd>Tab</kbd> | Move line up / down | <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> |
 | Next / previous tab | <kbd>Ctrl</kbd>+<kbd>PgDn</kbd> / <kbd>PgUp</kbd> | Duplicate line | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> |
@@ -253,6 +256,37 @@ comment = "#7d6e60"
 
 Pick it with <kbd>Ctrl</kbd>+<kbd>K</kbd> <kbd>Ctrl</kbd>+<kbd>T</kbd>. Colours are `#rrggbb` or `#rrggbbaa`; theme files
 reload when you save them.
+
+</details>
+
+<details>
+<summary><b>Workspaces</b></summary>
+
+<br>
+
+A workspace is a named set of root folders (local paths or `ssh://host/path`) plus the
+open tabs with cursor and scroll positions, the split layout, the terminal and sidebar
+state, and optional settings overrides. Each one is a file in `workspaces/<name>.toml`:
+
+```toml
+name = "overheat"
+folders = ["/home/me/Overheat", "ssh://devbox/srv/api"]   # first = primary
+
+[settings]          # applied while the workspace is open, never written to settings.toml
+theme = "Overheat Light"
+word_wrap = true    # also: font_family, font_size, minimap, breadcrumbs, ligatures, ...
+```
+
+- **Nothing opens by itself.** Startup and *File: Open Folder...* never load a workspace;
+  when a folder belongs to one, the status bar and the welcome screen point it out.
+- **Switcher** (<kbd>Ctrl</kbd>+<kbd>R</kbd>): recent first, fuzzy filter; inside a workspace
+  <kbd>Ctrl</kbd>+<kbd>R</kbd> <kbd>Enter</kbd> jumps back to the previous one.
+- **Autosave:** the session is saved when you switch away, close it or quit, but only for a
+  workspace you opened or saved yourself.
+- Commands: *Save Workspace As...*, *Add Folder to Workspace...* (multi-root explorer),
+  *Close Workspace*, *Delete Workspace...*, *Edit Workspace File*.
+- A project can ship a shared `.overheat-workspace` file (same format, folders relative to
+  it); your personal tabs and layout for it stay in the config folder.
 
 </details>
 
