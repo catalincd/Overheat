@@ -27,6 +27,13 @@ the git log; keep this file short and current.
   whitespace is drawn from the computed layout and the file's own indentation is ignored,
   with a setting to write the computed indentation back on save. Per-language rules;
   off by default, with an explicit "Reindent selection / file" command either way
+- [ ] **4coder-style highlighting of brackets and scopes**: colour parentheses, brackets and
+  braces by nesting depth; tint the backgrounds of enclosing scopes around the cursor (one
+  shade per level); highlight the matching pair and the scope boundaries more strongly
+  than the current bracket match
+- [ ] **4coder-style underlines**: underline the token under the cursor and its other
+  occurrences, and the lines of the current jump/compile-error location. Make the style
+  (underline, box, background) configurable per theme
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
 
 ## Follow-ups from the 2026-11-26 batch
