@@ -20,6 +20,21 @@ the git log; keep this file short and current.
   centred, with no background. Keep the current colours, using contrast between them for
   shading. No drop light
 
+## From the editor survey (2026-11-26)
+
+- [ ] **Clickable `file:line:col`** in the terminal and build output (Acme/Geany): Ctrl+click
+  opens the file at that position. Also a one-key **build/run task** (configurable command,
+  e.g. F5/Ctrl+B) whose compiler errors land in the Problems panel
+- [ ] **Multibuffers** (Zed): search results, references and diagnostics shown as one
+  *editable* document of excerpts, with edits written back to the source files. One
+  mechanism for the search results, find references and the Problems panel
+- [ ] **Syntax-aware selection** (Helix/Kakoune): expand/shrink the selection to the
+  enclosing tree-sitter node, and select the next/previous sibling node with multiple
+  cursors. The selection model only, not modal editing
+- [ ] **True portable mode** (SciTE/Notepad++): when a marker file (e.g. `portable.txt`)
+  sits next to the exe, keep settings, themes and workspaces next to it instead of
+  `%APPDATA%` / `~/.config`; ship the Windows portable zip with the marker
+
 ## Next up
 
 - [ ] Hover tooltips (LSP `textDocument/hover`) with a small markdown renderer
