@@ -3,6 +3,23 @@
 Living list of what is next, known limitations, and ideas. Done items move to
 the git log; keep this file short and current.
 
+## Requested (2026-11-26)
+
+- [ ] **Bug:** recursive search in a folder crashes. Find out whether it is the renderer
+  (too many result quads/glyphs) or the search itself (memory, unbounded results), then
+  add limits. Check how VS Code does it: result caps, streaming results, excluded folders
+  and binary/large-file skipping
+- [ ] Workspaces like VS Code's, but smarter and never auto-opened on startup
+- [ ] More bundled fonts: research what editor users like (Reddit and similar threads)
+- [ ] More themes, using popular VS Code themes as references
+- [ ] Window transparency on Linux and Windows
+- [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
+- [ ] Full-featured status bar
+- [ ] File-type icons in the explorer and tabs, like VS Code's but in our own style
+- [ ] **New logo/icon:** a flat but 3D-looking flame in the style of Obsidian's logo,
+  centred, with no background. Keep the current colours, using contrast between them for
+  shading. No drop light
+
 ## Next up
 
 - [ ] Hover tooltips (LSP `textDocument/hover`) with a small markdown renderer
