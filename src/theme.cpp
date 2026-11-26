@@ -1,4 +1,7 @@
 #include "theme.h"
+#include "theme_builtin.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -15,6 +18,10 @@ const Token TOKENS[] = {
     {"editor.current_line", &Theme::current_line},
     {"editor.selection", &Theme::selection},
     {"editor.cursor", &Theme::cursor_color},
+    {"editor.bracket_match", &Theme::bracket_match},
+    {"editor.find_match", &Theme::find_match},
+    {"editor.find_match_active", &Theme::find_match_active},
+    {"editor.indent_guide", &Theme::indent_guide},
     {"gutter.background", &Theme::gutter_bg},
     {"gutter.line_number", &Theme::line_number},
     {"gutter.line_number_active", &Theme::line_number_active},
@@ -22,6 +29,7 @@ const Token TOKENS[] = {
     {"sidebar.selection", &Theme::tree_selection},
     {"tabs.background", &Theme::tab_bg},
     {"tabs.active_background", &Theme::tab_active_bg},
+    {"tabs.active_foreground", &Theme::tab_active_fg},
     {"tabs.inactive_foreground", &Theme::tab_inactive_fg},
     {"status.background", &Theme::status_bg},
     {"status.foreground", &Theme::status_fg},
@@ -37,13 +45,17 @@ const Token TOKENS[] = {
     {"ui.scrollbar", &Theme::scrollbar},
     {"syntax.comment", &Theme::comment},
     {"syntax.keyword", &Theme::keyword},
+    {"syntax.keyword_control", &Theme::keyword_control},
     {"syntax.string", &Theme::string_color},
     {"syntax.number", &Theme::number},
+    {"syntax.constant", &Theme::constant},
     {"syntax.function", &Theme::function_name},
     {"syntax.type", &Theme::type_color},
+    {"syntax.type_builtin", &Theme::type_builtin},
     {"syntax.operator", &Theme::operator_color},
     {"syntax.punctuation", &Theme::punctuation},
     {"syntax.property", &Theme::property},
+    {"syntax.variable", &Theme::variable},
     {"syntax.preprocessor", &Theme::preprocessor},
     {"diagnostic.error", &Theme::error},
     {"diagnostic.warning", &Theme::warning},
@@ -54,6 +66,42 @@ const Token TOKENS[] = {
     {"git.untracked", &Theme::git_untracked},
     {"git.ignored", &Theme::git_ignored},
 };
+
+// Tokens added after the first theme format. A theme that does not set one gets
+// it from its parent (alpha < 0 keeps the parent's alpha, otherwise the parent's
+// alpha is multiplied by it), but only when the parent itself was set in the same
+// file; otherwise the value inherited from the base theme stands. So older user
+// themes keep looking as they did, and a theme that only recolours keywords
+// recolours control-flow keywords too.
+struct Derived { Color Theme::*child; Color Theme::*parent; float alpha; };
+
+const Derived DERIVED[] = {
+    {&Theme::keyword_control, &Theme::keyword, -1.0f},
+    {&Theme::constant, &Theme::keyword, -1.0f},
+    {&Theme::type_builtin, &Theme::type_color, -1.0f},
+    {&Theme::variable, &Theme::fg, -1.0f},
+    {&Theme::tab_active_fg, &Theme::fg, -1.0f},
+    {&Theme::bracket_match, &Theme::fg_muted, 0.6f},
+    {&Theme::find_match, &Theme::warning, 0.22f},
+    {&Theme::find_match_active, &Theme::warning, 0.5f},
+    {&Theme::indent_guide, &Theme::line_number, 0.35f},
+};
+
+const char* token_key(Color Theme::*m) {
+    for (auto& tok : TOKENS)
+        if (tok.member == m) return tok.key;
+    return "";
+}
+
+void derive(Theme& t, Color Theme::*child, Color Theme::*parent, float alpha) {
+    t.*child = t.*parent;
+    if (alpha >= 0) (t.*child).a *= alpha;
+}
+
+// Fills every derived token from its parent (used for themes defined in code).
+void derive_all(Theme& t) {
+    for (auto& d : DERIVED) derive(t, d.child, d.parent, d.alpha);
+}
 
 bool parse_color(const std::string& v, Color& out) {
     if (v.size() < 4 || v[0] != '#') return false;
@@ -124,6 +172,7 @@ Theme light_theme() {
     const uint32_t ansi[16] = {0x2c2f35, 0xc92a2a, 0x2b8a3e, 0xa86b00, 0x1f5fd1, 0x8a3ffc, 0x0b7285, 0xb3b6bd,
                                0x6b6f78, 0xe03131, 0x37b24d, 0xc78a00, 0x3b7cff, 0xa463ff, 0x1098ad, 0xf3f3f5};
     for (int i = 0; i < 16; i++) t.ansi[i] = Color::hex(ansi[i]);
+    derive_all(t);
     return t;
 }
 
@@ -147,6 +196,7 @@ Theme high_contrast_theme() {
     t.function_name = Color::hex(0x00bbff); t.type_color = Color::hex(0xffff00);
     t.operator_color = Color::hex(0xff4444); t.punctuation = Color::hex(0xff4444);
     t.property = Color::hex(0x00bbff); t.preprocessor = t.keyword;
+    derive_all(t);
     return t;
 }
 
@@ -155,7 +205,11 @@ Theme high_contrast_theme() {
 std::string ThemeManager::serialize(const Theme& t) {
     std::ostringstream o;
     o << "# Overheat theme. Colours are #rrggbb or #rrggbbaa.\n"
-      << "# Copy this file, change `name`, and edit; or set `base` and override a few keys.\n"
+      << "# Copy this file, change `name`, and edit; or set `base` to any theme name\n"
+      << "# (e.g. base = \"Dracula\") and override a few keys. Keys left out of a file\n"
+      << "# come from the base; keyword_control, constant, type_builtin and variable\n"
+      << "# follow keyword / type / editor.foreground when only those are set.\n"
+      << "# This file is regenerated by Overheat; edit a copy.\n"
       << "name = \"" << t.name << "\"\n"
       << "dark = " << (t.dark ? "true" : "false") << "\n";
     std::string section;
@@ -180,14 +234,32 @@ void ThemeManager::init(const fs::path& config_dir) {
         e.builtin = t;
         entries_.push_back(std::move(e));
     }
+    // Themes modelled on popular VS Code themes, written in the user theme format.
+    for (const char* src : builtin_theme_sources()) {
+        std::istringstream in(src);
+        Entry e;
+        parse_stream(in, "<built-in>", e);
+        Theme t;
+        if (e.has_dark && !e.builtin.dark) t = light_theme();
+        t.name = e.name;
+        t.dark = e.builtin.dark;
+        apply_overrides(t, e.overrides, "built-in theme " + e.name);
+        e.overrides.clear();
+        e.builtin = t;
+        entries_.push_back(std::move(e));
+    }
     std::error_code ec;
     fs::create_directories(themes_dir(), ec);
-    // Ship editable copies of the built-ins so users have a starting point.
+    // Ship editable copies of the built-ins so users have a starting point. They
+    // are rewritten when the format gains tokens; they are never loaded.
     for (const char* stem : {"overheat-dark", "overheat-light"}) {
         fs::path p = themes_dir() / (std::string(stem) + ".example.toml");
-        if (!fs::exists(p, ec)) {
+        std::string text = serialize(std::string(stem) == "overheat-dark" ? Theme{} : light_theme());
+        std::ifstream old(p);
+        std::string cur((std::istreambuf_iterator<char>(old)), std::istreambuf_iterator<char>());
+        if (cur != text) {
             std::ofstream out(p);
-            out << serialize(std::string(stem) == "overheat-dark" ? Theme{} : light_theme());
+            out << text;
         }
     }
     scan_user_themes();
@@ -212,6 +284,12 @@ void ThemeManager::scan_user_themes() {
 bool ThemeManager::parse_file(const fs::path& path, Entry& e) const {
     std::ifstream in(path);
     if (!in) return false;
+    parse_stream(in, path.string(), e);
+    if (e.name.empty()) e.name = path.stem().string();
+    return true;
+}
+
+void ThemeManager::parse_stream(std::istream& in, const std::string& label, Entry& e) {
     std::string section, line;
     int lineno = 0;
     while (std::getline(in, line)) {
@@ -224,18 +302,29 @@ bool ThemeManager::parse_file(const fs::path& path, Entry& e) const {
         if (line.front() == '[' && line.back() == ']') { section = trim(line.substr(1, line.size() - 2)); continue; }
         auto eq = line.find('=');
         if (eq == std::string::npos) {
-            std::fprintf(stderr, "theme %s:%d: expected key = value\n", path.c_str(), lineno);
+            std::fprintf(stderr, "theme %s:%d: expected key = value\n", label.c_str(), lineno);
             continue;
         }
         std::string key = trim(line.substr(0, eq));
         std::string value = unquote(line.substr(eq + 1));
         if (section.empty() && key == "name") e.name = value;
         else if (section.empty() && key == "base") e.base = value;
-        else if (section.empty() && key == "dark") e.builtin.dark = (value == "true");
+        else if (section.empty() && key == "dark") { e.builtin.dark = (value == "true"); e.has_dark = true; }
         else e.overrides.push_back({section.empty() ? key : section + "." + key, value});
     }
-    if (e.name.empty()) e.name = path.stem().string();
-    return true;
+}
+
+void ThemeManager::apply_overrides(Theme& out, const std::vector<std::pair<std::string, std::string>>& overrides,
+                                   const std::string& label) {
+    for (auto& [key, value] : overrides)
+        if (!set_token(out, key, value))
+            std::fprintf(stderr, "theme %s: unknown key or bad colour: %s = %s\n",
+                         label.c_str(), key.c_str(), value.c_str());
+    auto has = [&](const char* key) {
+        return std::any_of(overrides.begin(), overrides.end(), [&](auto& kv) { return kv.first == key; });
+    };
+    for (auto& d : DERIVED)
+        if (!has(token_key(d.child)) && has(token_key(d.parent))) derive(out, d.child, d.parent, d.alpha);
 }
 
 const ThemeManager::Entry* ThemeManager::find(const std::string& name) const {
@@ -251,20 +340,38 @@ bool ThemeManager::resolve(const std::string& name, Theme& out, int depth) const
         out = e->builtin;
         return true;
     }
-    // User theme: start from its base (default: Overheat Dark), then apply overrides.
-    if (e->base.empty() || e->base == e->name || !resolve(e->base, out, depth + 1)) out = Theme{};
+    // User theme: start from its base (default: Overheat Dark, or Overheat Light
+    // for `dark = false`), then apply overrides.
+    bool based = !e->base.empty() && e->base != e->name && resolve(e->base, out, depth + 1);
+    if (!based) out = (e->has_dark && !e->builtin.dark) ? light_theme() : Theme{};
     out.name = e->name;
-    out.dark = e->builtin.dark;
-    for (auto& [key, value] : e->overrides)
-        if (!set_token(out, key, value))
-            std::fprintf(stderr, "theme %s: unknown key or bad colour: %s = %s\n",
-                         e->file.c_str(), key.c_str(), value.c_str());
+    if (e->has_dark) out.dark = e->builtin.dark;
+    apply_overrides(out, e->overrides, e->file.string());
     return true;
 }
 
 std::vector<std::string> ThemeManager::names() const {
     std::vector<std::string> out;
     for (auto& e : entries_) out.push_back(e.name);
+    return out;
+}
+
+std::vector<ThemeManager::Info> ThemeManager::list() const {
+    std::vector<Info> out;
+    for (auto& e : entries_) {
+        Theme t;
+        if (!resolve(e.name, t)) continue;
+        out.push_back({e.name, t.dark, !e.file.empty()});
+    }
+    // Dark themes first, then light; alphabetical within each group.
+    auto lower = [](std::string s) {
+        for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::stable_sort(out.begin(), out.end(), [&](const Info& a, const Info& b) {
+        if (a.dark != b.dark) return a.dark;
+        return lower(a.name) < lower(b.name);
+    });
     return out;
 }
 

@@ -104,6 +104,7 @@ set(OVERHEAT_SOURCES
     src/keys.cpp
     src/script.cpp
     src/theme.cpp
+    src/theme_builtin.cpp
     src/vfs.cpp
     src/fonts.cpp
     src/remote.cpp

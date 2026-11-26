@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -7,12 +8,20 @@ namespace oh {
 
 // Built-in themes plus user themes from <config>/themes/*.toml. A theme file may
 // set `base = "<theme name>"` and override only some tokens. The active theme
-// file is watched and re-applied when it changes on disk.
+// file is watched and re-applied when it changes on disk. Most built-ins are
+// themselves written in the TOML format (theme_builtin.cpp).
 class ThemeManager {
 public:
     void init(const fs::path& config_dir);
 
     std::vector<std::string> names() const;
+    struct Info {
+        std::string name;
+        bool dark = true;
+        bool user = false;  // from a file in themes_dir()
+    };
+    // All themes for a picker: dark ones first, then light, each sorted by name.
+    std::vector<Info> list() const;
     const std::string& current() const { return current_; }
     bool apply(const std::string& name, Theme& out);
     // Re-reads theme files whose mtime changed; re-applies if the active one did.
@@ -35,6 +44,7 @@ private:
         fs::path file;  // empty for built-ins
         fs::file_time_type mtime{};
         std::string base;
+        bool has_dark = false;  // `dark = ...` given explicitly
         std::vector<std::pair<std::string, std::string>> overrides;  // token -> value
         Theme builtin;
     };
@@ -44,6 +54,9 @@ private:
 
     void scan_user_themes();
     bool parse_file(const fs::path& path, Entry& e) const;
+    static void parse_stream(std::istream& in, const std::string& label, Entry& e);
+    static void apply_overrides(Theme& out, const std::vector<std::pair<std::string, std::string>>& overrides,
+                                const std::string& label);
     bool resolve(const std::string& name, Theme& out, int depth = 0) const;
     const Entry* find(const std::string& name) const;
 };

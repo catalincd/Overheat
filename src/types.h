@@ -73,6 +73,11 @@ struct Theme {
     Color cursor_color  = Color::hex(0x5b9cff);
     Color tree_selection = Color::hex(0x5b9cff, 0.18f);
     Color scrollbar     = Color::hex(0xffffff, 0.10f);
+    Color tab_active_fg = Color::hex(0xd6d7db);
+    Color bracket_match = Color::hex(0x8a8d96, 0.6f);   // outline around the matching bracket
+    Color find_match    = Color::hex(0xe5b350, 0.22f);
+    Color find_match_active = Color::hex(0xe5b350, 0.5f);
+    Color indent_guide  = Color::hex(0x4d5058, 0.35f);
 
     // Syntax
     Color comment       = Color::hex(0x6b6f78);
@@ -85,6 +90,10 @@ struct Theme {
     Color punctuation   = Color::hex(0x8a8d96);
     Color property      = Color::hex(0xc7cbd6);
     Color preprocessor  = Color::hex(0xb392f0);
+    Color keyword_control = Color::hex(0xb392f0);  // if/for/return/...
+    Color constant      = Color::hex(0xb392f0);    // true/false/nullptr/this
+    Color type_builtin  = Color::hex(0x6fd0c5);    // int/char/void/...
+    Color variable      = Color::hex(0xd6d7db);    // plain identifiers
 
     // Diagnostics and git
     Color error         = Color::hex(0xf26d6d);
@@ -131,7 +140,8 @@ struct Selection {
 enum class TokenType : uint8_t {
     Normal, Keyword, String, Number, Comment, Function,
     Type, Operator, Punctuation, Preprocessor, Variable,
-    Property, Tag, Attribute, Builtin, Error
+    Property, Tag, Attribute, Builtin, Error,
+    KeywordControl, Constant, BuiltinType
 };
 
 struct Token {

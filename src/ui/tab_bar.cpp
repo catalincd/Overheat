@@ -106,7 +106,7 @@ void TabBar::render(RenderContext& ctx, Rect bounds) {
         } else if (hover) {
             ctx.r->add_rect({x, bounds.y, w, bounds.h}, th.surface_hover);
         }
-        ctx.r->add_text(x + PAD, baseline, tab_title(tab), active || hover ? th.fg : th.tab_inactive_fg, *ctx.font);
+        ctx.r->add_text(x + PAD, baseline, tab_title(tab), active ? th.tab_active_fg : hover ? th.fg : th.tab_inactive_fg, *ctx.font);
 
         // Close glyph; an unsaved tab shows a dot in its place.
         float cx = x + w - PAD - CLOSE_W + 4.0f;
