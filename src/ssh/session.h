@@ -21,6 +21,10 @@ struct SSHConfig {
     std::string key_passphrase;
     std::string known_hosts;               // OpenSSH known_hosts file to verify against
     bool trust_new_host = false;           // add an unknown host key (after user consent)
+    // If set, the host key's "SHA256:..." fingerprint must equal this and known_hosts
+    // is not consulted (a second connection to a host the user already verified).
+    std::string pinned_fingerprint;
+    int timeout_ms = 20000;                // libssh2 blocking-call timeout
 };
 
 enum class SSHConnectStatus { Ok, NetworkError, HostUnknown, HostChanged, AuthFailed };
