@@ -64,7 +64,7 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 <td valign="top" width="33%">
 
 ### 🧠 Code intelligence
-- tree-sitter highlighting (C, C++)
+- tree-sitter highlighting (C, C++, Rust)
 - Language Server Protocol: diagnostics, completion, go to definition
 - Breadcrumbs with the enclosing class and function
 - Minimap with a viewport you can drag
@@ -298,7 +298,7 @@ word_wrap = true    # also: font_family, font_size, minimap, breadcrumbs, ligatu
 
 - **Key bindings:** use the shortcut editor in Settings, or edit `keybindings.json`
   (`{"Ctrl+Alt+T": "toggle_terminal"}`).
-- **Language servers:** C and C++ use `clangd` from your `PATH`. Give it a
+- **Language servers:** C and C++ use `clangd`, Rust uses `rust-analyzer`, from your `PATH`. Give clangd a
   `compile_commands.json` (`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`) for accurate results.
 - **AI chat (draft):** choose a backend with *AI: Select Backend*. Any OpenAI-compatible
   `/v1/chat/completions` endpoint works. API keys are read from the `OVERHEAT_LLM_API_KEY`
@@ -341,7 +341,7 @@ src/
 ├── lsp/ git/ ssh/     language servers, libgit2, libssh2
 shaders/               quad.vert / quad.frag (GLSL → SPIR-V, embedded)
 packaging/             windows/ (NSIS, MinGW toolchain), linux/, arch/
-third_party/           tree-sitter core + C/C++ grammars (MIT)
+third_party/           tree-sitter core + C/C++/Rust grammars (MIT)
 ```
 
 ## 🗺 Roadmap

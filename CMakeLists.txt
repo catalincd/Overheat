@@ -29,14 +29,20 @@ set_target_properties(tree_sitter PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_
 target_compile_definitions(tree_sitter PRIVATE _POSIX_C_SOURCE=200112L _DEFAULT_SOURCE)
 target_compile_options(tree_sitter PRIVATE -O2 -w)
 
-add_library(ts_grammars STATIC
-    third_party/tree-sitter-c/parser.c
-    third_party/tree-sitter-cpp/parser.c
-    third_party/tree-sitter-cpp/scanner.c)
-set_source_files_properties(third_party/tree-sitter-c/parser.c PROPERTIES
-    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/tree-sitter-c)
-set_source_files_properties(third_party/tree-sitter-cpp/parser.c third_party/tree-sitter-cpp/scanner.c PROPERTIES
-    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/tree-sitter-cpp)
+# Each grammar lives in third_party/tree-sitter-<name>/ (parser.c, optional scanner.c,
+# its own tree_sitter/*.h) and is registered in the GRAMMARS table in src/editor/syntax.cpp.
+set(TS_GRAMMARS c cpp rust)
+add_library(ts_grammars STATIC)
+foreach(grammar ${TS_GRAMMARS})
+    set(dir ${CMAKE_SOURCE_DIR}/third_party/tree-sitter-${grammar})
+    set(srcs ${dir}/parser.c)
+    if(EXISTS ${dir}/scanner.c)
+        list(APPEND srcs ${dir}/scanner.c)
+    endif()
+    target_sources(ts_grammars PRIVATE ${srcs})
+    # Per-file include dir: every grammar ships its own (possibly different) tree_sitter/parser.h.
+    set_source_files_properties(${srcs} PROPERTIES INCLUDE_DIRECTORIES ${dir})
+endforeach()
 set_target_properties(ts_grammars PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
 target_compile_options(ts_grammars PRIVATE -O2 -w)
 
