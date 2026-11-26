@@ -120,6 +120,11 @@ set(OVERHEAT_SOURCES
     src/workspace.cpp
     src/workspace_store.cpp
     src/lsp_glue.cpp
+    src/debug/json.cpp
+    src/debug/dap_client.cpp
+    src/debug/breakpoints.cpp
+    src/debug/launch_config.cpp
+    src/debug/debugger.cpp
     src/platform/platform_posix.cpp
     src/platform/platform_win.cpp
 )
@@ -237,3 +242,11 @@ target_include_directories(sysmon_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(sysmon_test PRIVATE -fsanitize=address,undefined)
 target_link_options(sysmon_test PRIVATE -fsanitize=address,undefined)
 add_test(NAME sysmon_test COMMAND sysmon_test)
+
+add_executable(debug_test tests/debug_test.cpp src/debug/json.cpp src/debug/dap_client.cpp
+               src/debug/breakpoints.cpp src/debug/launch_config.cpp src/platform/platform_posix.cpp)
+target_include_directories(debug_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(debug_test PRIVATE PkgConfig::FREETYPE pthread util dl)
+target_compile_options(debug_test PRIVATE -fsanitize=address,undefined)
+target_link_options(debug_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME debug_test COMMAND debug_test ${CMAKE_BINARY_DIR}/debug_test_dir)
