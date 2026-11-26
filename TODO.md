@@ -49,6 +49,22 @@ the git log; keep this file short and current.
   - spring-based smooth scrolling for page/jump scrolls, and animated window/split resizes
   - each one configurable (duration, trail length, effect) and covered by the existing
     animations off switch; must stay within the frame budget
+- [ ] **Build, lint and navigation like VS Code**
+  - **Build tasks:** a project task file (like `.vscode/tasks.json`: name, command, cwd,
+    env, default build task) with Run Build Task (Ctrl+Shift+B) and Run Task… in the
+    palette. Output goes to a task terminal, and problem matchers (gcc/clang, MSVC, rustc,
+    tsc, generic `file:line:col`) feed the Problems panel. Auto-detect CMake, Make, Cargo
+    and npm scripts. Also import `.vscode/tasks.json` when present. Works over Remote-SSH.
+    Builds on the clickable-errors item below.
+  - **Linting:** today only the language server's diagnostics show (clangd). Add
+    clang-tidy through clangd (`.clang-tidy`), external linters per language (ruff,
+    eslint, shellcheck…) run on save with problem matchers, quick fixes / code actions
+    (Ctrl+.), and a Problems panel listing all diagnostics with severity filters.
+  - **Go to definition:** F12 exists. Add Ctrl+click and hover underline on symbols,
+    Peek Definition (Alt+F12) inline, Go to Declaration / Type Definition /
+    Implementation, a picker when there are several results, and back/forward
+    navigation history (Alt+Left/Right in VS Code; reconcile with the 4coder arrows
+    item). It must work for remote files too.
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
 
 ## Follow-ups from the 2026-11-26 batch
