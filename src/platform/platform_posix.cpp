@@ -234,7 +234,18 @@ bool Pty::exited() {
 void Pty::kill() {
     if (impl_->pid > 0) {
         ::kill(impl_->pid, SIGHUP);
-        waitpid(impl_->pid, nullptr, 0);
+        // A shell still busy in its rc files can hold off SIGHUP; never block the UI on it.
+        bool gone = false;
+        for (int i = 0; i < 30 && !gone; i++) {
+            pid_t r = waitpid(impl_->pid, nullptr, WNOHANG);
+            gone = r == impl_->pid || (r < 0 && errno != EINTR);
+            if (!gone) usleep(10000);
+        }
+        if (!gone) {
+            ::kill(-impl_->pid, SIGKILL);  // its session's process group (forkpty: pgid == pid)
+            ::kill(impl_->pid, SIGKILL);
+            waitpid(impl_->pid, nullptr, 0);
+        }
         impl_->pid = -1;
     }
     if (impl_->fd >= 0) close(impl_->fd);
