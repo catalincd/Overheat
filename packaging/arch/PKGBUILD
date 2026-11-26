@@ -28,8 +28,8 @@ build() {
 package() {
     DESTDIR="$pkgdir" cmake --install build
     install -Dm644 "$pkgname-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-    install -Dm644 "$pkgname-$pkgver/assets/fonts/JetBrainsMono-OFL.txt" \
-        "$pkgdir/usr/share/licenses/$pkgname/JetBrainsMono-OFL.txt"
+    # Bundled fonts (/usr/share/overheat/fonts): one license file per family.
+    install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" "$pkgname-$pkgver"/assets/fonts/*.txt
     install -Dm644 "$pkgname-$pkgver/third_party/tree-sitter/LICENSE" \
         "$pkgdir/usr/share/licenses/$pkgname/tree-sitter-LICENSE"
 }

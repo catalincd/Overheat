@@ -171,12 +171,16 @@ else()
     target_link_options(overheat PRIVATE -O3 -flto=auto)
 endif()
 
+# Bundled fonts next to the binary, as in the Windows install, so a build-tree
+# run finds them (src/fonts.cpp looks in exe_dir/fonts).
+add_custom_command(TARGET overheat POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/fonts $<TARGET_FILE_DIR:overheat>/fonts)
+
 # ---- install layout ----
 include(GNUInstallDirs)
 if(WIN32)
     install(TARGETS overheat RUNTIME DESTINATION .)
-    install(FILES assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf assets/fonts/JetBrainsMono-OFL.txt
-            DESTINATION fonts)
+    install(DIRECTORY assets/fonts/ DESTINATION fonts)
     install(FILES assets/logo/overheat.ico DESTINATION .)
 else()
     install(TARGETS overheat RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -186,8 +190,7 @@ else()
                 DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps RENAME overheat.png)
     endforeach()
     install(FILES assets/logo/overheat.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
-    install(FILES assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf assets/fonts/JetBrainsMono-OFL.txt
-            DESTINATION ${CMAKE_INSTALL_DATADIR}/overheat/fonts)
+    install(DIRECTORY assets/fonts/ DESTINATION ${CMAKE_INSTALL_DATADIR}/overheat/fonts)
 endif()
 
 if(WIN32 OR CMAKE_CROSSCOMPILING)
