@@ -21,6 +21,12 @@ the git log; keep this file short and current.
 - [ ] Layout at small sizes (seen at 520x380): the sidebar and terminal keep their size and
   the editor collapses to nothing. Give the editor a minimum size and shrink or auto-hide
   the sidebar and terminal first, like VS Code
+- [ ] **4coder-style indentation**: indentation computed from the code structure
+  (tree-sitter scopes, brackets, continued statements) instead of typed. Every edit
+  re-indents the affected lines automatically. Optionally "virtual whitespace": leading
+  whitespace is drawn from the computed layout and the file's own indentation is ignored,
+  with a setting to write the computed indentation back on save. Per-language rules;
+  off by default, with an explicit "Reindent selection / file" command either way
 - [ ] (Optional, low priority) Wobbly windows or other KDE-inspired animations
 
 ## Follow-ups from the 2026-11-26 batch
