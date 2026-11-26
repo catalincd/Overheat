@@ -110,6 +110,33 @@ std::string user_name() {
     return u.empty() ? "user" : u;
 }
 
+std::vector<std::string> environment() {
+    std::vector<std::string> out;
+    wchar_t* block = GetEnvironmentStringsW();
+    for (wchar_t* e = block; e && *e; e += wcslen(e) + 1)
+        if (*e != L'=') out.push_back(narrow(e));  // skip the per-drive "=C:=C:\" entries
+    if (block) FreeEnvironmentStringsW(block);
+    return out;
+}
+
+void kill_process(long pid) {
+    if (pid <= 0) return;
+    if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(pid))) {
+        TerminateProcess(h, 1);
+        CloseHandle(h);
+    }
+}
+
+bool process_alive(long pid) {
+    if (pid <= 0) return false;
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (!h) return false;
+    DWORD code = 0;
+    bool alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+    CloseHandle(h);
+    return alive;
+}
+
 std::vector<std::string> default_shell() {
     // PowerShell 7 if installed, then Windows PowerShell, then cmd.
     wchar_t found[MAX_PATH];
@@ -232,6 +259,7 @@ int Process::wait() {
 }
 
 bool Process::running() const { return impl_->process != nullptr; }
+long Process::pid() const { return impl_->process ? static_cast<long>(GetProcessId(impl_->process)) : 0; }
 
 // ---------------------------------------------------------------- Pty (ConPTY)
 

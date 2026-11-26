@@ -49,6 +49,8 @@ public:
         Position start_pt, old_end_pt, new_end_pt;
     };
     std::vector<Change> take_changes() { return std::exchange(changes_, {}); }
+    // Optional observer of every change as it happens (breakpoints follow edits).
+    std::function<void(const TextBuffer&, const Change&)> on_change;
     // Increments on every mutation; cheap change detection for derived data.
     uint64_t version() const { return version_; }
 

@@ -566,6 +566,47 @@ std::vector<SyntaxHighlighter::Scope> SyntaxHighlighter::scope_at(const TextBuff
     return out;
 }
 
+bool SyntaxHighlighter::function_range_at(size_t offset, size_t& start, size_t& end) const {
+    if (!tree_) return false;
+    uint32_t off = static_cast<uint32_t>(offset);
+    TSNode n = ts_node_descendant_for_byte_range(ts_tree_root_node(tree_), off, off);
+    for (; !ts_node_is_null(n); n = ts_node_parent(n)) {
+        const char* type = ts_node_type(n);
+        if (is(type, "function_definition") || is(type, "function_item")) {  // lambdas: the enclosing function
+            start = ts_node_start_byte(n);
+            end = ts_node_end_byte(n);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::pair<size_t, size_t>> SyntaxHighlighter::identifiers_in(size_t start, size_t end) const {
+    std::vector<std::pair<size_t, size_t>> out;
+    if (!tree_) return out;
+    TSTreeCursor cur = ts_tree_cursor_new(ts_tree_root_node(tree_));
+    // Depth-first walk, skipping subtrees outside [start, end).
+    for (;;) {
+        TSNode n = ts_tree_cursor_current_node(&cur);
+        uint32_t a = ts_node_start_byte(n), b = ts_node_end_byte(n);
+        bool overlaps = b > start && a < end;
+        if (overlaps) {
+            const char* type = ts_node_type(n);
+            if (is(type, "identifier") || is(type, "self")) {
+                out.emplace_back(a, b - a);
+            } else if (ts_tree_cursor_goto_first_child(&cur)) {
+                continue;
+            }
+        }
+        while (!ts_tree_cursor_goto_next_sibling(&cur)) {
+            if (!ts_tree_cursor_goto_parent(&cur)) {
+                ts_tree_cursor_delete(&cur);
+                return out;
+            }
+        }
+    }
+}
+
 std::vector<Token> SyntaxHighlighter::tokens_for_line(const TextBuffer& buffer, size_t line_start_byte,
                                                        size_t line_length) const {
     std::vector<Token> tokens;

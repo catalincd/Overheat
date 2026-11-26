@@ -113,6 +113,7 @@ void TextBuffer::record_change(size_t start, const std::string& removed, const s
         return p;
     };
     changes_.push_back({start, removed.size(), inserted.size(), s, advance(s, removed), advance(s, inserted)});
+    if (on_change) on_change(*this, changes_.back());
 }
 
 void TextBuffer::insert(size_t offset, const std::string& text) {

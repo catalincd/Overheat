@@ -37,6 +37,11 @@ public:
         std::string name;
     };
     std::vector<Scope> scope_at(const TextBuffer& buffer, size_t offset) const;
+    // Byte range of the innermost function definition (C/C++) or fn item (Rust) around
+    // offset; false outside any. Used by the debugger's inline values.
+    bool function_range_at(size_t offset, size_t& start, size_t& end) const;
+    // Plain identifiers (not fields or types) in [start, end): byte offset + length.
+    std::vector<std::pair<size_t, size_t>> identifiers_in(size_t start, size_t end) const;
 
     static std::string detect_language(const fs::path& path);
     // True when a tree-sitter grammar is built in for this language id.

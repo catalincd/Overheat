@@ -18,6 +18,12 @@ std::string user_name();
 std::string getenv_str(const char* name);
 int process_id();
 
+// This process's environment as NAME=value strings.
+std::vector<std::string> environment();
+// Forcefully ends a process by id (a debuggee left behind by a crashed debugger).
+void kill_process(long pid);
+bool process_alive(long pid);
+
 // Default shell for the integrated terminal (argv).
 std::vector<std::string> default_shell();
 // Fonts tried in order when no font family is configured.
@@ -39,6 +45,7 @@ public:
     void terminate();   // ask the process to stop (SIGTERM / TerminateProcess)
     int wait();         // exit code, or -1
     bool running() const;
+    long pid() const;   // 0 when not running
 
 private:
     struct Impl;
