@@ -5,6 +5,7 @@
 #include "ui/completion_popup.h"
 #include "renderer/font_atlas.h"
 #include "anim.h"
+#include "ui/scope_highlight.h"
 #include <unordered_map>
 #include <memory>
 
@@ -55,6 +56,8 @@ private:
     bool shape_ligatures_ = true;
     uint64_t shape_generation_ = 0;
     CompletionPopup completion_;
+    ScopeHighlight scope_;  // bracket depth colours, scope tints, occurrence marks
+    void render_scope_highlight(RenderContext& ctx, Rect text_rect, bool& drew_pair);
     const std::vector<LSPDiagnostic>* diagnostics_ = nullptr;
     void render_diagnostics(RenderContext& ctx, Rect text_rect);
     void render_scrollbar(RenderContext& ctx, Rect text_rect);

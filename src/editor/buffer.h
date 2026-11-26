@@ -51,6 +51,9 @@ public:
     std::vector<Change> take_changes() { return std::exchange(changes_, {}); }
     // Increments on every mutation; cheap change detection for derived data.
     uint64_t version() const { return version_; }
+    // Smallest byte offset touched by any mutation after `since` (SIZE_MAX if none,
+    // 0 if the history no longer reaches back that far or the text was reloaded).
+    size_t earliest_change_since(uint64_t since) const;
 
     bool is_modified() const { return modified_; }
     void set_unmodified() { modified_ = false; save_point_ = undo_stack_.size(); }
@@ -91,6 +94,8 @@ private:
 
     std::vector<Change> changes_;
     uint64_t version_ = 0;
+    std::vector<std::pair<uint64_t, size_t>> edit_log_;  // (version after change, start offset)
+    void log_edit(size_t start);
     void record_change(size_t start, const std::string& removed, const std::string& inserted);
 
     void rebuild_line_cache() const;

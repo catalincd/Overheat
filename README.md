@@ -55,6 +55,8 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 - Multi-cursor: <kbd>Ctrl</kbd>+<kbd>D</kbd>, <kbd>Alt</kbd>+click, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>
 - Auto-closing brackets and quotes
 - Bracket matching, indent guides
+- 4coder-style structure: brackets coloured by depth, tinted scopes around the cursor,
+  underlined occurrences of the identifier under the cursor, highlighted jump lines
 - Word wrap (<kbd>Alt</kbd>+<kbd>Z</kbd>)
 - Move, duplicate and delete lines, toggle comments
 - Find and replace, find in files
@@ -228,6 +230,9 @@ ligatures = true
 word_wrap = false
 minimap = true
 animations = true
+bracket_colors = true                # ( [ { coloured by nesting depth
+scope_highlight = true               # tint the { } scopes around the cursor
+occurrence_underline = true          # mark the identifier under the cursor
 opacity = 1.0                        # 0.5-1.0: translucent background, opaque text
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
 remote_monitor = true                # host stats strip while on Remote-SSH
@@ -260,7 +265,10 @@ comment = "#7d6e60"
 ```
 
 Pick it with <kbd>Ctrl</kbd>+<kbd>K</kbd> <kbd>Ctrl</kbd>+<kbd>T</kbd>. Colours are `#rrggbb` or `#rrggbbaa`; theme files
-reload when you save them.
+reload when you save them. Structure highlighting has its own `[editor]` keys: `bracket1` to `bracket6`
+(depth colours; derived from the terminal palette when a theme sets only that), `scope_tint`,
+`scope_boundary`, `occurrence`, `jump_line`, and `occurrence_style` / `jump_line_style`
+(`underline`, `box` or `background`). `themes/overheat-dark.example.toml` lists every key.
 
 </details>
 

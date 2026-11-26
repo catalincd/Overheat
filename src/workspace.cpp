@@ -701,6 +701,12 @@ void App::apply_workspace_settings(const Workspace& ws) {
             bool prev = anim::enabled;
             anim::enabled = on;
             workspace_undo_.push_back([prev] { anim::enabled = prev; });
+        } else if (key == "bracket_colors" || key == "scope_highlight" || key == "occurrence_underline") {
+            bool* flag = key == "bracket_colors" ? &ScopeHighlight::bracket_colors
+                       : key == "scope_highlight" ? &ScopeHighlight::scopes : &ScopeHighlight::occurrences;
+            bool prev = *flag;
+            *flag = on;
+            workspace_undo_.push_back([flag, prev] { *flag = prev; });
         } else if (key == "auto_close_brackets") {
             bool prev = Editor::auto_close_pairs;
             Editor::auto_close_pairs = on;

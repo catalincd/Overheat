@@ -89,6 +89,7 @@ set(OVERHEAT_SOURCES
     src/editor/syntax.cpp
     src/ui/panel.cpp
     src/ui/editor_view.cpp
+    src/ui/scope_highlight.cpp
     src/ui/file_tree.cpp
     src/ui/terminal.cpp
     src/ui/status_bar.cpp

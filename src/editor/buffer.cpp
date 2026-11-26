@@ -25,6 +25,7 @@ void TextBuffer::load_string(const std::string& text) {
     redo_stack_.clear();
     changes_.clear();
     version_++;
+    log_edit(0);
     current_group_ = nullptr;
     save_point_ = 0;
     modified_ = false;
@@ -102,8 +103,22 @@ void TextBuffer::split_piece(size_t piece_idx, size_t local_offset) {
     pieces_.insert(pieces_.begin() + static_cast<ptrdiff_t>(piece_idx) + 1, right);
 }
 
+void TextBuffer::log_edit(size_t start) {
+    if (edit_log_.size() >= 512) edit_log_.erase(edit_log_.begin(), edit_log_.begin() + 256);
+    edit_log_.push_back({version_, start});
+}
+
+size_t TextBuffer::earliest_change_since(uint64_t since) const {
+    if (since >= version_) return SIZE_MAX;
+    if (edit_log_.empty() || edit_log_.front().first > since + 1) return 0;
+    size_t lo = SIZE_MAX;
+    for (auto it = edit_log_.rbegin(); it != edit_log_.rend() && it->first > since; ++it) lo = std::min(lo, it->second);
+    return lo;
+}
+
 void TextBuffer::record_change(size_t start, const std::string& removed, const std::string& inserted) {
     version_++;
+    log_edit(start);
     Position s = position_of(start);
     auto advance = [](Position p, const std::string& t) {
         for (char c : t) {

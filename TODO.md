@@ -27,13 +27,6 @@ the git log; keep this file short and current.
   whitespace is drawn from the computed layout and the file's own indentation is ignored,
   with a setting to write the computed indentation back on save. Per-language rules;
   off by default, with an explicit "Reindent selection / file" command either way
-- [ ] **4coder-style highlighting of brackets and scopes**: colour parentheses, brackets and
-  braces by nesting depth; tint the backgrounds of enclosing scopes around the cursor (one
-  shade per level); highlight the matching pair and the scope boundaries more strongly
-  than the current bracket match
-- [ ] **4coder-style underlines**: underline the token under the cursor and its other
-  occurrences, and the lines of the current jump/compile-error location. Make the style
-  (underline, box, background) configurable per theme
 - [ ] **4coder-style Ctrl/Alt + arrows** (changes current bindings; make the old ones a
   "VS Code" keymap preset):
   - Ctrl+Left/Right: jump by whitespace boundaries (whole tokens like `foo.bar()`)

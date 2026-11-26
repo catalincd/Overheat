@@ -89,6 +89,15 @@ public:
     // when the line differs from HEAD.
     const GitBlame* blame_for_line(size_t line, bool& uncommitted);
 
+    // Jump location (4coder-style line highlight): the line of the last search hit,
+    // definition or (later) build error jumped to. Dropped when edits shift lines.
+    void set_jump_line(size_t line) { jump_ = std::pair{line, buffer_.line_count()}; }
+    void clear_jump_line() { jump_.reset(); }
+    std::optional<size_t> jump_line() const {
+        if (jump_ && jump_->second == buffer_.line_count()) return jump_->first;
+        return std::nullopt;
+    }
+
     // Re-reads the file from disk keeping cursor and scroll (e.g. after checkout).
     void reload();
 
@@ -106,6 +115,7 @@ private:
     uint64_t git_marks_version_ = UINT64_MAX;
     std::future<std::vector<GitBlame>> blame_job_;
     std::vector<GitBlame> blame_;  // index = HEAD line - 1
+    std::optional<std::pair<size_t, size_t>> jump_;  // (line, line count when set)
 
     void on_text_changed();
 };
