@@ -1,5 +1,6 @@
 #include "ui/tab_bar.h"
 #include "editor/editor.h"
+#include "ui/file_icons.h"
 #include "renderer/font_atlas.h"
 #include "renderer/renderer2d.h"
 #include <algorithm>
@@ -81,13 +82,14 @@ float TabBar::tab_width(const Tab& tab) const {
     std::string t = tab_title(tab);
     size_t chars = 0;
     for (unsigned char c : t) chars += (c & 0xC0) != 0x80;
-    return std::round(PAD * 2.0f + static_cast<float>(chars) * char_w_ + CLOSE_W + 6.0f);
+    return std::round(PAD * 2.0f + icon_w_ + static_cast<float>(chars) * char_w_ + CLOSE_W + 6.0f);
 }
 
 void TabBar::render(RenderContext& ctx, Rect bounds) {
     bounds_ = bounds;
     const Theme& th = *ctx.theme;
     char_w_ = ctx.font->char_width();
+    icon_w_ = file_icons::advance(*ctx.font);
     ctx.r->add_rect(bounds, th.tab_bg);
 
     float baseline = bounds.y + (bounds.h - ctx.font->line_height()) * 0.5f + ctx.font->ascender();
@@ -106,7 +108,9 @@ void TabBar::render(RenderContext& ctx, Rect bounds) {
         } else if (hover) {
             ctx.r->add_rect({x, bounds.y, w, bounds.h}, th.surface_hover);
         }
-        ctx.r->add_text(x + PAD, baseline, tab_title(tab), active ? th.tab_active_fg : hover ? th.fg : th.tab_inactive_fg, *ctx.font);
+        std::string title = tab_title(tab);
+        float tx = file_icons::draw(*ctx.r, *ctx.font, th, x + PAD, baseline, title, false);
+        ctx.r->add_text(tx, baseline, title, active ? th.tab_active_fg : hover ? th.fg : th.tab_inactive_fg, *ctx.font);
 
         // Close glyph; an unsaved tab shows a dot in its place.
         float cx = x + w - PAD - CLOSE_W + 4.0f;

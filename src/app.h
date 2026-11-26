@@ -305,6 +305,7 @@ private:
     SDL_Cursor* cursor_ns_ = nullptr;
     SDL_Cursor* cursor_default_ = nullptr;
     void select_theme();
+    void select_file_icons();
     void print_frame_stats() const;
 };
 

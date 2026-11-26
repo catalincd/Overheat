@@ -114,6 +114,7 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 
 ### 🎨 Look and feel
 - Overheat Dark and Light themes, plus your own TOML themes
+- Overheat's own file-type icons in the explorer, tabs, Quick Open and breadcrumbs (or minimal ones, or none)
 - Ten bundled coding fonts (Fira Code, Cascadia Code, Iosevka, Maple Mono, Monaspace, ...) or any installed monospace font, with ligatures
 - Text zoom with <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>-</kbd>/wheel
 - Quick, subtle animations (or none): Neovide-style cursor smear that flies between splits and into
@@ -252,6 +253,8 @@ cursor_vfx = "none"                  # railgun | torpedo | pixiedust | sonicboom
 scroll_animation_ms = 250            # smooth-scroll spring; 0 = instant
 wobbly = false                       # elastic pop for the palette and settings page
 keymap = "overheat"                  # or "vscode": Ctrl+arrows move by VS Code words
+animations = true
+file_icons = "overheat"              # "overheat" | "minimal" | "none"
 opacity = 1.0                        # 0.5-1.0: translucent background, opaque text
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
 remote_monitor = true                # host stats strip while on Remote-SSH
@@ -361,6 +364,9 @@ platform/ (POSIX · Win32)   lsp/ (JSON-RPC)   git/ (libgit2)   ssh/ (libssh2 + 
   space on an sRGB swapchain.
 - **Text:** glyphs are rasterised lazily into a 2048² atlas. HarfBuzz runs are cached per line, so
   ligatures cost nothing after the first frame.
+- **File icons:** a small icon font generated from code (`assets/icons/`) and embedded in the
+  binary. Marks go through the glyph path, so they follow zoom and stay sharp; the tinted tile
+  behind each one is a pixel-snapped quad, coloured per file type for dark or light themes.
 - **Editor core:** a piece table with positional undo groups and a change log that feeds
   tree-sitter's incremental `ts_tree_edit`. A fuzz test with ASan/UBSan guards it.
 - **Platform layer:** `src/platform/` wraps processes, pseudo-terminals (forkpty / ConPTY),
@@ -375,6 +381,7 @@ src/
 ├── platform/          POSIX + Win32 implementations
 ├── lsp/ git/ ssh/     language servers, libgit2, libssh2
 shaders/               quad.vert / quad.frag (GLSL → SPIR-V, embedded)
+assets/icons/          file-icon font and its generator (embedded at build time)
 packaging/             windows/ (NSIS, MinGW toolchain), linux/, arch/
 third_party/           tree-sitter core + C/C++/Rust grammars (MIT)
 ```

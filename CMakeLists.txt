@@ -77,6 +77,19 @@ add_custom_command(
 )
 add_custom_target(shaders ALL DEPENDS ${SPIRV_HEADER})
 
+# File-type icon font (assets/icons, built by build_icons.py and committed), embedded so
+# no install path is needed to find it.
+set(ICON_FONT_HEADER "${CMAKE_BINARY_DIR}/generated/overheat_icons_ttf.h")
+add_custom_command(
+    OUTPUT ${ICON_FONT_HEADER}
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_SOURCE_DIR}/assets/icons/OverheatIcons.ttf -DOUT=${ICON_FONT_HEADER}
+            -DVAR=overheat_icons_ttf -P ${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake
+    DEPENDS ${CMAKE_SOURCE_DIR}/assets/icons/OverheatIcons.ttf ${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake
+    COMMENT "Embedding the icon font"
+    VERBATIM
+)
+add_custom_target(icon_font ALL DEPENDS ${ICON_FONT_HEADER})
+
 set(OVERHEAT_SOURCES
     src/main.cpp
     src/app.cpp
@@ -95,6 +108,8 @@ set(OVERHEAT_SOURCES
     src/ui/status_bar.cpp
     src/ui/monitor_bar.cpp
     src/ui/tab_bar.cpp
+    src/ui/file_icons.cpp
+    src/ui/file_icon_map.cpp
     src/ui/command_palette.cpp
     src/ui/scm_panel.cpp
     src/ui/find_bar.cpp
@@ -131,7 +146,7 @@ if(WIN32)
 endif()
 
 add_executable(overheat ${OVERHEAT_SOURCES})
-add_dependencies(overheat shaders)
+add_dependencies(overheat shaders icon_font)
 
 target_include_directories(overheat PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -241,6 +256,10 @@ add_executable(workspace_test tests/workspace_test.cpp src/workspace_store.cpp)
 target_include_directories(workspace_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(workspace_test PRIVATE PkgConfig::FREETYPE)
 add_test(NAME workspace_test COMMAND workspace_test ${CMAKE_BINARY_DIR}/workspace_test_dir)
+
+add_executable(file_icon_test tests/file_icon_test.cpp src/ui/file_icon_map.cpp)
+target_include_directories(file_icon_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME file_icon_test COMMAND file_icon_test)
 
 add_executable(sysmon_test tests/sysmon_test.cpp src/sysmon.cpp)
 target_include_directories(sysmon_test PRIVATE ${CMAKE_SOURCE_DIR}/src)

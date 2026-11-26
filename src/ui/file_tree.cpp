@@ -1,4 +1,5 @@
 #include "ui/file_tree.h"
+#include "ui/file_icons.h"
 #include "renderer/font_atlas.h"
 #include "renderer/renderer2d.h"
 #include <SDL3/SDL_keycode.h>
@@ -160,13 +161,10 @@ void FileTree::render(RenderContext& ctx, Rect bounds) {
         }
 
         float x = bounds.x + 10.0f + static_cast<float>(entry->depth) * 14.0f;
-        if (entry->is_dir) {
+        if (entry->is_dir)
             ctx.r->add_char(x, baseline, entry->expanded ? 0xEAB4 : 0xEAB6, th.fg_muted, *ctx.font);
-            ctx.r->add_char(x + char_w + 6.0f, baseline, entry->expanded ? 0xEAF7 : 0xEA83, th.accent, *ctx.font);
-        } else {
-            ctx.r->add_char(x + char_w + 6.0f, baseline, 0xEA7B, th.fg_muted, *ctx.font);
-        }
-        float name_x = x + 2.0f * char_w + 14.0f;
+        float name_x = file_icons::draw(*ctx.r, *ctx.font, th, x + char_w + 6.0f, baseline, entry->name,
+                                        entry->is_dir, entry->expanded);
 
         Color name_color = th.fg;
         const char* badge = nullptr;
