@@ -49,6 +49,18 @@ the git log; keep this file short and current.
   - spring-based smooth scrolling for page/jump scrolls, and animated window/split resizes
   - each one configurable (duration, trail length, effect) and covered by the existing
     animations off switch; must stay within the frame budget
+- [ ] **Bug: opening large / binary files.** There is no binary detection today: the
+  file is read whole into the piece table and then highlighted, sent to the LSP and shown
+  in the minimap. Fix it like VS Code:
+  - detect binaries the way search does (NUL byte in the first 8 KiB) and show a
+    "binary file, open anyway?" card instead of the text; optionally a read-only hex view
+  - check the size before reading, also over SFTP: above about 50 MB ask first, above
+    a hard cap refuse or open read-only
+  - large text files: no tree-sitter, LSP, minimap, word wrap or git blame above a
+    threshold (status-bar note "large file mode"); consider mmap / lazy line indexing
+  - invalid UTF-8 must render (replacement glyphs) without breaking cursor movement,
+    and saving must not corrupt the bytes
+  - add tests: a 1 GB file, `/usr/bin/*`, a random-bytes file, a minified 50 MB JS line
 - [ ] **Build, lint and navigation like VS Code**
   - **Build tasks:** a project task file (like `.vscode/tasks.json`: name, command, cwd,
     env, default build task) with Run Build Task (Ctrl+Shift+B) and Run Task… in the
