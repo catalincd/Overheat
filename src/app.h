@@ -258,6 +258,11 @@ private:
     void handle_command(const std::string& cmd);
     void update(float dt);
     void render();
+    // Live resize: redraw from SDL's event watch while the OS runs its modal
+    // size/move loop (Windows), so the compositor never stretches a stale frame.
+    static bool SDLCALL live_resize_watch(void* userdata, SDL_Event* e);
+    void live_resize_frame();
+    bool rendering_ = false;
 
     void register_commands();
     void scan_project_files();

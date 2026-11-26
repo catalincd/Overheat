@@ -239,6 +239,12 @@ void App::run() {
         return ev.type != SDL_EVENT_KEY_UP;
     };
 
+    // While the user drags a window edge on Windows, the OS runs its own modal loop and
+    // this one is blocked. Without new frames, DWM stretches the last one to the new
+    // size, so the text appears to grow or shrink. SDL delivers live-resize EXPOSED
+    // events to event watches on the main thread from inside that loop; redraw there.
+    SDL_AddEventWatch(&App::live_resize_watch, this);
+
     while (running_) {
         // Event-driven: sleep until input, terminal output (SDL_EVENT_USER), the next
         // cursor blink, or the next scripted step. At most one frame per display refresh.
@@ -291,7 +297,9 @@ void App::run() {
         frame_start += Clock::now() - probe_start;  // test-harness waits are not frame time
         for (auto& label : script_.step(Clock::now())) pending_probes_.push_back(label);
 
+        rendering_ = true;
         render();
+        rendering_ = false;
         frame_count_++;
         if (anim::active) dirty = true;  // keep drawing until animations settle
 
@@ -306,9 +314,31 @@ void App::run() {
                          frame_ms, renderer_.quad_count());
         }
     }
+    SDL_RemoveEventWatch(&App::live_resize_watch, this);
     autosave_workspace();
     save_session();
     print_frame_stats();
+}
+
+bool SDLCALL App::live_resize_watch(void* userdata, SDL_Event* e) {
+    if (e->type == SDL_EVENT_WINDOW_EXPOSED && e->window.data1 == 1)
+        static_cast<App*>(userdata)->live_resize_frame();
+    return true;
+}
+
+void App::live_resize_frame() {
+    if (rendering_ || !first_paint_done_) return;
+    rendering_ = true;
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
+    VkExtent2D ext = vk_.extent();
+    if (w > 0 && h > 0 && (static_cast<uint32_t>(w) != ext.width || static_cast<uint32_t>(h) != ext.height))
+        vk_.recreate_swapchain();
+    anim::dt = 0.0f;
+    anim::active = false;
+    update(0.0f);
+    render();
+    rendering_ = false;
 }
 
 void App::print_frame_stats() const {
@@ -388,6 +418,7 @@ void App::handle_event(const SDL_Event& e) {
         break;
 
     case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:  // also DPI changes between monitors
         vk_.recreate_swapchain();
         break;
 
