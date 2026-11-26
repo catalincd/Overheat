@@ -284,3 +284,12 @@ foreach(f /usr/bin/ls /usr/bin/cmake /bin/sh)
     endif()
 endforeach()
 add_test(NAME file_check_test COMMAND file_check_test ${CMAKE_BINARY_DIR}/file_check_test_dir ${FILE_CHECK_SAMPLES})
+
+# Problem matchers, terminal links and task files against captured compiler output
+# (tests/fixtures/matchers, recorded by tests/projects/capture.sh).
+add_executable(problem_matcher_test tests/problem_matcher_test.cpp src/tasks/json.cpp src/tasks/matchers.cpp
+               src/tasks/links.cpp src/tasks/tasks.cpp)
+target_include_directories(problem_matcher_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(problem_matcher_test PRIVATE -fsanitize=address,undefined)
+target_link_options(problem_matcher_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME problem_matcher_test COMMAND problem_matcher_test ${CMAKE_SOURCE_DIR}/tests)

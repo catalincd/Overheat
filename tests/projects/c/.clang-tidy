@@ -1,0 +1,10 @@
+# clangd runs these clang-tidy checks as you type; findings show as warnings in the
+# editor and the Problems panel (source "clang-tidy"), some with quick fixes (Ctrl+.).
+Checks: >
+  -*,
+  bugprone-*,
+  misc-unused-parameters,
+  performance-*,
+  readability-else-after-return,
+  readability-braces-around-statements
+WarningsAsErrors: ''

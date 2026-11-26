@@ -1,0 +1,23 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "broken",
+      "displayName": "Debug with the broken source",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/broken",
+      "cacheVariables": { "BROKEN": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "broken", "configurePreset": "broken" }
+  ]
+}

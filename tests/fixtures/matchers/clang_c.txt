@@ -1,0 +1,16 @@
+clang -Wall -Wextra -g -DBROKEN -o app main.c util.c broken.c
+broken.c:8:24: error: incompatible pointer to integer conversion passing 'char[4]' to parameter of type 'int' [-Wint-conversion]
+    8 |     int total = add(1, "two");
+      |                        ^~~~~
+./util.h:4:20: note: passing argument to parameter 'b' here
+    4 | int add(int a, int b);
+      |                    ^
+broken.c:9:5: error: call to undeclared function 'undeclared_function'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+    9 |     undeclared_function(total);
+      |     ^
+broken.c:10:17: error: expected ';' after return statement
+   10 |     return total
+      |                 ^
+      |                 ;
+3 errors generated.
+make: *** [Makefile:12: app] Error 1
