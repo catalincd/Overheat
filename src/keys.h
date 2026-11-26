@@ -19,6 +19,11 @@ public:
     void init_defaults();
     void bind(SDL_Keycode key, KeyMod mods, const std::string& command);
     std::string lookup(SDL_Keycode key, KeyMod mods) const;
+    // Two-key chords like VS Code's "Ctrl+K Ctrl+T": the first key only arms the
+    // second (App keeps the armed prefix between key presses).
+    void bind_chord(SDL_Keycode k1, KeyMod m1, SDL_Keycode k2, KeyMod m2, const std::string& command);
+    bool is_chord_prefix(SDL_Keycode key, KeyMod mods) const;
+    std::string lookup_chord(SDL_Keycode k1, KeyMod m1, SDL_Keycode k2, KeyMod m2) const;
 
     // User file overlays the defaults: commands it mentions lose their default keys.
     bool load(const fs::path& path);
@@ -42,6 +47,9 @@ private:
         }
     };
     std::unordered_map<KeyCombo, std::string, KeyComboHash> bindings_;
+    using ChordMap = std::unordered_map<KeyCombo, std::string, KeyComboHash>;
+    std::unordered_map<KeyCombo, ChordMap, KeyComboHash> chords_;  // prefix -> second key -> command
+    void erase_command(const std::string& command);
     std::vector<std::string> user_commands_;  // commands defined by the user file / editor
 };
 

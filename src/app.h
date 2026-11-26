@@ -130,6 +130,8 @@ private:
     void open_settings();
     void open_keybindings();
     std::string capture_command_;  // keybinding editor: waiting for a chord
+    std::optional<std::pair<SDL_Keycode, KeyMod>> chord_prefix_;  // first key of a chord, armed
+    bool chord_eat_text_ = false;  // drop the text input of a chord's second key
     std::unordered_map<std::string, fs::file_time_type> disk_mtimes_;
     float watch_timer_ = 0;
     void watch_open_files();

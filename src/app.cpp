@@ -471,10 +471,36 @@ void App::handle_event(const SDL_Event& e) {
             if (sidebar_view_ == SidebarView::Chat && chat_.input_focused() && chat_.handle_key(ke)) break;
         }
 
+        // Chords (Ctrl+K Ctrl+T): the prefix arms the next key; modifiers alone keep it armed.
+        bool in_terminal = terminal_.focused() && terminal_visible_;
+        chord_eat_text_ = false;
+        if (chord_prefix_) {
+            bool modifier_only = kc == SDLK_LCTRL || kc == SDLK_RCTRL || kc == SDLK_LSHIFT || kc == SDLK_RSHIFT ||
+                                 kc == SDLK_LALT || kc == SDLK_RALT || kc == SDLK_LGUI || kc == SDLK_RGUI;
+            if (modifier_only) break;
+            auto [pk, pm] = *chord_prefix_;
+            chord_prefix_.reset();
+            chord_eat_text_ = true;  // a plain second key must not also type its character
+            std::string chord_cmd = keymap_.lookup_chord(pk, pm, kc, mods);
+            if (chord_cmd.empty()) {
+                set_status_message("(" + KeyMap::chord_to_string(pk, pm) + ", " + KeyMap::chord_to_string(kc, mods) +
+                                   ") is not a command");
+            } else {
+                set_status_message("", 0.0f);
+                handle_command(chord_cmd);
+            }
+            break;
+        }
+        if (!in_terminal && keymap_.is_chord_prefix(kc, mods)) {
+            chord_prefix_ = {kc, mods};
+            set_status_message("(" + KeyMap::chord_to_string(kc, mods) + ") was pressed. Waiting for the second key...",
+                               10.0f);
+            break;
+        }
+
         // Check keymap. While the terminal has focus, the shell owns the keyboard
         // except for a few app-level shortcuts (and Ctrl+Shift+C/V for the clipboard).
         std::string cmd = keymap_.lookup(kc, mods);
-        bool in_terminal = terminal_.focused() && terminal_visible_;
         if (!cmd.empty() && in_terminal) {
             static const char* global_cmds[] = {
                 "toggle_terminal", "command_palette_files", "command_palette_commands",
@@ -517,7 +543,9 @@ void App::handle_event(const SDL_Event& e) {
 
     case SDL_EVENT_TEXT_INPUT: {
         const char* text = e.text.text;
-        if (command_palette_.is_visible()) {
+        if (chord_eat_text_) {
+            chord_eat_text_ = false;
+        } else if (command_palette_.is_visible()) {
             command_palette_.handle_text(text);
         } else if (scm_.input_focused()) {
             scm_.handle_text(text);
