@@ -239,13 +239,16 @@ struct Pty::Impl {
     HPCON console = nullptr;
     HANDLE process = nullptr;
     HANDLE in_write = nullptr, out_read = nullptr;
+    int exit_code = -1;
 };
 
 Pty::Pty() : impl_(std::make_unique<Impl>()) {}
 Pty::~Pty() { kill(); }
 
-bool Pty::spawn(const std::vector<std::string>& argv_in, const fs::path& cwd, int cols, int rows) {
+bool Pty::spawn(const std::vector<std::string>& argv_in, const fs::path& cwd, int cols, int rows,
+               const std::vector<std::pair<std::string, std::string>>& env) {
     kill();
+    impl_->exit_code = -1;
     std::vector<std::string> argv = argv_in.empty() ? default_shell() : argv_in;
     HANDLE in_read = nullptr, in_write = nullptr, out_read = nullptr, out_write = nullptr;
     if (!CreatePipe(&in_read, &in_write, nullptr, 0)) return false;
@@ -280,8 +283,22 @@ bool Pty::spawn(const std::vector<std::string>& argv_in, const fs::path& cwd, in
     std::wstring cmd = command_line(argv);
     std::wstring wcwd = cwd.empty() ? L"" : cwd.wstring();
     SetEnvironmentVariableW(L"TERM", L"xterm-256color");
+    // The child inherits our environment: set the extra variables around CreateProcess.
+    std::vector<std::pair<std::wstring, std::wstring>> saved;
+    std::vector<bool> had;
+    for (auto& [k, v] : env) {
+        std::wstring wk = fs::path(k).wstring(), wv = fs::path(v).wstring();
+        DWORD n = GetEnvironmentVariableW(wk.c_str(), nullptr, 0);
+        std::wstring old(n, L'\0');
+        if (n > 0) old.resize(GetEnvironmentVariableW(wk.c_str(), old.data(), n));
+        saved.emplace_back(wk, old);
+        had.push_back(n > 0);
+        SetEnvironmentVariableW(wk.c_str(), wv.c_str());
+    }
     BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, EXTENDED_STARTUPINFO_PRESENT,
                              nullptr, wcwd.empty() ? nullptr : wcwd.c_str(), &si.StartupInfo, &pi);
+    for (size_t i = 0; i < saved.size(); i++)
+        SetEnvironmentVariableW(saved[i].first.c_str(), had[i] ? saved[i].second.c_str() : nullptr);
     DeleteProcThreadAttributeList(attrs);
     if (!ok) {
         ClosePseudoConsole(hpc);
@@ -331,12 +348,21 @@ bool Pty::exited() {
     return WaitForSingleObject(impl_->process, 0) == WAIT_OBJECT_0;
 }
 
+int Pty::exit_code() {
+    DWORD code = 0;
+    if (impl_->process && WaitForSingleObject(impl_->process, 0) == WAIT_OBJECT_0 &&
+        GetExitCodeProcess(impl_->process, &code))
+        impl_->exit_code = static_cast<int>(code);
+    return impl_->exit_code;
+}
+
 void Pty::kill() {
     // Closing the console ends the session; the shell then exits.
     if (impl_->console) ClosePseudoConsole(impl_->console);
     impl_->console = nullptr;
     if (impl_->process) {
         if (WaitForSingleObject(impl_->process, 500) != WAIT_OBJECT_0) TerminateProcess(impl_->process, 1);
+        exit_code();
         CloseHandle(impl_->process);
         impl_->process = nullptr;
     }

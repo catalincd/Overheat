@@ -161,13 +161,19 @@ bool Process::running() const { return impl_->pid > 0; }
 struct Pty::Impl {
     pid_t pid = -1;
     int fd = -1;
+    int exit_code = -1;
+    void reaped(int status) {
+        exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
+    }
 };
 
 Pty::Pty() : impl_(std::make_unique<Impl>()) {}
 Pty::~Pty() { kill(); }
 
-bool Pty::spawn(const std::vector<std::string>& argv_in, const fs::path& cwd, int cols, int rows) {
+bool Pty::spawn(const std::vector<std::string>& argv_in, const fs::path& cwd, int cols, int rows,
+               const std::vector<std::pair<std::string, std::string>>& env) {
     kill();
+    impl_->exit_code = -1;
     std::vector<std::string> argv = argv_in.empty() ? default_shell() : argv_in;
     winsize ws{};
     ws.ws_row = static_cast<unsigned short>(rows);
@@ -177,6 +183,7 @@ bool Pty::spawn(const std::vector<std::string>& argv_in, const fs::path& cwd, in
     if (pid < 0) return false;
     if (pid == 0) {
         setenv("TERM", "xterm-256color", 1);
+        for (auto& [k, v] : env) setenv(k.c_str(), v.c_str(), 1);
         if (!cwd.empty() && chdir(cwd.c_str()) != 0) {}
         std::vector<char*> args;
         for (auto& a : argv) args.push_back(const_cast<char*>(a.c_str()));
@@ -226,9 +233,15 @@ bool Pty::exited() {
     int status = 0;
     if (waitpid(impl_->pid, &status, WNOHANG) > 0) {
         impl_->pid = -1;  // reaped: never signal this pid again (it may be reused)
+        impl_->reaped(status);
         return true;
     }
     return false;
+}
+
+int Pty::exit_code() {
+    if (impl_->pid > 0) exited();
+    return impl_->exit_code;
 }
 
 void Pty::kill() {
@@ -237,7 +250,9 @@ void Pty::kill() {
         // A shell still busy in its rc files can hold off SIGHUP; never block the UI on it.
         bool gone = false;
         for (int i = 0; i < 30 && !gone; i++) {
-            pid_t r = waitpid(impl_->pid, nullptr, WNOHANG);
+            int status = 0;
+            pid_t r = waitpid(impl_->pid, &status, WNOHANG);
+            if (r == impl_->pid) impl_->reaped(status);
             gone = r == impl_->pid || (r < 0 && errno != EINTR);
             if (!gone) usleep(10000);
         }
