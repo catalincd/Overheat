@@ -15,6 +15,9 @@ public:
     // Absolute path -> status; folders inherit the status of changed descendants.
     void set_git_status(const std::unordered_map<std::string, FileStatus>& status);
     const fs::path& root() const { return root_; }
+    // Multi-root workspaces: more folders shown as top-level nodes next to the root,
+    // under a header named `label`. Empty = a single-folder explorer.
+    void set_extra_roots(std::vector<fs::path> roots, std::string label);
     void set_on_open(OpenCallback cb) { on_open_ = cb; }
     void refresh();
 
@@ -24,6 +27,8 @@ public:
 
 private:
     fs::path root_;
+    std::vector<fs::path> extra_roots_;
+    std::string multi_label_;
     Vfs* vfs_ = nullptr;
     FileEntry root_entry_;
     std::unordered_map<std::string, FileStatus> git_status_;
