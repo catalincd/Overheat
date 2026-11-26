@@ -520,6 +520,17 @@ void SyntaxHighlighter::apply_changes(const TextBuffer& buffer,
     tree_ = next;
 }
 
+std::pair<const char*, const char*> SyntaxHighlighter::brace_context(size_t byte) const {
+    if (!tree_ || pending_.valid()) return {"", ""};
+    uint32_t b = static_cast<uint32_t>(byte);
+    TSNode n = ts_node_descendant_for_byte_range(ts_tree_root_node(tree_), b, b + 1);
+    if (ts_node_is_null(n) || ts_node_start_byte(n) != b || std::strcmp(ts_node_type(n), "{") != 0) return {"", ""};
+    TSNode p = ts_node_parent(n);
+    if (ts_node_is_null(p)) return {"", ""};
+    TSNode g = ts_node_parent(p);
+    return {ts_node_type(p), ts_node_is_null(g) ? "" : ts_node_type(g)};
+}
+
 std::vector<SyntaxHighlighter::Scope> SyntaxHighlighter::scope_at(const TextBuffer& buf, size_t offset) const {
     std::vector<Scope> out;
     if (!tree_) return out;

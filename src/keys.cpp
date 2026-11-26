@@ -69,6 +69,10 @@ void KeyMap::init_defaults() {
     bind(SDLK_F,     KeyMod::Ctrl,                      "find");
     bind(SDLK_H,     KeyMod::Ctrl,                      "replace");
 
+    // Indentation
+    bind(SDLK_I,     KeyMod::Ctrl | KeyMod::Shift,      "reindent_selection");
+    bind(SDLK_I,     KeyMod::Ctrl | KeyMod::Shift | KeyMod::Alt, "reindent_file");
+
     // Window
     bind(SDLK_F11,   KeyMod::None,                      "toggle_fullscreen");
     bind(SDLK_Q,     KeyMod::Ctrl,                      "quit");

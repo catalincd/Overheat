@@ -55,6 +55,8 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 - Multi-cursor: <kbd>Ctrl</kbd>+<kbd>D</kbd>, <kbd>Alt</kbd>+click, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>
 - Auto-closing brackets and quotes
 - Bracket matching, indent guides
+- 4coder-style structural indentation (C, C++, Rust; brace depth elsewhere): reindent a
+  selection or file, re-indent on every edit, or *virtual whitespace* (experimental)
 - Word wrap (<kbd>Alt</kbd>+<kbd>Z</kbd>)
 - Move, duplicate and delete lines, toggle comments
 - Find and replace, find in files
@@ -165,6 +167,7 @@ Grab the latest build from **[Releases](https://github.com/catalincd/Overheat/re
 | Find / Replace | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Select line | <kbd>Ctrl</kbd>+<kbd>L</kbd> |
 | Find in files | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Trigger suggestions | <kbd>Ctrl</kbd>+<kbd>Space</kbd> |
 | Save / Save As | <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Undo / Redo | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> |
+| | | Reindent selection / file | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd> |
 
 | View | | | |
 |---|---|---|---|
@@ -232,7 +235,33 @@ opacity = 1.0                        # 0.5-1.0: translucent background, opaque t
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
 remote_monitor = true                # host stats strip while on Remote-SSH
 local_monitor = false                # the same strip for this computer
+tab_width = 4                        # columns per indent level and per tab
+insert_spaces = true
+indent_mode = "off"                  # "off" | "auto" | "virtual" (see below)
 ```
+
+<details>
+<summary><b>Structural indentation</b></summary>
+
+<br>
+
+Indentation is computed from the code structure, as in 4coder: brace and bracket depth
+(with tree-sitter telling what each `{` opens), continued statements, `case` labels,
+access specifiers, preprocessor lines, wrapped argument lists and closing brackets. C, C++
+and Rust have their own rules; JavaScript, TypeScript, Go, Java, JSON, CSS and Zig get brace
+depth; languages where indentation is meaningful (Python, YAML...) are left alone.
+
+- **Reindent Selection / Reindent File** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> /
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd>) work in every mode.
+- `indent_mode = "auto"`: every edit re-indents the lines it touched, in the same undo step.
+  Typing `}` dedents, Enter lands at the computed indent, Tab at the indent re-indents.
+- `indent_mode = "virtual"` (experimental): the file's own leading whitespace is ignored and
+  every line is drawn at its computed indent; the caret never enters the hidden whitespace,
+  and copy produces the computed indentation. `indent_write_on_save = true` writes it into
+  the file when saving. Word wrap shows the real whitespace.
+- `indent_namespaces = false` and `indent_case_labels = true` pick the C++ style.
+
+</details>
 
 <details>
 <summary><b>Custom themes</b></summary>
@@ -346,7 +375,7 @@ platform/ (POSIX · Win32)   lsp/ (JSON-RPC)   git/ (libgit2)   ssh/ (libssh2 + 
 src/
 ├── app.cpp            workbench: layout, commands, sessions, settings
 ├── renderer/          Vulkan context, quad renderer, font atlas
-├── editor/            buffer, cursors, editor ops, tree-sitter syntax
+├── editor/            buffer, cursors, editor ops, tree-sitter syntax, indentation
 ├── ui/                editor view, terminal, panels, palette, settings
 ├── platform/          POSIX + Win32 implementations
 ├── lsp/ git/ ssh/     language servers, libgit2, libssh2

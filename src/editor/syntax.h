@@ -37,6 +37,9 @@ public:
         std::string name;
     };
     std::vector<Scope> scope_at(const TextBuffer& buffer, size_t offset) const;
+    // Node types of the parent and grandparent of the `{` token at `byte` (what the brace
+    // opens, for the indenter); empty strings when there is no tree or no `{` there.
+    std::pair<const char*, const char*> brace_context(size_t byte) const;
 
     static std::string detect_language(const fs::path& path);
     // True when a tree-sitter grammar is built in for this language id.

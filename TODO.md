@@ -21,12 +21,11 @@ the git log; keep this file short and current.
 - [ ] Layout at small sizes (seen at 520x380): the sidebar and terminal keep their size and
   the editor collapses to nothing. Give the editor a minimum size and shrink or auto-hide
   the sidebar and terminal first, like VS Code
-- [ ] **4coder-style indentation**: indentation computed from the code structure
-  (tree-sitter scopes, brackets, continued statements) instead of typed. Every edit
-  re-indents the affected lines automatically. Optionally "virtual whitespace": leading
-  whitespace is drawn from the computed layout and the file's own indentation is ignored,
-  with a setting to write the computed indentation back on save. Per-language rules;
-  off by default, with an explicit "Reindent selection / file" command either way
+- [ ] **Indentation follow-ups** (engine, auto mode and virtual whitespace are in):
+  virtual whitespace while word-wrapping (wrap shows the real whitespace today); the
+  status bar column counts bytes, not the virtual column; per-language/per-workspace
+  indent settings; rustfmt's `)\n.method()` chains and `macro_rules!` bodies; clang-format
+  style operand alignment (`a ||\n    b` aligns under `a`); more languages with real rules
 - [ ] **4coder-style highlighting of brackets and scopes**: colour parentheses, brackets and
   braces by nesting depth; tint the backgrounds of enclosing scopes around the cursor (one
   shade per level); highlight the matching pair and the scope boundaries more strongly
@@ -124,7 +123,6 @@ the git log; keep this file short and current.
 
 - [ ] Cursor up/down by visual row when word wrap is on
 - [ ] Word wrap for files over 2 MB (incremental wrap map)
-- [ ] Configurable tab width and "insert spaces" (currently 4 / spaces)
 - [ ] Bold / italic font faces for syntax styles
 - [ ] Column (box) selection with Alt+Shift+drag
 - [ ] Sticky scroll (current scope pinned at the top)

@@ -101,6 +101,10 @@ private:
     uint64_t wrap_version_ = UINT64_MAX;
     size_t wrap_map_cols_ = 0;
     float col_x(const std::string& line_text, size_t byte_col, Rect text_rect) const;
+    // Virtual whitespace (indent_mode = "virtual") is drawn when not word-wrapping;
+    // dcol() is the display column of a byte column either way.
+    bool virt() const { return editor_ && !wrapping() && editor_->virtual_ws(); }
+    size_t dcol(const std::string& text, size_t line, size_t byte) const;
     std::pair<size_t, size_t> visible_lines(Rect text_rect) const;  // [first, end)
 
     static constexpr float TEXT_PAD = 4.0f;

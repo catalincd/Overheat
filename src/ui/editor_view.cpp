@@ -33,6 +33,7 @@ void EditorView::render(RenderContext& ctx, Rect bounds) {
     bounds_ = bounds;
     if (!editor_) return;
     editor_->sync_syntax();
+    editor_->virtual_normalize();  // virtual whitespace: no caret inside the hidden indent
 
     cached_line_h_ = ctx.font->line_height();
     cached_char_w_ = ctx.font->char_width();
@@ -217,9 +218,13 @@ std::pair<size_t, size_t> EditorView::line_at_row(size_t row) const {
 EditorView::Pt EditorView::point(const std::string& text, size_t line, size_t byte, Rect text_rect) const {
     auto segs = segments(text);
     size_t seg = static_cast<size_t>(std::upper_bound(segs.begin(), segs.end(), byte) - segs.begin()) - 1;
-    float x = text_rect.x + TEXT_PAD - view_x_ +
-              static_cast<float>(utf8::display_col(text, byte) - utf8::display_col(text, segs[seg])) * cached_char_w_;
+    size_t seg_col = seg ? utf8::display_col(text, segs[seg]) : 0;
+    float x = text_rect.x + TEXT_PAD - view_x_ + static_cast<float>(dcol(text, line, byte) - seg_col) * cached_char_w_;
     return {x, text_rect.y + static_cast<float>(first_row(line) + seg) * cached_line_h_ - view_y_};
+}
+
+size_t EditorView::dcol(const std::string& text, size_t line, size_t byte) const {
+    return virt() ? editor_->view_col(line, text, byte) : utf8::display_col(text, byte);
 }
 
 float EditorView::row_y(size_t line, Rect text_rect) const {
@@ -265,11 +270,25 @@ void EditorView::render_text(RenderContext& ctx, Rect text_rect) {
     float char_w = cached_char_w_;
     auto [first, end] = visible_lines(text_rect);
 
+    const bool virt_ws = virt();
     for (size_t line_idx = first; line_idx < end; line_idx++) {
         std::string line = buf.line_text(line_idx);
         float y = row_y(line_idx, text_rect);
+        auto tokens = syntax.tokens_for_line(buf, buf.line_start(line_idx), line.size());
+        if (virt_ws) {  // shown as computed indent + the text after the file's own whitespace
+            size_t ws = leading_ws(line), vi = editor_->view_col(line_idx, line, ws);
+            if (vi != utf8::display_col(line, ws) || line.find('\t') < ws) {
+                line = std::string(vi, ' ') + line.substr(ws);
+                std::vector<Token> shifted;
+                for (Token t : tokens) {
+                    size_t a = std::max<size_t>(t.start, ws), b = t.start + t.length;
+                    if (b <= a) continue;
+                    shifted.push_back({static_cast<uint32_t>(a - ws + vi), static_cast<uint32_t>(b - a), t.type});
+                }
+                tokens = std::move(shifted);
+            }
+        }
         size_t line_len = line.size();
-        auto tokens = syntax.tokens_for_line(buf, buf.line_start(line_idx), line_len);
 
         std::vector<Color> byte_colors(line_len, ctx.theme->fg);
         for (auto& tok : tokens) {
@@ -374,7 +393,7 @@ void EditorView::render_selections(RenderContext& ctx, Rect text_rect) {
                 bool last = k + 1 == segs.size();
                 if (a > b || (a == b && !(last && line_idx != mx.line))) continue;
                 Pt p0 = point(line, line_idx, a, text_rect);
-                float x1 = p0.x + static_cast<float>(utf8::display_col(line, b) - utf8::display_col(line, a)) * cached_char_w_;
+                float x1 = p0.x + static_cast<float>(dcol(line, line_idx, b) - dcol(line, line_idx, a)) * cached_char_w_;
                 if (last && line_idx != mx.line) x1 += cached_char_w_;  // show the selected newline
                 if (x1 > p0.x) ctx.r->add_rect({p0.x, p0.y, x1 - p0.x, cached_line_h_}, ctx.theme->selection);
             }
@@ -460,7 +479,7 @@ void EditorView::render_diagnostics(RenderContext& ctx, Rect text_rect) {
                 size_t a = std::max(c0, s0), b = std::min(c1, s1);
                 if (a > b || (a == b && segs.size() > 1)) continue;
                 Pt p0 = point(text, line, a, text_rect);
-                float x1 = std::max(p0.x + static_cast<float>(utf8::display_col(text, b) - utf8::display_col(text, a)) *
+                float x1 = std::max(p0.x + static_cast<float>(dcol(text, line, b) - dcol(text, line, a)) *
                                                cached_char_w_, p0.x + cached_char_w_);
                 ctx.r->add_squiggle({p0.x, p0.y + cached_line_h_ - 5.0f, x1 - p0.x, 5.0f}, color_of(d.severity), 1.2f, 6.0f, 1.2f);
             }
@@ -519,12 +538,16 @@ void EditorView::render_indent_guides(RenderContext& ctx, Rect text_rect) {
     auto& buf = editor_->buffer();
     auto [first, end] = visible_lines(text_rect);
     Color c = ctx.theme->indent_guide;
+    const size_t unit = static_cast<size_t>(std::max(1, IndentSettings::width));
     auto indent_of = [&](size_t line, bool& blank) {
         std::string t = buf.line_text(line);
-        size_t col = 0, i = 0;
-        for (; i < t.size() && (t[i] == ' ' || t[i] == '\t'); i++) col += t[i] == '\t' ? 4 - col % 4 : 1;
+        size_t i = leading_ws(t);
         blank = i == t.size();
-        return col;
+        if (blank && virt() && editor_->computed_indent(line) >= 0) {  // virtual: blank lines have an indent too
+            blank = false;
+            return static_cast<size_t>(editor_->computed_indent(line));
+        }
+        return dcol(t, line, i);
     };
     float x0 = text_rect.x + TEXT_PAD - view_x_;
     for (size_t line = first; line < end; line++) {
@@ -538,8 +561,8 @@ void EditorView::render_indent_guides(RenderContext& ctx, Rect text_rect) {
                 if (!b2) { ind = i2; break; }
             }
         }
-        for (size_t col = 4; col < ind + (blank ? 1 : 0) && col <= ind; col += 4)
-            ctx.r->add_rect({x0 + static_cast<float>(col - 4) * cached_char_w_, row_y(line, text_rect), 1.0f, cached_line_h_}, c);
+        for (size_t col = unit; col < ind + (blank ? 1 : 0) && col <= ind; col += unit)
+            ctx.r->add_rect({x0 + static_cast<float>(col - unit) * cached_char_w_, row_y(line, text_rect), 1.0f, cached_line_h_}, c);
     }
 }
 
@@ -693,7 +716,7 @@ Position EditorView::position_at(float x, float y) const {
     size_t seg_dcol = utf8::display_col(text, segs[seg]);
     // Round to the nearest cell edge; byte_col_at snaps to a character boundary.
     size_t dcol = seg_dcol + (rel_x > 0 ? static_cast<size_t>(rel_x / cached_char_w_ + 0.5f) : 0);
-    size_t byte = utf8::byte_col_at(text, dcol);
+    size_t byte = virt() ? editor_->view_byte(line, text, dcol) : utf8::byte_col_at(text, dcol);
     if (seg + 1 < segs.size() && byte >= segs[seg + 1])  // clicking past a wrapped row's end
         byte = utf8::prev_boundary(text, segs[seg + 1]);
     return {line, byte};
@@ -723,6 +746,8 @@ bool EditorView::handle_key(const KeyEvent& e) {
 
     auto& cursors = editor_->cursors();
     auto& buf = editor_->buffer();
+    const std::vector<Selection> sel_before = cursors.selections();  // for virtual whitespace
+    const size_t pref_before = cursors.preferred_col();
 
     bool nav_handled = true;
     switch (e.keycode) {
@@ -787,6 +812,14 @@ bool EditorView::handle_key(const KeyEvent& e) {
     }
 
     if (nav_handled) {
+        bool move = e.keycode == SDLK_LEFT || e.keycode == SDLK_RIGHT || e.keycode == SDLK_UP || e.keycode == SDLK_DOWN ||
+                    e.keycode == SDLK_HOME || e.keycode == SDLK_END || e.keycode == SDLK_PAGEUP || e.keycode == SDLK_PAGEDOWN;
+        bool vertical = (e.keycode == SDLK_UP || e.keycode == SDLK_DOWN || e.keycode == SDLK_PAGEUP ||
+                         e.keycode == SDLK_PAGEDOWN) && !(ctrl && shift);
+        editor_->virtual_normalize(move ? &sel_before : nullptr,
+                                   vertical ? Editor::Nav::Vertical
+                                            : e.keycode == SDLK_HOME ? Editor::Nav::Home : Editor::Nav::Other,
+                                   pref_before);
         completion_.refilter(*editor_);
         reveal_cursor();
         return true;
