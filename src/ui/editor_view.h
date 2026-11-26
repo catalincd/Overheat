@@ -5,6 +5,7 @@
 #include "ui/completion_popup.h"
 #include "renderer/font_atlas.h"
 #include "anim.h"
+#include <functional>
 #include <unordered_map>
 #include <memory>
 
@@ -34,6 +35,9 @@ public:
     bool handle_mouse(const MouseEvent& e) override;
     bool handle_text(const std::string& text) override;
     bool wants_focus() const override { return true; }
+
+    // Binary / large file card (file_gate_card.cpp): "Open Anyway" calls this.
+    void set_on_open_anyway(std::function<void(Editor&)> fn) { on_open_anyway_ = std::move(fn); }
 
     float gutter_width(const FontAtlas& font) const;
     float last_gutter_width() const { return cached_gutter_w_; }
@@ -101,9 +105,20 @@ private:
     uint64_t wrap_version_ = UINT64_MAX;
     size_t wrap_map_cols_ = 0;
     float col_x(const std::string& line_text, size_t byte_col, Rect text_rect) const;
+    // Line text as drawn: lines over MAX_DRAWN_LINE bytes (minified files) are cut
+    // there, so shaping and per-byte work stay bounded however long the line is.
+    static constexpr size_t MAX_DRAWN_LINE = 64 * 1024;
+    std::string view_line(size_t line) const;
     std::pair<size_t, size_t> visible_lines(Rect text_rect) const;  // [first, end)
 
     static constexpr float TEXT_PAD = 4.0f;
+
+    std::function<void(Editor&)> on_open_anyway_;
+    Rect gate_button_{};
+    bool gated() const;
+    void render_gate_card(RenderContext& ctx, Rect bounds);
+    bool gate_key(const KeyEvent& e);
+    bool gate_mouse(const MouseEvent& e);
 };
 
 } // namespace oh

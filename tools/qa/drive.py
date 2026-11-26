@@ -41,7 +41,8 @@ subprocess.run(["hyprctl", "eval", "hl.window_rule({ name = 'overheat-qa', match
 if app_capture:
     extra = ["--shot-dir", os.path.abspath(outdir), *extra]
 proc = subprocess.Popen([binary, "--script", script, *extra], cwd=os.environ.get("QA_CWD", root), env=env,
-                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                        errors="replace")  # probes echo file text, which may be invalid UTF-8
 win = None
 for _ in range(100):
     win = find_window(proc.pid)

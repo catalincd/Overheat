@@ -47,10 +47,16 @@ void StatusBar::render(RenderContext& ctx, Rect bounds) {
         right.push_back("UTF-8");
         right.push_back("Spaces: 4");
         auto pos = editor_->cursors().primary_pos();
-        size_t col = utf8::display_col(editor_->buffer().line_text(pos.line), pos.col);
+        // Huge (minified) lines: the byte column, without copying the line every frame.
+        size_t col = editor_->buffer().line_length(pos.line) > (1u << 20)
+                         ? pos.col
+                         : utf8::display_col(editor_->buffer().line_text(pos.line), pos.col);
         char buf[64];
         std::snprintf(buf, sizeof buf, "Ln %zu, Col %zu", pos.line + 1, col + 1);
         right.push_back(buf);
+        if (editor_->binary()) right.push_back("Binary (read-only)");
+        else if (editor_->large_file()) right.push_back("Large File Mode");
+        else if (editor_->read_only()) right.push_back("Read-only");
     }
     float rx = bounds.x + bounds.w - 12.0f;
     float left_limit = bounds.x + bounds.w * 0.35f;

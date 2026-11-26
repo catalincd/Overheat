@@ -116,7 +116,7 @@ void TextBuffer::record_change(size_t start, const std::string& removed, const s
 }
 
 void TextBuffer::insert(size_t offset, const std::string& text) {
-    if (text.empty()) return;
+    if (text.empty() || read_only_) return;
     record_change(offset, "", text);
 
     size_t add_start = add_buf_.size();
@@ -150,7 +150,7 @@ void TextBuffer::insert(size_t offset, const std::string& text) {
 }
 
 void TextBuffer::erase(size_t offset, size_t len) {
-    if (len == 0) return;
+    if (len == 0 || read_only_) return;
     std::string removed;
     removed.reserve(len);
     for (size_t i = 0; i < len; i++) removed.push_back(char_at(offset + i));

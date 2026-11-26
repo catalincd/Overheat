@@ -277,6 +277,9 @@ private:
     void register_commands();
     void scan_project_files();
     void setup_lsp_for_file(const fs::path& path);
+    // Reads `path` into `ed` (large-file mode above filecheck::LARGE_MODE; binaries read-only).
+    bool load_editor_file(Editor& ed, const fs::path& path, bool binary);
+    void open_gated(Editor& ed);  // "Open Anyway" on a binary / large file card
     KeyMod sdl_mods(SDL_Keymod m) const;
     void emit_probe(const std::string& label);
     void focus_editor();

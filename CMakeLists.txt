@@ -89,6 +89,7 @@ set(OVERHEAT_SOURCES
     src/editor/syntax.cpp
     src/ui/panel.cpp
     src/ui/editor_view.cpp
+    src/ui/file_gate_card.cpp
     src/ui/file_tree.cpp
     src/ui/terminal.cpp
     src/ui/status_bar.cpp
@@ -237,3 +238,17 @@ target_include_directories(sysmon_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(sysmon_test PRIVATE -fsanitize=address,undefined)
 target_link_options(sysmon_test PRIVATE -fsanitize=address,undefined)
 add_test(NAME sysmon_test COMMAND sysmon_test)
+
+add_executable(file_check_test tests/file_check_test.cpp src/editor/buffer.cpp src/vfs.cpp)
+target_include_directories(file_check_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(file_check_test PRIVATE PkgConfig::FREETYPE)
+target_compile_options(file_check_test PRIVATE -fsanitize=address,undefined)
+target_link_options(file_check_test PRIVATE -fsanitize=address,undefined)
+# A few real binaries when present (any that are missing are simply skipped).
+set(FILE_CHECK_SAMPLES "")
+foreach(f /usr/bin/ls /usr/bin/cmake /bin/sh)
+    if(EXISTS ${f})
+        list(APPEND FILE_CHECK_SAMPLES ${f})
+    endif()
+endforeach()
+add_test(NAME file_check_test COMMAND file_check_test ${CMAKE_BINARY_DIR}/file_check_test_dir ${FILE_CHECK_SAMPLES})

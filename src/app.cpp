@@ -126,6 +126,8 @@ bool App::init(int argc, char** argv) {
     Editor::auto_close_pairs = themes_.setting("auto_close_brackets") != "false";
     editor_view_.set_wrap(themes_.setting("word_wrap") == "true");
     editor_view2_.set_wrap(themes_.setting("word_wrap") == "true");
+    editor_view_.set_on_open_anyway([this](Editor& ed) { open_gated(ed); });
+    editor_view2_.set_on_open_anyway([this](Editor& ed) { open_gated(ed); });
     sidebar_open_.snap(sidebar_visible_ ? 1.0f : 0.0f);
     terminal_open_.snap(terminal_visible_ ? 1.0f : 0.0f);
     font_.set_ligatures(themes_.setting("ligatures") != "false");
@@ -1028,7 +1030,7 @@ void App::poll_git_refresh() {
 }
 
 void App::attach_git(Editor& ed) {
-    if (!git_.is_open() || ed.buffer().file_path().empty()) return;
+    if (!git_.is_open() || ed.buffer().file_path().empty() || ed.large_file()) return;
     const fs::path path = ed.buffer().file_path();
     ed.set_git_base(git_.head_content(path));
     if (!ed.has_git_base()) return;
@@ -1278,14 +1280,26 @@ void App::open_file(const fs::path& path) {
         }
     }
 
-    std::string content;
-    if (!vfs_->read(path, content)) {
-        set_status_message("Cannot open " + path.string(), 6.0f);
-        return;
+    // Size and a binary sniff before reading (local or SFTP): binaries and very
+    // large files get a card first (EditorView, file_gate_card.cpp).
+    using filecheck::Verdict;
+    uint64_t size = 0;
+    std::string head;
+    Verdict verdict = Verdict::Open;
+    if (vfs_->file_size(path, size)) {
+        if (!vfs_->read_head(path, filecheck::BINARY_PROBE, head)) {
+            set_status_message("Cannot open " + path.string(), 6.0f);
+            return;
+        }
+        verdict = filecheck::classify(size, head);
     }
     auto editor = std::make_shared<Editor>();
-    editor->load_content(path, content);
-    if (!vfs_->is_remote()) attach_git(*editor);
+    if (verdict == Verdict::Open) {
+        if (!load_editor_file(*editor, path, false)) return;
+    } else {
+        editor->buffer().set_file_path(path);
+        editor->set_gate(verdict, size);
+    }
 
     // Replace a pristine "Untitled" tab instead of piling up empty tabs.
     int replace = -1;
@@ -1299,12 +1313,44 @@ void App::open_file(const fs::path& path) {
     status_bar_.set_editor(editor);
     focus_editor();
 
-    setup_lsp_for_file(path);
+    if (!editor->large_file() && verdict == Verdict::Open) setup_lsp_for_file(path);
+}
 
+bool App::load_editor_file(Editor& ed, const fs::path& path, bool binary) {
+    std::string content;
+    if (!vfs_->read(path, content)) {
+        set_status_message("Cannot open " + path.string(), 6.0f);
+        return false;
+    }
+    bool large = filecheck::large_mode(content.size());
+    ed.set_large_file(large, binary);
+    ed.load_content(path, content);
+    ed.set_read_only(binary);
+    if (!ed.large_file() && !vfs_->is_remote()) attach_git(ed);
+    if (ed.large_file())
+        set_status_message(path.filename().string() + (binary ? ": binary file, read-only" : ": large file mode"), 6.0f);
+    return true;
+}
+
+// "Open Anyway" on a binary / large file card.
+void App::open_gated(Editor& ed) {
+    using filecheck::Verdict;
+    Verdict v = ed.gate();
+    if (v != Verdict::Binary && v != Verdict::AskLarge) return;
+    uint64_t size = ed.file_size();
+    if (!load_editor_file(ed, ed.buffer().file_path(), v == Verdict::Binary)) return;
+    ed.set_gate(Verdict::Open, size);
+    ed.set_read_only(v == Verdict::Binary);
+    if (!ed.large_file()) setup_lsp_for_file(ed.buffer().file_path());
+    request_redraw();
 }
 
 void App::save_current() {
     if (Editor* ed = current_editor()) {
+        if (ed->read_only()) {
+            set_status_message(ed->buffer().file_path().filename().string() + " is read-only");
+            return;
+        }
         if (ed->buffer().file_path().empty()) {
             save_as();
             return;
@@ -1330,6 +1376,8 @@ void App::save_current() {
 void App::save_as() {
     Editor* ed = current_editor();
     if (!ed) return;
+    if (ed->gate() != filecheck::Verdict::Open) return save_current();  // no text loaded
+
     CommandPalette::PickOptions opts;
     opts.placeholder = "Save as (path relative to " + project_root_.string() + ")";
     opts.allow_free_text = true;
@@ -1696,7 +1744,7 @@ void App::watch_open_files() {
     for (auto& tab : tab_bar_.tabs()) {
         if (!tab.editor) continue;
         const fs::path& p = tab.editor->buffer().file_path();
-        if (p.empty()) continue;
+        if (p.empty() || tab.editor->gate() != filecheck::Verdict::Open) continue;
         std::error_code ec;
         auto t = fs::last_write_time(p, ec);
         if (ec) continue;

@@ -13,6 +13,10 @@ public:
         return true;
     }
     bool read(const fs::path& path, std::string& out) override { return s_.read_file(path.generic_string(), out); }
+    bool read_head(const fs::path& path, size_t max, std::string& out) override {
+        return s_.read_file(path.generic_string(), out, max);
+    }
+    bool file_size(const fs::path& path, uint64_t& out) override { return s_.file_size(path.generic_string(), out); }
     bool write(const fs::path& path, const std::string& data) override { return s_.write_file(path.generic_string(), data); }
     bool is_remote() const override { return true; }
 

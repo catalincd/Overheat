@@ -38,9 +38,10 @@ void Editor::load_content(const fs::path& path, const std::string& content) {
     scroll_x_ = 0;
     scroll_y_ = 0;
 
-    std::string lang = SyntaxHighlighter::detect_language(path);
+    std::string lang = large_file_ ? "" : SyntaxHighlighter::detect_language(path);
     syntax_.set_language(lang);
     constexpr size_t SYNC_PARSE_LIMIT = 256 * 1024;  // small files never show uncoloured
+    if (large_file_) return;  // large-file mode: no syntax tree
     if (buffer_.length() <= SYNC_PARSE_LIMIT) syntax_.update(buffer_);
     else syntax_.parse_async(buffer_.text());
 }
@@ -96,6 +97,7 @@ static std::vector<size_t> reverse_sorted_indices(const std::vector<Selection>& 
 }
 
 void Editor::insert_text(const std::string& text) {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -174,6 +176,7 @@ void Editor::insert_text(const std::string& text) {
 }
 
 void Editor::delete_backward() {
+    if (read_only_) return;
     if (cursors_.selections().size() == 1 && cursors_.primary().empty()) {
         Position p = cursors_.primary_pos();
         std::string l = buffer_.line_text(p.line);
@@ -234,6 +237,7 @@ void Editor::delete_backward() {
 }
 
 void Editor::delete_forward() {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -278,6 +282,7 @@ void Editor::delete_forward() {
 }
 
 void Editor::delete_word_backward() {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -334,6 +339,7 @@ void Editor::delete_word_backward() {
 }
 
 void Editor::delete_word_forward() {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -391,6 +397,7 @@ void Editor::delete_word_forward() {
 }
 
 void Editor::delete_line() {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     // Collect unique lines to delete (from cursors), process in reverse order
@@ -431,6 +438,7 @@ void Editor::delete_line() {
 }
 
 void Editor::duplicate_line() {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -473,6 +481,7 @@ void Editor::duplicate_line() {
 }
 
 void Editor::move_line_up() {
+    if (read_only_) return;
     Position pos = cursors_.primary_pos();
     if (pos.line == 0) return;
 
@@ -509,6 +518,7 @@ void Editor::move_line_up() {
 }
 
 void Editor::move_line_down() {
+    if (read_only_) return;
     Position pos = cursors_.primary_pos();
     if (pos.line + 1 >= buffer_.line_count()) return;
 
@@ -544,6 +554,7 @@ void Editor::move_line_down() {
 }
 
 void Editor::newline() {
+    if (read_only_) return;
     // Auto-indent: copy leading whitespace from current line
     Position pos = cursors_.primary_pos();
     std::string line = buffer_.line_text(pos.line);
@@ -561,6 +572,7 @@ void Editor::newline() {
 }
 
 void Editor::tab() {
+    if (read_only_) return;
     // If there's a selection, indent; otherwise insert spaces
     if (!cursors_.primary().empty()) {
         indent();
@@ -570,6 +582,7 @@ void Editor::tab() {
 }
 
 void Editor::indent() {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -598,6 +611,7 @@ void Editor::indent() {
 }
 
 void Editor::unindent() {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     auto& sels = cursors_.selections();
@@ -633,6 +647,7 @@ void Editor::unindent() {
 }
 
 void Editor::toggle_comment() {
+    if (read_only_) return;
     buffer_.begin_undo_group();
 
     // Determine comment prefix based on language
@@ -767,6 +782,7 @@ std::string Editor::copy_text(bool& line_mode) const {
 }
 
 std::string Editor::cut_text(bool& line_mode) {
+    if (read_only_) return copy_text(line_mode);
     std::string text = copy_text(line_mode);
     if (line_mode) {
         buffer_.begin_undo_group();
@@ -794,6 +810,7 @@ std::string Editor::cut_text(bool& line_mode) {
 }
 
 void Editor::paste_text(const std::string& text, bool line_mode) {
+    if (read_only_) return;
     if (line_mode && cursors_.selections().size() == 1 && cursors_.primary().empty()) {
         Position p = cursors_.primary_pos();
         size_t at = buffer_.line_start(p.line);
@@ -809,6 +826,7 @@ void Editor::paste_text(const std::string& text, bool line_mode) {
 }
 
 void Editor::replace_ranges(const std::vector<std::pair<size_t, size_t>>& ranges, const std::string& text) {
+    if (read_only_) return;
     if (ranges.empty()) return;
     buffer_.begin_undo_group();
     for (auto it = ranges.rbegin(); it != ranges.rend(); ++it) {  // back to front keeps offsets valid
@@ -865,6 +883,7 @@ void Editor::add_cursor_vertical(int dir) {
 }
 
 void Editor::type_text(const std::string& text) {
+    if (read_only_) return;
     if (text.size() != 1) {
         insert_text(text);
         return;
@@ -923,6 +942,7 @@ void Editor::type_text(const std::string& text) {
 }
 
 bool Editor::find_bracket_pair(Position& a, Position& b) const {
+    if (large_file_) return false;  // would scan huge (minified) lines every frame
     Position cur = cursors_.primary_pos();
     std::string line = buffer_.line_text(cur.line);
     auto is_bracket = [](char ch) { return ch && std::strchr("()[]{}", ch); };
@@ -957,11 +977,13 @@ bool Editor::find_bracket_pair(Position& a, Position& b) const {
 }
 
 void Editor::undo() {
+    if (read_only_) return;
     if (auto off = buffer_.undo()) cursors_.set_primary(buffer_.position_of(*off));
     on_text_changed();
 }
 
 void Editor::redo() {
+    if (read_only_) return;
     if (auto off = buffer_.redo()) cursors_.set_primary(buffer_.position_of(*off));
     on_text_changed();
 }
@@ -1018,6 +1040,7 @@ const GitBlame* Editor::blame_for_line(size_t line, bool& uncommitted) {
 }
 
 void Editor::reload() {
+    if (gate_ != filecheck::Verdict::Open) return;  // not loaded yet: nothing to refresh
     Position cur = cursors_.primary_pos();
     float sx = scroll_x_, sy = scroll_y_;
     fs::path path = buffer_.file_path();
