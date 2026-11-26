@@ -63,6 +63,7 @@ private:
     std::vector<MatchResult> filtered_;
     PickOptions pick_;
     anim::Smooth appear_;
+    anim::Wobble wobble_;
     int first_visible_ = 0;
     int last_previewed_ = -1;
     void select(int index);

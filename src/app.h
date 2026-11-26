@@ -237,7 +237,8 @@ private:
     bool sidebar_visible_ = true;
     bool terminal_visible_ = true;
     float sidebar_width_ = 260.0f;
-    anim::Smooth sidebar_open_, terminal_open_;  // 0..1 slide fractions
+    anim::Smooth sidebar_open_, terminal_open_, split_open_;  // 0..1 slide fractions
+    void load_motion_settings();  // cursor_animation, cursor_vfx, scroll_animation_ms, wobbly
     bool hover_was_chrome_ = false;
     static constexpr float ACTIVITY_BAR_W = 48.0f;
     float terminal_height_ = 200.0f;

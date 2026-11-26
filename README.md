@@ -114,7 +114,8 @@ Sublime-class speed, VS Code-class features, drawn entirely on the GPU with Vulk
 - Overheat Dark and Light themes, plus your own TOML themes
 - Ten bundled coding fonts (Fira Code, Cascadia Code, Iosevka, Maple Mono, Monaspace, ...) or any installed monospace font, with ligatures
 - Text zoom with <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>-</kbd>/wheel
-- Quick, subtle animations (or none)
+- Quick, subtle animations (or none): Neovide-style cursor smear that flies between splits and into
+  the terminal, spring-based smooth scrolling, optional cursor particles (railgun, pixiedust, ripple, ...)
 - Settings page and keyboard-shortcut editor
 - Draft AI chat (any OpenAI-compatible endpoint)
 
@@ -227,7 +228,13 @@ font_size = 15
 ligatures = true
 word_wrap = false
 minimap = true
-animations = true
+animations = true                    # master switch for everything below
+cursor_animation = "smear"           # smear | glide | none
+cursor_animation_ms = 150            # jump settle time; cursor_short_animation_ms = 40 for typing
+cursor_trail = 0.8                   # 0 = rigid glide .. 1 = longest smear
+cursor_vfx = "none"                  # railgun | torpedo | pixiedust | sonicboom | ripple | wireframe
+scroll_animation_ms = 250            # smooth-scroll spring; 0 = instant
+wobbly = false                       # elastic pop for the palette and settings page
 opacity = 1.0                        # 0.5-1.0: translucent background, opaque text
 terminal_shell = "pwsh -NoLogo"      # any shell; default: $SHELL / PowerShell
 remote_monitor = true                # host stats strip while on Remote-SSH

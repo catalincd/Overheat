@@ -1,6 +1,7 @@
 #include "app.h"
 #include "platform/platform.h"
 #include "fonts.h"
+#include "ui/cursor_fx.h"
 #include <SDL3/SDL.h>
 #include <cmath>
 #include <fstream>
@@ -119,6 +120,7 @@ bool App::init(int argc, char** argv) {
         font_size_ = std::clamp(std::strtof(v.c_str(), nullptr), 8.0f, 40.0f);
     font_family_ = themes_.setting("font_family");
     anim::enabled = themes_.setting("animations") != "false";
+    load_motion_settings();
     show_breadcrumbs_ = themes_.setting("breadcrumbs") != "false";
     remote_monitor_ = themes_.setting("remote_monitor") != "false";
     local_monitor_ = themes_.setting("local_monitor") == "true";
@@ -365,8 +367,9 @@ void App::emit_probe(const std::string& label) {
     SDL_GetWindowSize(window_, &w, &h);
     SDL_GetWindowSizeInPixels(window_, &pw, &ph);
     VkExtent2D ext = vk_.extent();
-    std::fprintf(stderr, "PROBE %s: window=%dx%d pixels=%dx%d swapchain=%ux%u\n",
-                 label.c_str(), w, h, pw, ph, ext.width, ext.height);
+    std::fprintf(stderr, "PROBE %s: window=%dx%d pixels=%dx%d swapchain=%ux%u frames=%llu particles=%zu\n",
+                 label.c_str(), w, h, pw, ph, ext.width, ext.height,
+                 static_cast<unsigned long long>(frame_count_), CursorFx::get().particle_count());
     std::fprintf(stderr, "  editor=(%.0f,%.0f %.0fx%.0f) terminal=(%.0f,%.0f %.0fx%.0f) gutter=%.0f "
                  "char=%.1fx%.1f last_click=(%.0f,%.0f)\n",
                  l.editor.x, l.editor.y, l.editor.w, l.editor.h,
@@ -960,7 +963,9 @@ App::Layout App::compute_layout() const {
     // Tab bar at the top of the editor region, breadcrumbs under it; two columns when split.
     float tab_h = 36.0f;
     float crumbs_h = show_breadcrumbs_ ? 24.0f : 0.0f;
-    float left_w = split_ ? std::floor(right_w * split_ratio_) : right_w;
+    // A new split slides open from the right edge.
+    float ratio = 1.0f + (split_ratio_ - 1.0f) * std::clamp(split_open_.value, 0.0f, 1.0f);
+    float left_w = split_ ? std::floor(right_w * ratio) : right_w;
     float act_x = right_x, act_w = left_w, oth_x = right_x + left_w, oth_w = right_w - left_w;
     if (split_ && active_right_) {
         std::swap(act_x, oth_x);
@@ -1123,6 +1128,7 @@ void App::update(float dt) {
     // Panels slide open/closed instead of popping.
     sidebar_open_.follow(sidebar_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     terminal_open_.follow(terminal_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
+    split_open_.follow(split_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     lsp_update();
     poll_remote_connect();
     update_monitor();
@@ -1174,6 +1180,7 @@ void App::render() {
 
     // One ordered quad stream for the whole frame
     renderer_.begin(extent);
+    CursorFx::get().begin_frame();
 
     // Flat layout: panels separate by tone; only a hairline above the terminal.
     renderer_.add_rect({0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)}, theme_.bg);
@@ -1225,6 +1232,7 @@ void App::render() {
         renderer_.pop_clip();
     }
     if (layout.terminal.h > 0) clipped(terminal_, layout.terminal);
+    CursorFx::get().render(renderer_);  // in-flight cursor smear and particles
     if (layout.monitor.h > 0) clipped(monitor_bar_, layout.monitor);
     clipped(status_bar_, layout.status_bar);
     if (Splitter sp = splitter_drag_ != Splitter::None ? splitter_drag_ : splitter_hover_; sp != Splitter::None) {
@@ -1573,6 +1581,7 @@ void App::split_editor() {
         return;
     }
     split_ = true;
+    split_open_.snap(0.0f);
     tab_bar2_ = TabBar{};
     tab_bar2_.set_on_close_request([this](int i) { request_close_tab(i); });
     tab_bar2_.add_tab(ed);
@@ -1593,6 +1602,7 @@ void App::focus_group(bool right) {
     }
     std::swap(tab_bar_, tab_bar2_);
     std::swap(editor_view_, editor_view2_);
+    CursorFx::get().break_anchor();
     active_right_ = right;
     editor_view2_.set_focused(false);
     focus_editor();
@@ -1620,6 +1630,21 @@ void App::refresh_command_keys() {
     command_palette_.set_commands(commands_);
 }
 
+void App::load_motion_settings() {
+    auto& fx = CursorFx::get();
+    auto num = [this](const char* key, float def, float lo, float hi) {
+        std::string v = themes_.setting(key);
+        return v.empty() ? def : std::clamp(std::strtof(v.c_str(), nullptr), lo, hi);
+    };
+    fx.mode = CursorFx::parse_mode(themes_.setting("cursor_animation"));
+    fx.vfx = CursorFx::parse_vfx(themes_.setting("cursor_vfx"));
+    fx.length = num("cursor_animation_ms", 150.0f, 0.0f, 2000.0f) / 1000.0f;
+    fx.short_length = std::min(fx.length, num("cursor_short_animation_ms", 40.0f, 0.0f, 2000.0f) / 1000.0f);
+    fx.trail = num("cursor_trail", 0.8f, 0.0f, 1.0f);
+    anim::scroll_duration = num("scroll_animation_ms", 250.0f, 0.0f, 2000.0f) / 1000.0f;
+    anim::wobbly = themes_.setting("wobbly") == "true";
+}
+
 void App::open_settings() {
     using Row = SettingsPage::Row;
     auto toggle = [this](std::string label, std::string desc, std::function<bool()> on, std::string cmd) {
@@ -1641,8 +1666,26 @@ void App::open_settings() {
                     [this](int d) { if (d) set_opacity(opacity_ + 0.05f * static_cast<float>(d)); }});
     rows.push_back(toggle("Font ligatures", "Render => != -> as joined glyphs when the font has them",
                           [this] { return font_.ligatures(); }, "toggle_ligatures"));
-    rows.push_back(toggle("Animations", "Smooth scrolling, caret glide, panel and popup motion",
+    rows.push_back(toggle("Animations", "Smooth scrolling, cursor smear, panel and popup motion",
                           [] { return anim::enabled; }, "toggle_animations"));
+    auto cycle = [this](std::string label, std::string desc, std::string key,
+                        std::vector<std::string> values, std::function<std::string()> get) {
+        return Row{Row::Choice, std::move(label), std::move(desc), get, nullptr,
+                   [this, key, values, get](int d) {
+                       auto it = std::find(values.begin(), values.end(), get());
+                       int n = static_cast<int>(values.size());
+                       int i = it == values.end() ? 0 : static_cast<int>(it - values.begin());
+                       i = ((i + (d == 0 ? 1 : d)) % n + n) % n;
+                       themes_.set_setting(key, "\"" + values[static_cast<size_t>(i)] + "\"");
+                       load_motion_settings();
+                   }};
+    };
+    rows.push_back(cycle("Cursor animation", "Smear: the caret stretches toward jumps and springs in (Neovide)",
+                         "cursor_animation", {"smear", "glide", "none"},
+                         [] { return std::string(CursorFx::mode_name(CursorFx::get().mode)); }));
+    rows.push_back(cycle("Cursor effect", "Particles on cursor moves and typing",
+                         "cursor_vfx", {"none", "railgun", "torpedo", "pixiedust", "sonicboom", "ripple", "wireframe"},
+                         [] { return std::string(CursorFx::vfx_name(CursorFx::get().vfx)); }));
     rows.push_back(toggle("Word wrap", "Wrap long lines at the editor width (Alt+Z)",
                           [this] { return editor_view_.wrap(); }, "toggle_word_wrap"));
     rows.push_back(toggle("Minimap", "Code overview at the editor's right edge",

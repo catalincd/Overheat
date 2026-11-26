@@ -40,6 +40,10 @@ public:
     void add_squiggle(Rect rect, Color color, float amplitude = 1.5f,
                       float wavelength = 6.0f, float thickness = 1.2f);
 
+    // Convex polygon of up to 4 points (pts = x0,y0 .. x3,y3; repeat the last point
+    // for a triangle), anti-aliased; outline_w > 0 draws only an inner band.
+    void add_poly(const float pts[8], Color color, float outline_w = 0.0f);
+
     size_t quad_count() const { return quads_.size(); }
 
     static constexpr size_t MAX_QUADS = 131072;

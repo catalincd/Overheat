@@ -56,6 +56,24 @@ float glyph_coverage(Quad q, vec2 local) {
     return mix(c0, texel(origin, size, t - ivec2(1, 0)), frac);
 }
 
+// Signed distance (approximate: max over edges) to a convex quad; negative inside.
+float poly_distance(vec2 p, vec2 v[4]) {
+    float area = 0.0;
+    for (int i = 0; i < 4; i++) {
+        vec2 a = v[i], b = v[(i + 1) & 3];
+        area += a.x * b.y - b.x * a.y;
+    }
+    float s = area >= 0.0 ? 1.0 : -1.0;
+    float d = -1e9;
+    for (int i = 0; i < 4; i++) {
+        vec2 a = v[i], e = v[(i + 1) & 3] - a;
+        float len = length(e);
+        if (len < 1e-4) continue;
+        d = max(d, -s * (e.x * (p.y - a.y) - e.y * (p.x - a.x)) / len);
+    }
+    return d;
+}
+
 void main() {
     Quad q = quads[v_index];
     if (v_pixel.x < q.clip.x || v_pixel.y < q.clip.y || v_pixel.x >= q.clip.z || v_pixel.y >= q.clip.w)
@@ -81,6 +99,11 @@ void main() {
         // Linear-space blending thins dark text; boost coverage less as text gets lighter.
         float lum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
         alpha = pow(cov, mix(1.0 / g.text_gamma, 1.0, lum));
+    } else if (kind == KIND_POLY) {
+        vec2 v[4] = vec2[](q.data.xy, q.data.zw, q.color2.xy, q.color2.zw);
+        float d = poly_distance(local, v);
+        alpha = clamp(0.5 - d, 0.0, 1.0);
+        if (q.params.y > 0.0) alpha *= clamp(0.5 + d + q.params.y, 0.0, 1.0);
     } else if (kind == KIND_SQUIGGLE) {
         float amp = q.data.x, k = 6.2831853 / q.data.y, thick = q.data.z;
         float wave = q.rect.w * 0.5 + amp * sin(local.x * k);

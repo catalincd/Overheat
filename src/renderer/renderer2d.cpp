@@ -8,7 +8,7 @@ namespace oh {
 
 namespace {
 
-constexpr float KIND_RECT = 0, KIND_GLYPH = 1, KIND_SQUIGGLE = 2;
+constexpr float KIND_RECT = 0, KIND_GLYPH = 1, KIND_SQUIGGLE = 2, KIND_POLY = 3;
 
 struct Globals {
     glm::vec2 viewport;
@@ -245,6 +245,32 @@ void Renderer2D::add_squiggle(Rect r, Color color, float amplitude, float wavele
     q.color  = color.vec4();
     q.data   = {amplitude, wavelength, thickness, 0};
     q.params = {KIND_SQUIGGLE, 0, fade_start_, fade_end_};
+    push(q);
+}
+
+void Renderer2D::add_poly(const float pts[8], Color color, float outline_w) {
+    float x0 = pts[0], y0 = pts[1], x1 = pts[0], y1 = pts[1];
+    for (int i = 1; i < 4; i++) {
+        x0 = std::min(x0, pts[2 * i]); x1 = std::max(x1, pts[2 * i]);
+        y0 = std::min(y0, pts[2 * i + 1]); y1 = std::max(y1, pts[2 * i + 1]);
+    }
+    x0 = std::floor(x0) - 1.0f; y0 = std::floor(y0) - 1.0f;
+    x1 = std::ceil(x1) + 1.0f; y1 = std::ceil(y1) + 1.0f;
+    GpuQuad q{};
+    q.rect   = {x0, y0, x1 - x0, y1 - y0};
+    q.clip   = current_clip();
+    q.color  = color.vec4();
+    q.data   = {pts[0] - x0, pts[1] - y0, pts[2] - x0, pts[3] - y0};
+    q.color2 = {pts[4] - x0, pts[5] - y0, pts[6] - x0, pts[7] - y0};
+    q.params = {KIND_POLY, outline_w, fade_start_, fade_end_};
+    if (alpha_ < 1.0f) {  // color2 holds points here, not a colour
+        q.color.a *= alpha_;
+        float a = alpha_;
+        alpha_ = 1.0f;
+        push(q);
+        alpha_ = a;
+        return;
+    }
     push(q);
 }
 
