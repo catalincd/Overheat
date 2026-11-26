@@ -107,6 +107,8 @@ set(OVERHEAT_SOURCES
     src/vfs.cpp
     src/fonts.cpp
     src/remote.cpp
+    src/workspace.cpp
+    src/workspace_store.cpp
     src/lsp_glue.cpp
     src/platform/platform_posix.cpp
     src/platform/platform_win.cpp
@@ -214,3 +216,8 @@ target_link_options(search_test PRIVATE -fsanitize=address,undefined)
 foreach(seed 1 2 3)
     add_test(NAME search_test_${seed} COMMAND search_test ${seed})
 endforeach()
+
+add_executable(workspace_test tests/workspace_test.cpp src/workspace_store.cpp)
+target_include_directories(workspace_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(workspace_test PRIVATE PkgConfig::FREETYPE)
+add_test(NAME workspace_test COMMAND workspace_test ${CMAKE_BINARY_DIR}/workspace_test_dir)

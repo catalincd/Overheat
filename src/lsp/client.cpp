@@ -274,6 +274,7 @@ std::string LSPClient::uri_from_path(const fs::path& path) const {
 
 bool LSPClient::start(const std::string& command, const std::vector<std::string>& args) {
     if (running_) return false;
+    stop();  // reap a server that exited by itself; assigning over live threads would terminate
 
     std::vector<std::string> argv{command};
     argv.insert(argv.end(), args.begin(), args.end());
@@ -291,7 +292,9 @@ bool LSPClient::start(const std::string& command, const std::vector<std::string>
 }
 
 void LSPClient::stop() {
-    if (!running_) return;
+    // A server that exited by itself (EOF sets running_ = false) still has threads
+    // to join; the writer sleeps on outbox_cv_ until it is woken here.
+    if (!running_ && !writer_thread_.joinable() && !reader_thread_.joinable() && !process_) return;
     {
         std::lock_guard<std::mutex> lock(outbox_mutex_);
         running_ = false;

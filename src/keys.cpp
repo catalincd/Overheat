@@ -26,6 +26,7 @@ void KeyMap::init_defaults() {
     // Panels
     bind(SDLK_GRAVE, KeyMod::Ctrl,                      "toggle_terminal");
     bind(SDLK_B,     KeyMod::Ctrl,                      "toggle_sidebar");
+    bind(SDLK_R,     KeyMod::Ctrl,                      "workspace_switch");
     bind(SDLK_COMMA, KeyMod::Ctrl,                      "open_settings");
     bind(SDLK_I,     KeyMod::Ctrl | KeyMod::Alt,        "view_chat");
     bind(SDLK_Z,     KeyMod::Alt,                       "toggle_word_wrap");

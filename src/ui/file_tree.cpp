@@ -14,6 +14,12 @@ void FileTree::set_root(const fs::path& root, Vfs* vfs) {
     refresh();
 }
 
+void FileTree::set_extra_roots(std::vector<fs::path> roots, std::string label) {
+    extra_roots_ = std::move(roots);
+    multi_label_ = std::move(label);
+    refresh();
+}
+
 void FileTree::collect_expanded(const FileEntry& e, std::unordered_set<std::string>& out) const {
     for (auto& c : e.children)
         if (c.is_dir && c.expanded) {
@@ -34,12 +40,32 @@ void FileTree::restore_expanded(FileEntry& e, const std::unordered_set<std::stri
 void FileTree::refresh() {
     std::unordered_set<std::string> open;
     collect_expanded(root_entry_, open);
+    std::unordered_set<std::string> shown;  // top-level nodes before this refresh
+    for (auto& c : root_entry_.children) shown.insert(c.path.string());
     root_entry_ = {};
     root_entry_.name = root_.filename().string();
     root_entry_.path = root_;
     root_entry_.is_dir = true;
     root_entry_.expanded = true;
-    scan_directory(root_entry_);
+    if (extra_roots_.empty()) {
+        scan_directory(root_entry_);
+    } else {
+        // Each workspace folder becomes a top-level node, open unless the user folded it.
+        root_entry_.name = multi_label_;
+        root_entry_.scanned = true;
+        std::vector<fs::path> roots{root_};
+        roots.insert(roots.end(), extra_roots_.begin(), extra_roots_.end());
+        for (auto& r : roots) {
+            FileEntry node;
+            node.name = r.filename().empty() ? r.string() : r.filename().string();
+            node.path = r;
+            node.is_dir = true;
+            node.depth = 1;
+            node.expanded = !shown.count(r.string()) || open.count(r.string());
+            if (node.expanded) scan_directory(node);
+            root_entry_.children.push_back(std::move(node));
+        }
+    }
     restore_expanded(root_entry_, open);
     visible_entries_.clear();
     flatten_visible(root_entry_);
