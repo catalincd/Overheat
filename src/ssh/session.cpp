@@ -146,7 +146,7 @@ SSHConnectStatus SSHSession::connect(const SSHConfig& config) {
         return SSHConnectStatus::NetworkError;
     }
     libssh2_session_set_blocking(session_, 1);
-    libssh2_session_set_timeout(session_, 20000);
+    libssh2_session_set_timeout(session_, config_.timeout_ms);
     if (libssh2_session_handshake(session_, sock_) != 0) {
         char* msg = nullptr;
         libssh2_session_last_error(session_, &msg, nullptr, 0);
@@ -181,6 +181,11 @@ SSHConnectStatus SSHSession::verify_host_key() {
     }
     if (const char* h = libssh2_hostkey_hash(session_, LIBSSH2_HOSTKEY_HASH_SHA256))
         host_fingerprint_ = "SHA256:" + base64(reinterpret_cast<const unsigned char*>(h), 32);
+    if (!config_.pinned_fingerprint.empty()) {
+        if (host_fingerprint_ == config_.pinned_fingerprint) return SSHConnectStatus::Ok;
+        last_error_ = "HOST KEY CHANGED for " + config_.host + " (" + host_fingerprint_ + ")";
+        return SSHConnectStatus::HostChanged;
+    }
 
     LIBSSH2_KNOWNHOSTS* kh = libssh2_knownhost_init(session_);
     if (!kh) {

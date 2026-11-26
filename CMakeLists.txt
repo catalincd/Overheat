@@ -92,6 +92,7 @@ set(OVERHEAT_SOURCES
     src/ui/file_tree.cpp
     src/ui/terminal.cpp
     src/ui/status_bar.cpp
+    src/ui/monitor_bar.cpp
     src/ui/tab_bar.cpp
     src/ui/command_palette.cpp
     src/ui/scm_panel.cpp
@@ -114,6 +115,8 @@ set(OVERHEAT_SOURCES
     src/vfs.cpp
     src/fonts.cpp
     src/remote.cpp
+    src/sysmon.cpp
+    src/monitor.cpp
     src/workspace.cpp
     src/workspace_store.cpp
     src/lsp_glue.cpp
@@ -228,3 +231,9 @@ add_executable(workspace_test tests/workspace_test.cpp src/workspace_store.cpp)
 target_include_directories(workspace_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(workspace_test PRIVATE PkgConfig::FREETYPE)
 add_test(NAME workspace_test COMMAND workspace_test ${CMAKE_BINARY_DIR}/workspace_test_dir)
+
+add_executable(sysmon_test tests/sysmon_test.cpp src/sysmon.cpp)
+target_include_directories(sysmon_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(sysmon_test PRIVATE -fsanitize=address,undefined)
+target_link_options(sysmon_test PRIVATE -fsanitize=address,undefined)
+add_test(NAME sysmon_test COMMAND sysmon_test)

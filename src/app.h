@@ -13,6 +13,7 @@
 #include "ui/search_panel.h"
 #include "ui/settings_page.h"
 #include "ui/chat_panel.h"
+#include "ui/monitor_bar.h"
 #include "llm.h"
 #include "git/repository.h"
 #include "ssh/session.h"
@@ -160,6 +161,14 @@ private:
     void poll_remote_connect();
     void open_remote_folder(const fs::path& path);
     void remote_disconnect();
+    // System monitor strip (monitor.h): the remote host while connected, else
+    // optionally this machine. Settings: remote_monitor (on), local_monitor (off).
+    SysMonitor monitor_;
+    MonitorBar monitor_bar_;
+    bool remote_monitor_ = true, local_monitor_ = false;
+    std::string monitor_key_, monitor_folder_;
+    bool monitor_visible() const { return !monitor_key_.empty(); }
+    void update_monitor();
     LSPClient lsp_;
     std::string lsp_server_;
     std::mutex lsp_mutex_;
@@ -249,6 +258,7 @@ private:
         float group_split_x = -1;  // x of the divider between groups
         Rect terminal_header;
         Rect terminal;
+        Rect monitor;  // system monitor strip above the status bar (h = 0 when hidden)
         Rect status_bar;
     };
     Layout compute_layout() const;

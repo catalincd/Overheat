@@ -261,5 +261,18 @@ void close_library(void* lib) {
 }
 const char* library_extension() { return ".so"; }
 
+// ---------------------------------------------------------------- system monitor
+
+std::string local_system_sample(const std::string& sh_script, const std::string&, bool) {
+    Process p;
+    if (!p.start({"/bin/sh", "-c", sh_script})) return {};
+    std::string out;
+    char buf[8192];
+    long n;
+    while ((n = p.read(buf, sizeof buf)) > 0) out.append(buf, static_cast<size_t>(n));
+    p.wait();
+    return out;
+}
+
 } // namespace oh::platform
 #endif

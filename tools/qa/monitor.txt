@@ -1,0 +1,34 @@
+wait 900
+key ctrl+shift+p
+type Remote-SSH: Connect to Host
+wait 200
+key Return
+wait 300
+type ohtest
+key Return
+wait 2500
+probe shot:folder_prompt
+type /tmp/claude-1000/ohmon-sshd
+key Return
+wait 5000
+probe shot:strip
+click 300 {H-38}
+wait 3000
+probe shot:detail
+key Escape
+wait 300
+probe shot:closed
+key ctrl+shift+p
+type Remote-SSH: Show System Monitor
+wait 200
+key Return
+wait 2500
+probe shot:detail_cmd
+key Escape
+key ctrl+shift+p
+type Remote-SSH: Close Remote
+wait 200
+key Return
+wait 800
+probe shot:disconnected
+quit

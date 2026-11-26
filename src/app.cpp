@@ -32,6 +32,7 @@ App::~App() {
     plugins_.shutdown();
 
     if (lsp_.is_running()) lsp_.stop();
+    monitor_.shutdown();  // its worker posts redraw events to SDL, shut down below
     if (ssh_.is_connected()) ssh_.disconnect();
     terminal_.kill();
 
@@ -119,6 +120,8 @@ bool App::init(int argc, char** argv) {
     font_family_ = themes_.setting("font_family");
     anim::enabled = themes_.setting("animations") != "false";
     show_breadcrumbs_ = themes_.setting("breadcrumbs") != "false";
+    remote_monitor_ = themes_.setting("remote_monitor") != "false";
+    local_monitor_ = themes_.setting("local_monitor") == "true";
     editor_view_.set_minimap(themes_.setting("minimap") != "false");
     Editor::auto_close_pairs = themes_.setting("auto_close_brackets") != "false";
     editor_view_.set_wrap(themes_.setting("word_wrap") == "true");
@@ -447,6 +450,10 @@ void App::handle_event(const SDL_Event& e) {
             KeyEvent ke{static_cast<uint32_t>(kc), mods, true};
             if (command_palette_.handle_key(ke)) break;
         }
+        if (kc == SDLK_ESCAPE && monitor_bar_.detail_open() && !command_palette_.is_visible()) {
+            monitor_bar_.set_detail(false);
+            break;
+        }
 
         // The settings card is modal.
         if (settings_page_.visible()) {
@@ -546,10 +553,18 @@ void App::handle_event(const SDL_Event& e) {
             (splitter_drag_ = splitter_at(mx, my)) != Splitter::None) {
             break;
         }
+        // The monitor detail card: clicks inside stay there, clicks elsewhere close it.
+        if (monitor_bar_.detail_open() && !command_palette_.is_visible() && !settings_page_.visible()) {
+            if (monitor_bar_.detail_rect().contains(mx, my)) break;
+            if (!layout.monitor.contains(mx, my)) monitor_bar_.set_detail(false);
+        }
         if (command_palette_.is_visible()) {
             command_palette_.handle_mouse(me);
         } else if (settings_page_.visible()) {
             settings_page_.handle_mouse(me);
+        } else if (layout.monitor.contains(mx, my)) {
+            monitor_bar_.handle_mouse(me);
+            update_monitor();  // detail samples start right away
         } else if (layout.activity_bar.contains(mx, my)) {
             int slot = static_cast<int>((my - layout.activity_bar.y) / ACTIVITY_BAR_W);
             SidebarView v = static_cast<SidebarView>(std::clamp(slot, 0, 3));
@@ -879,6 +894,21 @@ void App::handle_command(const std::string& cmd) {
     } else if (cmd == "toggle_breadcrumbs") {
         show_breadcrumbs_ = !show_breadcrumbs_;
         themes_.set_setting("breadcrumbs", show_breadcrumbs_ ? "true" : "false");
+    } else if (cmd == "toggle_remote_monitor") {
+        remote_monitor_ = !remote_monitor_;
+        themes_.set_setting("remote_monitor", remote_monitor_ ? "true" : "false");
+        set_status_message(std::string("Remote monitor ") + (remote_monitor_ ? "on" : "off"));
+    } else if (cmd == "toggle_local_monitor") {
+        local_monitor_ = !local_monitor_;
+        themes_.set_setting("local_monitor", local_monitor_ ? "true" : "false");
+        set_status_message(std::string("Local system monitor ") + (local_monitor_ ? "on" : "off"));
+    } else if (cmd == "monitor_details") {
+        if (!monitor_visible()) {
+            if (remote_active_) remote_monitor_ = true;
+            else local_monitor_ = true;
+            update_monitor();
+        }
+        monitor_bar_.set_detail(!monitor_bar_.detail_open());
     } else if (cmd == "toggle_animations") {
         anim::enabled = !anim::enabled;
         themes_.set_setting("animations", anim::enabled ? "true" : "false");
@@ -913,6 +943,10 @@ App::Layout App::compute_layout() const {
     l.status_bar = {0, fh - status_h, fw, status_h};
 
     float content_h = fh - status_h;
+    if (monitor_visible()) {
+        content_h -= MonitorBar::HEIGHT;
+        l.monitor = {0, content_h, fw, MonitorBar::HEIGHT};
+    }
 
     // Activity bar (always visible), then the sidebar view.
     float ab_w = ACTIVITY_BAR_W;
@@ -1091,6 +1125,7 @@ void App::update(float dt) {
     terminal_open_.follow(terminal_visible_ ? 1.0f : 0.0f, anim::NORMAL, 0.002f);
     lsp_update();
     poll_remote_connect();
+    update_monitor();
     search_.tick(dt);
     poll_search();
     poll_git_refresh();
@@ -1190,16 +1225,19 @@ void App::render() {
         renderer_.pop_clip();
     }
     if (layout.terminal.h > 0) clipped(terminal_, layout.terminal);
+    if (layout.monitor.h > 0) clipped(monitor_bar_, layout.monitor);
     clipped(status_bar_, layout.status_bar);
     if (Splitter sp = splitter_drag_ != Splitter::None ? splitter_drag_ : splitter_hover_; sp != Splitter::None) {
         Color c = theme_.accent;
         if (sp == Splitter::Groups)
             renderer_.add_rect({layout.group_split_x - 1.0f, 0, 2.0f, layout.editor.y + layout.editor.h}, c);
         else if (sp == Splitter::Sidebar)
-            renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1.0f, 0, 2.0f, layout.status_bar.y}, c);
+            renderer_.add_rect({layout.sidebar.x + layout.sidebar.w - 1.0f, 0, 2.0f, layout.sidebar.h}, c);
         else
             renderer_.add_rect({layout.terminal_header.x, layout.terminal_header.y - 1.0f, layout.terminal.w, 2.0f}, c);
     }
+    if (layout.monitor.h > 0)
+        monitor_bar_.render_detail(ctx, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (settings_page_.visible())
         clipped(settings_page_, {0, 0, static_cast<float>(extent.width), static_cast<float>(extent.height)});
     if (command_palette_.is_visible())
@@ -1321,7 +1359,7 @@ void App::focus_editor() { focus(&editor_view_); }
 App::Splitter App::splitter_at(float x, float y) const {
     Layout l = compute_layout();
     constexpr float GRAB = 4.0f;
-    if (sidebar_visible_ && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y < l.status_bar.y)
+    if (sidebar_visible_ && std::abs(x - (l.sidebar.x + l.sidebar.w)) <= GRAB && y < l.sidebar.h)
         return Splitter::Sidebar;
     if (terminal_visible_ && std::abs(y - l.terminal_header.y) <= GRAB && x >= l.terminal.x)
         return Splitter::Terminal;
@@ -1611,6 +1649,10 @@ void App::open_settings() {
                           [this] { return editor_view_.minimap(); }, "toggle_minimap"));
     rows.push_back(toggle("Breadcrumbs", "Path and enclosing symbols above the editor",
                           [this] { return show_breadcrumbs_; }, "toggle_breadcrumbs"));
+    rows.push_back(toggle("Remote monitor", "Live CPU, RAM, disk and network of the SSH host",
+                          [this] { return remote_monitor_; }, "toggle_remote_monitor"));
+    rows.push_back(toggle("Local system monitor", "The same strip for this computer",
+                          [this] { return local_monitor_; }, "toggle_local_monitor"));
     rows.push_back(toggle("Inline git blame", "Author and commit at the end of the cursor line",
                           [this] { return editor_view_.blame(); }, "toggle_blame"));
     rows.push_back({Row::Toggle, "Auto-close brackets and quotes", "Typing ( [ { \" ' ` inserts the pair",
@@ -2059,6 +2101,9 @@ void App::register_commands() {
     add("zoom_reset",              "Reset Zoom",                "Ctrl+0");
     add("remote_connect",          "Remote-SSH: Connect to Host...", "");
     add("remote_disconnect",       "Remote-SSH: Close Remote Connection", "");
+    add("toggle_remote_monitor",   "Remote-SSH: Toggle Remote Monitor", "");
+    add("monitor_details",         "Remote-SSH: Show System Monitor Details", "");
+    add("toggle_local_monitor",    "View: Toggle Local System Monitor", "");
     add("view_explorer",           "View: Explorer",            "Ctrl+Shift+E");
     add("trigger_suggest",         "Trigger Suggest",           "Ctrl+Space");
     add("goto_definition",         "Go to Definition",          "F12");
